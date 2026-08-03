@@ -45,23 +45,3 @@ def verify_refresh_token(token: str):
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
     return payload
-
-
-async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    payload = verify_access_token(token)
-
-    user_id = UUID(payload.get("sub"))
-
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
-    if not user.is_active:
-        raise HTTPException(status_code=403, detail="Account is disabled")
-
-    return user

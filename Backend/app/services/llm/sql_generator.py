@@ -44,4 +44,28 @@ STRICT RULES:
 - No explaination
 - No comments
 - Use PostgreSQL syntax
+
+If query is impossible:
+Return:
+SELECT 'INVALID_QUERY' LIMIT 1
 """
+
+#Build Prompt
+
+def build_sql_prompt(user_query : str)->str:
+    return f"""
+    Database Schema:
+    {DATABASE_SCHEMA}
+    User Query:
+    {user_query}
+    Generate a safe PostgreSQL query.
+"""
+
+# clean sql response
+# eg. llm may return like this: ```sql
+# SELECT id, name FROM customers;
+# ```
+def clean_sql_response(text : str)-> str:
+    """
+    Remove markdown/codeblocks/explaination
+    """
