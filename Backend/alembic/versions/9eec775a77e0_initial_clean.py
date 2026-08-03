@@ -32,10 +32,13 @@ def upgrade() -> None:
     sa.Column('last_reset', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('is_active', sa.Boolean(), nullable=True),
     sa.Column('plan', sa.String(), nullable=True),
+    sa.Column('device_fingerprint', sa.String(length=255), nullable=True),
+    sa.Column('is_verified', sa.Boolean(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('google_id')
+    sa.UniqueConstraint('google_id'),
+    sa.UniqueConstraint('device_fingerprint')
     )
     op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
     op.create_table('file_uploads',

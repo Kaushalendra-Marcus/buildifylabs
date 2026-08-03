@@ -1,10 +1,13 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException, status
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 
 from app.db.models.user import User
 from app.services.auth.token_service import create_access_token, create_refresh_token
+from app.utils.usage import reset_daily_usage_if_needed
+
+GUEST_DAILY_LIMIT = 2
 
 
 async def create_guest_user(db: AsyncSession, fingerprint: str):
@@ -14,13 +17,10 @@ async def create_guest_user(db: AsyncSession, fingerprint: str):
     existing = result.scalar_one_or_none()
 
     if existing:
-        if existing.last_reset:
-            if datetime.utcnow() - existing.last_reset > timedelta(days=1):
-                existing.queries_today = 0
-                existing.last_reset = datetime.utcnow()
-                await db.commit()
+        if reset_daily_usage_if_needed(existing):
+            await db.commit()
 
-        if existing.queries_today >= 2:
+        if existing.queries_today >= GUEST_DAILY_LIMIT:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Guest limit reached. Please sign up to continue.",
@@ -38,7 +38,7 @@ async def create_guest_user(db: AsyncSession, fingerprint: str):
         plan="free",
         device_fingerprint=fingerprint,
         queries_today=0,
-        last_reset=datetime.utcnow(),
+        last_reset=datetime.now(timezone.utc),
     )
 
     db.add(user)

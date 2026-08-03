@@ -4,19 +4,6 @@ from typing import Optional
 from pydantic import field_validator
 
 
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str
-    name: Optional[str] = None
-
-    @field_validator("password")
-    @classmethod
-    def password_strength(cls, v):
-        if v and len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        return v
-
-
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
@@ -36,7 +23,7 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
-class RefeshTokenRequest(BaseModel):
+class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
 
@@ -45,3 +32,29 @@ class AuthUserResponse(BaseModel):
     email: Optional[EmailStr] = None
     name: Optional[str] = None
     plan: str
+
+    class Config:
+        from_attributes = True
+
+
+class AuthResponse(BaseModel):
+    user: AuthUserResponse
+    access_token: str
+    refresh_token: Optional[str] = None
+    token_type: str = "bearer"
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def password_strength(cls, v):
+        if v and len(v) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        return v

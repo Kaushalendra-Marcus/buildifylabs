@@ -7,9 +7,13 @@ sqlalchemy
 asyncpg
 alembic
 psycopg2-binary
-datetime
 passlib
+bcrypt<4.1
 python-jose[cryptography]
 google-auth
 aiosmtplib
 groq
+httpx
+email-validator
+python-multipart
+sqlglot

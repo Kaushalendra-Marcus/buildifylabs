@@ -11,7 +11,6 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: Optional[str] = None
-    auth_provider: str
 
     @field_validator("password")
     @classmethod

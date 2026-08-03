@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings
 from pydantic import Field
 from functools import lru_cache
+from typing import Optional
 
 
 class Settings(BaseSettings):
@@ -9,17 +10,23 @@ class Settings(BaseSettings):
     ALLOWED_ORIGIN: list[str] = ["http://localhost:5173"]
 
     DATABASE_URL: str = Field(..., env="DATABASE_URL")
+    SQL_ECHO: bool = False
 
-    GROQ_API_KEY: str = Field(..., env="GROQ_API_KEY")
+    # These back features that are planned but not wired into any route yet
+    # (LLM pipeline, embeddings/vector store, payments). Making them required
+    # meant the app couldn't boot at all without dummy values for keys nothing
+    # currently uses. They become required again as each feature actually
+    # ships.
+    GROQ_API_KEY: Optional[str] = Field(None, env="GROQ_API_KEY")
     GROQ_MODEL: str = "llama-3.1-70b-versatile"
 
-    HF_API_KEY: str = Field(..., env="HF_API_KEY")
+    HF_API_KEY: Optional[str] = Field(None, env="HF_API_KEY")
     HF_MODEL: str = "mistralai/Mixtral-8x7B-Instruct-v0.1"
 
-    PINECONE_API_KEY: str = Field(..., env="PINECONE_API_KEY")
-    PINECONE_ENVIRONMENT: str = Field(..., env="PINECONE_ENVIRONMENT")
+    PINECONE_API_KEY: Optional[str] = Field(None, env="PINECONE_API_KEY")
+    PINECONE_ENVIRONMENT: Optional[str] = Field(None, env="PINECONE_ENVIRONMENT")
 
-    REDIS_URL: str = Field(..., env="REDIS_URL")
+    REDIS_URL: Optional[str] = Field(None, env="REDIS_URL")
 
     JWT_SECRET: str = Field(..., env="JWT_SECRET")
     JWT_ALGORITHM: str = "HS256"
@@ -35,12 +42,16 @@ class Settings(BaseSettings):
     SMTP_PASS: str = Field(..., env="SMTP_PASS")
     EMAIL_FROM: str = Field(..., env="EMAIL_FROM")
 
+    # Google login is live and uses GOOGLE_CLIENT_ID to verify ID tokens.
+    # GOOGLE_CLIENT_SECRET isn't referenced anywhere yet (only needed for a
+    # server-side auth-code exchange flow, which isn't implemented), so it
+    # stays optional until that's built.
     GOOGLE_CLIENT_ID: str = Field(..., env="GOOGLE_CLIENT_ID")
-    GOOGLE_CLIENT_SECRET: str = Field(..., env="GOOGLE_CLIENT_SECRET")
+    GOOGLE_CLIENT_SECRET: Optional[str] = Field(None, env="GOOGLE_CLIENT_SECRET")
 
     HUGGINGFACE_MODEL_PATH: str = "sentence-transformers/all-MiniLM-L6-v2"
 
-    UPI_ID: str = Field(..., env="UPI_ID")
+    UPI_ID: Optional[str] = Field(None, env="UPI_ID")
     PAYMENT_AMOUNT: int = 299
 
     LOGIN_RATE_LIMIT: int = 5

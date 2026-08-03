@@ -43,6 +43,9 @@ async def google_login(db: AsyncSession, token: str):
         if user:
             user.google_id = google_id
             user.auth_provider = "google"
+            # Google has already verified this address, so treat the account
+            # as email-verified too instead of leaving it stuck unverified.
+            user.is_verified = True
             await db.commit()
             await db.refresh(user)
 
@@ -58,6 +61,7 @@ async def google_login(db: AsyncSession, token: str):
             google_id=google_id,
             auth_provider="google",
             is_active=True,
+            is_verified=True,
             plan="free",
         )
         db.add(user)

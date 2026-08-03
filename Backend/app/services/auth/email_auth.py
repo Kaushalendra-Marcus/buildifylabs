@@ -47,7 +47,12 @@ async def login_user(db: AsyncSession, email, password):
     result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
 
-    if not user.is_email_verified:
+    # Use the same generic error whether the email doesn't exist or the
+    # password is wrong, so we don't leak which emails are registered.
+    if not user or not user.hashed_password or not verify_password(password, user.hashed_password):
+        raise ValueError("Invalid email or password")
+
+    if not user.is_verified:
         raise ValueError("Please verify your email first")
 
     if not user.is_active:

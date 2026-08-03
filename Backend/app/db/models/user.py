@@ -25,5 +25,9 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     queries = relationship("QueryLogs", back_populates="user")
-    file_upload = relationship("FileUpload", back_populates="user")
+    # Must be named "files" - FileUpload.user declares
+    # back_populates="files", and a mismatched name here makes SQLAlchemy
+    # raise an ArgumentError as soon as mappers are configured (i.e. the
+    # app can't boot at all).
+    files = relationship("FileUpload", back_populates="user")
     payments = relationship("Payment", back_populates="user")
