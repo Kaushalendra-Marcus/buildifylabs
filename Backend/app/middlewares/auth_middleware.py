@@ -1,16 +1,14 @@
 from fastapi import HTTPException, Depends, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import jwt, JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
 import logging
 
-from app.config import get_settings
 from app.db.database import get_db
 from app.db.models.user import User
+from app.services.auth.token_service import verify_access_token
 
-settings = get_settings()
 security = HTTPBearer(auto_error=False)
 
 logger = logging.getLogger(__name__)
@@ -28,38 +26,23 @@ async def get_current_user(
 
     token = credentials.credentials
 
-    try:
-        payload = jwt.decode(
-            token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]
-        )
+    # Token decoding/verification lives in one place (token_service) so this
+    # middleware and any other consumer can't drift out of sync with it.
+    payload = verify_access_token(token)
 
-        token_type = payload.get("type")
-        if token_type != "access":
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token type",
-            )
-
-        user_id_str = payload.get("sub")
-        if not user_id_str:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token payload",
-            )
-
-        try:
-            user_id = UUID(user_id_str)
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid user ID format",
-            )
-
-    except JWTError:
-        logger.warning("Invalid or expired token used")
+    user_id_str = payload.get("sub")
+    if not user_id_str:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token expired or invalid",
+            detail="Invalid token payload",
+        )
+
+    try:
+        user_id = UUID(user_id_str)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user ID format",
         )
 
     result = await db.execute(select(User).where(User.id == user_id))

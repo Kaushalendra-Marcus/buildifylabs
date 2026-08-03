@@ -4,6 +4,7 @@ from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from uuid import UUID
+from datetime import datetime, timedelta, timezone
 
 from app.config import get_settings
 from app.db.models.user import User
@@ -45,3 +46,30 @@ def verify_refresh_token(token: str):
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
     return payload
+
+
+def _create_token(user_id, token_type: str, expires_delta: timedelta) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "type": token_type,
+        "iat": now,
+        "exp": now + expires_delta,
+    }
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+def create_access_token(user_id) -> str:
+    return _create_token(
+        user_id,
+        "access",
+        timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+
+
+def create_refresh_token(user_id) -> str:
+    return _create_token(
+        user_id,
+        "refresh",
+        timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+    )
