@@ -3,6 +3,11 @@ from app.config import get_settings
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
+
+# Registers every SQLAlchemy model up front - see app/db/models/__init__.py
+# for why this has to happen before any request can run a query.
+import app.db.models  # noqa: F401
+
 from app.routes.auth import router as auth_router
 
 logging.basicConfig(level=logging.INFO)
