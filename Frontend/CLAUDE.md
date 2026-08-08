@@ -21,6 +21,7 @@ chat, upload, and payment need mocked data behind a clean API seam until their r
 | Payment/upgrade flow | `../specs/03-payment-verification.md` + `docs/type-contracts.md` §Payment |
 | File upload flow | `../specs/04-file-upload-ingestion.md` + `docs/type-contracts.md` §Upload |
 | Chat UI + visual/chart rendering | `../specs/06-ai-insight-pipeline.md` + `docs/type-contracts.md` §Chat |
+| Chat Workspace page layout / visual design | `../specs/14-chat-workspace-ui-design.md` |
 | Need a TypeScript type for an API response | `docs/type-contracts.md` — don't re-derive from the Python schemas each time |
 | Deciding project structure, or the mock-vs-real API boundary | `docs/structure.md` |
 | Full architecture / module status | `../specs/00-overview.md` |

@@ -75,7 +75,7 @@ removed. See `13-frontend-migration.md` for full detail and current migration st
 | 4 | File upload validation + ingestion pipeline | ⚠️ Validator only, no route/pipeline | `04-file-upload-ingestion.md` |
 | 5 | NL→SQL generation + SQL safety sandbox | ⚠️ Sanitizer done, generator incomplete | `05-query-sql-safety.md` |
 | 6 | AI insight/visual pipeline (structured output) | ⚠️ Core done, unreachable via any route; contract updated to match real frontend components | `06-ai-insight-pipeline.md` |
-| 7 | News context (RSS + Pinecone news namespace) | ❌ Not started — deferred, see `09` §8 | `07-news-context-module.md` |
+| 7 | External context (user-directed `own_data`/`live_web`/`both` scope + category web scraping) | ❌ Not started — deferred, see `09` §8 | `07-news-context-module.md` |
 | 8 | Graph knowledge store (Neo4j entity/relationship retrieval) | ❌ Not started — deferred, see `09` §8 | `08-graph-knowledge-store.md` |
 | 11 | Prediction, calculation & benchmarking | ❌ Not started, core capability not a later add-on | `11-prediction-and-calculation.md` |
 | 12 | Multi-LLM orchestration | ❌ Not started, extends existing Groq/HF pattern | `12-llm-orchestration.md` |

@@ -33,8 +33,11 @@ the frontend can render without further parsing or guessing.
 - **FR5:** Provider selection (which LLM answers a given call) is delegated entirely to
   `12-llm-orchestration.md` — this spec defines *what* gets asked and in *what shape the answer must
   come back*, not which provider answers it.
-- **FR6:** News context is included in the prompt only when `include_news=True` is explicitly
-  passed (user opt-in) — otherwise the LLM is told the user didn't request it.
+- **FR6:** External (live-web) context is included in the prompt only per the user-directed
+  `source_scope` (`"own_data" | "live_web" | "both"`, spec `07`) — never inferred from query
+  content alone. This replaces the earlier opt-in-boolean design; `07`'s FR4 defines how a
+  free-text request that disagrees with the current selector is resolved (via FR7's clarification
+  mechanism, not silently).
 - **FR7 (new):** The pipeline can return a **clarifying question instead of a final answer**, per
   the ask-don't-guess pattern in `11-prediction-and-calculation.md` §4. When it does,
   `PipelineOutput.clarification` is populated (`{ question: str, options: list[str] }`) and the
@@ -47,10 +50,12 @@ the frontend can render without further parsing or guessing.
 `12-llm-orchestration.md` §4; update call sites accordingly when that spec is implemented. Until
 then, the existing Groq→HF-only behavior stands as an interim implementation.
 
-**`run_pipeline(user_query: str, db_data: dict, news_context: list = [], include_news: bool = False) -> PipelineOutput`**
-✅ Core logic done, but **currently unreachable** — no route calls it yet, and its `visual_type`
-values need updating to match FR3 below before it's wired up. Expects `db_data` to already be
-fetched by the caller (per spec `05`); does not fetch its own data.
+**`run_pipeline(user_query: str, db_data: dict, news_context: list = [], source_scope: Literal["own_data", "live_web", "both"] = "own_data") -> PipelineOutput`**
+✅ Core logic done, but **currently unreachable** — no route calls it yet, its signature needs
+updating from the old `include_news: bool` param to `source_scope` (spec `07`), and its
+`visual_type` values need updating to match FR3 below before it's wired up. `db_data` and
+`news_context` are both fetched by the caller according to `source_scope` (per specs `05` and
+`07`) — this function does not decide what to fetch, only how to narrate what it's given.
 
 ```python
 class VisualOutput(BaseModel):

@@ -39,6 +39,35 @@ to show, the frontend does a plain lookup to the matching component.
 - Per-component prop schemas (previously duplicated — a "live" set used for Tambo's own runtime
   validation, and a separately-imported set the seven components actually type themselves against)
   are consolidated into one file, `src/lib/schemas/visuals.ts`, with no Tambo dependency.
+- The seven components move from `src/components/tambo/` to `src/components/visuals/` — the old
+  path name is a Tambo leftover and actively misleading once Tambo is gone.
+
+## 2.5 Chart/icon rendering moves from hand-rolled to library-based
+
+**Decision, made during a pre-migration code review, folded into this same pass since every
+component is already being touched:** replace hand-rolled SVG chart and icon code with maintained
+libraries, for reliability — hand-rolled coordinate/trig math is exactly the class of code most
+prone to the kind of subtle edge-case bugs already found elsewhere in this codebase (`artifact.md`
+ISSUE-10's JSON-extraction edge case is the same underlying pattern: reinvented-the-wheel code that
+missed a case a maintained library already handles).
+
+- **`GraphCard`'s line/bar/pie/area charts** — currently ~250 lines of manual SVG `viewBox`
+  coordinate math and trigonometry (pie slice angles via `Math.cos`/`Math.sin`) — move to
+  **Recharts** (`<LineChart>`, `<BarChart>`, `<PieChart>`, `<AreaChart>`). Recharts already handles
+  edge cases the hand-rolled version has to rediscover one at a time: single-data-point series,
+  negative values, empty series, responsive resize.
+- **Every hardcoded inline `<svg><path>` icon** — currently duplicated independently across
+  `MetricCard`, `InsightCard`, `AlertList`, `StatusBadge`, and `BusinessSummaryTable` (five separate
+  copies of near-identical Heroicons-style path data) — moves to **`lucide-react`**, imported per
+  icon instead of hand-copied.
+- **`BusinessSummaryTable`'s manual sort logic** is a reasonable candidate for **TanStack Table**
+  if/when filtering or pagination complexity grows — not required for this pass, noted as a
+  follow-on rather than blocking it.
+- This does **not** change `06-ai-insight-pipeline.md`'s `visual_type` contract or `props` shape —
+  those describe *what* each component receives, not *how* it renders internally, and `06` already
+  defers to `src/lib/schemas/visuals.ts` as the source of truth for exactly this reason. Swapping
+  the rendering internals of an existing type doesn't touch the backend contract at all; only
+  adding a genuinely new `visual_type` would.
 
 ## 3. A contract mismatch this surfaced, that needs closing
 
@@ -72,6 +101,11 @@ These are blocked on tooling, not on decisions — the decisions are made:
   `src/app/api/tambo/`, `useTamboWorkspaceIntegration.ts`) and the `@tambo-ai/react` /
   `@valibot/to-json-schema` / `valibot` dependencies from `package.json` — archive rather than
   delete, consistent with how the Vite scaffold and `.git` history are being handled.
+- **Add `recharts` and `lucide-react` to `package.json`**, and work through the seven components
+  (now at `src/components/visuals/`, per §2.5) replacing hand-rolled chart/icon code with them.
+  Same pass as the Tambo removal, not a separate migration — every component file is already being
+  opened and edited for the path move and the schema consolidation (§2), so this is the efficient
+  point to also swap the rendering internals rather than doing a second pass later.
 
 ## 5. Acceptance Criteria
 
