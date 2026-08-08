@@ -1,0 +1,99 @@
+# 10 — Trust, Safety & Compliance Requirements
+
+> Status: 📋 Requirements — not yet implemented, tracked here so they get built alongside the
+> features they apply to rather than retrofitted after launch. Cross-references `05` and `06` for
+> the technical gaps this file adds product/legal context to.
+
+## 1. Why this matters more than usual for this product
+
+This product hands a non-technical business owner an LLM-generated interpretation of their own
+sales/financial data, including causal claims about *why* something happened. Two things make the
+stakes higher than a typical AI feature: (a) a confidently wrong number can directly cause a bad
+business decision, and (b) Indian SMB communities are tight-knit — a reputation for "gave me a wrong
+number" travels fast and is hard to undo. Separately, the data itself is often personal data
+(customer names, emails, phone numbers in sales records) subject to Indian data-protection law
+starting now, not eventually. This file covers both.
+
+## 2. AI output trust requirements
+
+These apply once `specs/06-ai-insight-pipeline.md`'s pipeline is actually wired to a route
+(currently unreachable — see `Backend/docs/known-gaps.md`). Build them in from the start rather than
+adding them after the fact; retrofitting "show your work" onto an already-shipped chat UI is much
+more disruptive than designing for it up front.
+
+- **Every insight and chart must be traceable to the underlying SQL query and the raw data slice it
+  came from.** The frontend should always offer a way to see "here's the query that produced this"
+  — not necessarily shown by default, but never hidden entirely. This is the single most effective
+  trust-building feature available here, because it turns "trust the AI" into "verify the AI," which
+  is a much easier bar to clear.
+- **Causal language must be hedged, not asserted.** "A possible contributing factor" and "correlates
+  with" instead of "the reason was" or "this caused." The pipeline's `root_causes` and
+  `recommendations` fields (per the `PipelineOutput` shape in `specs/06`) are exactly where this
+  matters most — a business owner acting on an assumed-certain wrong cause is the worst-case outcome
+  this product could produce.
+- **Surface the confidence score once it's meaningful.** `PipelineOutput.confidence` exists today
+  but is an unbounded `float` with no guarantee the LLM actually returns something in a sane range
+  (`specs/06` edge case, also in `Backend/docs/known-gaps.md`). Fix the schema constraint
+  (`Field(ge=0.0, le=1.0)`) before building any UI that displays it, or a garbage value will render
+  as if it were meaningful.
+- **Give the user a way to flag a wrong or misleading answer**, and make that flag land somewhere
+  reviewed, not a black hole. This is also the mechanism that makes the next point possible.
+- **Wire `QueryLogs` writes.** The table already exists (`Backend/app/db/models/query_logs.py`) but
+  nothing writes to it yet. Once the `/chat` route exists, log every query + response pair (with the
+  flag state from the point above). This is the cheapest, highest-leverage thing to build for
+  actually improving prompt/schema quality over time — without it, you're iterating on guesses about
+  what people ask and where the model fails, which is the single most important thing to actually
+  know for a product like this.
+
+## 3. Security requirement — blocking, not backlog
+
+`specs/05-query-sql-safety.md` and `Backend/docs/known-gaps.md` both already flag this, restated
+here because it's a launch blocker, not a normal backlog item: **no automatic user-scoping exists on
+generated SQL today.** Nothing currently guarantees a generated query only reads the requesting
+user's own uploaded data. For a product asking real businesses to upload real sales and customer
+data, this has to close before any user outside the founding team's own test data touches the
+system — full stop, before growth work, before additional features, before payments go live.
+
+## 4. Data protection compliance (India, DPDP Act)
+
+India's Digital Personal Data Protection Act, 2023 is no longer a future concern. Its implementing
+Rules were notified on November 14, 2025, kicking off an 18-month phased rollout: 2026 is
+effectively the "build and be ready" year, with soft enforcement (guidance and warnings) expected
+through 2026 and full/"hard" enforcement expected around mid-May 2027. Startups and MSMEs are not
+exempt — compliance obligations can be calibrated to scale and risk, but they still apply. Penalties
+for non-compliance are substantial (reported ranges run from roughly ₹50 crore up to ₹250 crore per
+violation for serious breaches), which makes this a real business risk, not paperwork.
+
+**What this means practically for this product**, given it stores personal data (customer records
+inside uploaded business files, plus users' own emails/names):
+
+- **Privacy policy and ToS** stating clearly what's collected, why, how long it's retained, and how
+  a user can request deletion. This is table stakes and cheap to do now.
+- **Explicit no-training commitment.** State plainly that uploaded business/customer data is not
+  used to train or fine-tune any model, unless a user opts in — this is both a compliance-relevant
+  purpose-limitation point and a genuine trust/marketing asset for a product asking SMBs to upload
+  sensitive sales data.
+- **Data retention and deletion policy**, with an actual mechanism behind it — not just a policy
+  document. `FileUpload` and `QueryLogs` records need a defined retention window and a real deletion
+  path once a user requests it or closes their account.
+- **Data processor awareness.** Groq, HuggingFace, and (once wired) Pinecone all process data on
+  this product's behalf when a query or file touches them. Under DPDP, engaging a processor doesn't
+  transfer the underlying responsibility for that data — worth reviewing each provider's own data
+  handling terms before they're in the critical path for real user data, not after.
+- **Breach response plan.** Even a short, honest internal runbook ("who gets notified, what gets
+  checked, how affected users are told") is far better than improvising one during an actual
+  incident.
+- None of this needs to be enterprise-grade on day one — the DPDP guidance itself expects
+  startups/MSMEs to calibrate to their size and risk. But "we'll deal with it later" stops being a
+  reasonable default once real (non-test) user data is being stored, which lines up with the same
+  point security gap §3 above draws the line at.
+
+## 5. Acceptance criteria for this file
+
+- [ ] `PipelineOutput.confidence` is a bounded field before any UI displays it.
+- [ ] `/chat` (once built, specs/05+06) ships with a visible "show the query behind this" affordance.
+- [ ] `QueryLogs` is actually written to on every query.
+- [ ] A basic "flag this answer" mechanism exists, feeding into `QueryLogs`.
+- [ ] The SQL user-scoping gap (specs/05) is closed before any non-test user's data is stored.
+- [ ] A privacy policy, ToS, and data retention/deletion policy exist and are linked from the app
+      before public signup opens.

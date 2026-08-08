@@ -24,7 +24,9 @@ business data (CSV/PDF/XLSX) and ask questions in plain language, and get back:
 
 Target differentiation vs. general tools (ChatGPT+Code Interpreter, Julius.ai, Power BI Copilot):
 Indian SMB focus — UPI-based payment (no gateway), India-compatible infra (no Supabase), and a
-root-cause/news-correlation layer on top of the usual chart+insight loop.
+root-cause/news-correlation layer on top of the usual chart+insight loop. **These are necessary for
+the Indian market but not a durable moat on their own** — see `09-differentiation-and-gtm.md` for a
+fuller strategy (vertical focus, integration-based friction reduction, distribution channel).
 
 ## 2. System Architecture (current target)
 
@@ -54,8 +56,17 @@ Neon.tech PostgreSQL              SQL Generator → SQL Sanitizer → DB
 | 4 | File upload validation + ingestion pipeline | ⚠️ Validator only, no route/pipeline | `04-file-upload-ingestion.md` |
 | 5 | NL→SQL generation + SQL safety sandbox | ⚠️ Sanitizer done, generator incomplete | `05-query-sql-safety.md` |
 | 6 | AI insight/visual pipeline (Groq + structured output) | ⚠️ Core done, unreachable via any route | `06-ai-insight-pipeline.md` |
-| 7 | News context (RSS + Pinecone news namespace) | ❌ Not started | `07-news-context-module.md` |
-| 8 | Frontend (chat UI, charts, dashboard) | ❌ Not started (Vite/React scaffold only) | — |
+| 7 | News context (RSS + Pinecone news namespace) | ❌ Not started — deferred, see `09` §8 | `07-news-context-module.md` |
+| 8 | Graph knowledge store (Neo4j entity/relationship retrieval) | ❌ Not started — deferred, see `09` §8 | `08-graph-knowledge-store.md` |
+
+Frontend status is tracked separately in `../Frontend/CLAUDE.md`, not as a numbered module here
+(there's no frontend-specific spec file — it's built against the API contracts in modules 1–8
+above). As of this audit: still the unmodified Vite/React scaffold, nothing product-specific built.
+
+**Strategy & requirements docs** (not implementation modules, so not status-tracked above):
+`09-differentiation-and-gtm.md` (positioning, distribution, retention) and
+`10-trust-safety-compliance.md` (AI-output trust requirements, the blocking security gap in row 5,
+and India DPDP Act compliance).
 
 ## 4. Tech Stack (current, from `requirements.txt` / `config.py`)
 
@@ -96,7 +107,8 @@ These are called out in detail in their respective module specs, listed here for
    persist the file afterward. (`04-file-upload-ingestion.md`)
 5. **No automatic user-scoping on generated SQL** — nothing currently guarantees a generated query
    only reads the requesting user's own uploaded data. This is a **blocking security gap** before
-   multi-tenant use. (`05-query-sql-safety.md`)
+   multi-tenant use. (`05-query-sql-safety.md`; full trust/compliance framing in
+   `10-trust-safety-compliance.md` §3)
 6. **`VisualOutput.visual_type` and `PipelineOutput.confidence` are unconstrained types** (`str` /
    `float` instead of `Literal[...]` / bounded `Field`) — an out-of-range or invalid value from the
    LLM currently passes schema validation. (`06-ai-insight-pipeline.md`)
@@ -112,6 +124,18 @@ These are called out in detail in their respective module specs, listed here for
 4. Build `POST /files/upload` + minimal CSV parsing (skip Pinecone/embeddings for a first pass —
    query the parsed table directly) (`04`).
 5. Build the first end-to-end `POST /chat` route: query → SQL → execute → `run_pipeline` → response
-   (`05` + `06`).
-6. Payment module (`03`) — needed for monetization but not for the core demo loop.
-7. News context (`07`) — explicitly deferred; adds real value but nothing else depends on it.
+   (`05` + `06`). Build in the trust requirements from `10-trust-safety-compliance.md` §2
+   (traceable SQL, hedged causal language, `QueryLogs` writes) at the same time — they're much
+   cheaper to include now than to retrofit onto a shipped chat UI later.
+
+   **→ Checkpoint: put this in front of real target users before continuing.** Steps 6–8 below
+   are ordered by priority, not committed scope — see `09-differentiation-and-gtm.md` §8.
+
+6. Payment module (`03`) — needed for monetization but not for the core demo loop. Build against
+   the Razorpay design in `03`, not the older UTR model shape (see `Backend/docs/known-gaps.md`).
+7. Integrations + distribution (`09` §3–§4: Sheets/Shopify/Tally, WhatsApp interface) — reduce
+   friction on a validated loop, ahead of any new capability.
+8. News context (`07`) and the graph knowledge store (`08`) — explicitly deferred until the core
+   loop has real-user evidence behind it, per `09-differentiation-and-gtm.md` §8. Real engineering
+   effort against value that's currently speculative; don't build concurrently with proving the
+   core loop.

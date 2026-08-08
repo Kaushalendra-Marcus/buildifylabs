@@ -1,100 +1,62 @@
 # CLAUDE.md — Frontend
 
-Guidance for Claude (or any agent) working in `Frontend/`. Read this before making changes.
+This file loads into context every session — keep it short. Full data contracts and structural
+guidance live in `docs/`; open only the section relevant to what you're building right now. **Don't
+read all of `docs/` or `specs/` up front** — use §2's table.
 
-## What this is
+## 1. Orientation
 
-Frontend for an **AI Business Intelligence Copilot**: a user uploads business data (CSV/PDF/XLSX),
-asks questions in plain English in a chat-style UI, and gets back a chart, a plain-English
-explanation, and recommendations.
+Frontend for **BuildifyLabs** (see `../Backend/CLAUDE.md` for the product description). **Still the
+unmodified Vite/React/TS scaffold** — `src/App.tsx` is template boilerplate, nothing product-
+specific exists yet. Only auth and plan/quota have a live backend to build against today (§3);
+chat, upload, and payment need mocked data behind a clean API seam until their routes ship.
 
-**Current state: this is still the unmodified `npm create vite -- --template react-ts` scaffold.**
-`src/App.tsx` is template boilerplate (counter button, Vite/React logo links) — nothing product-
-specific has been built yet. Per `../specs/00-overview.md`'s module status table, the frontend is
-explicitly marked "❌ Not started (Vite/React scaffold only)." Treat almost everything below as
-"what to build," not "what exists."
+## 2. What to read, by task
 
-The actual product spec — API contracts, data shapes, and required UI flows — lives in
-**`../specs/`**, one file per backend module (`00-overview.md` first). The frontend has no spec
-files of its own; it must be built to match the backend's contracts documented there. Read the
-relevant spec before building the corresponding screen, and check `../Backend/CLAUDE.md` for the
-backend's current implementation status — several backend modules referenced below are only
-partially built or not yet wired to a route, which directly limits what the frontend can actually
-call today.
+| Task | Read this — nothing else |
+|---|---|
+| Any task, first | This file only |
+| Auth screens (signup/signin/Google/guest/verify/reset) | `../specs/01-authentication.md` |
+| Quota/plan display, 429 handling | `../specs/02-plan-quota-enforcement.md` |
+| Payment/upgrade flow | `../specs/03-payment-verification.md` + `docs/type-contracts.md` §Payment |
+| File upload flow | `../specs/04-file-upload-ingestion.md` + `docs/type-contracts.md` §Upload |
+| Chat UI + visual/chart rendering | `../specs/06-ai-insight-pipeline.md` + `docs/type-contracts.md` §Chat |
+| Need a TypeScript type for an API response | `docs/type-contracts.md` — don't re-derive from the Python schemas each time |
+| Deciding project structure, or the mock-vs-real API boundary | `docs/structure.md` |
+| Full architecture / module status | `../specs/00-overview.md` |
+| Product strategy — positioning, integrations, WhatsApp, retention | `../specs/09-differentiation-and-gtm.md` |
+| Trust UX for AI answers (show-the-query, confidence, flagging) | `../specs/10-trust-safety-compliance.md` §2 |
 
-## Tech stack (as configured, nothing more)
+## 3. What's buildable today vs. mocked
 
-- **React 19** + **TypeScript** (`~6.0.2`) + **Vite 8**
-- **ESLint 9** with `typescript-eslint`, `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh`
-- No router, no state management library, no CSS framework, no HTTP client, no component library,
-  no chart library — **none of these are chosen yet**. Pick deliberately per the needs of each
-  screen rather than defaulting to something because it's familiar; nothing here constrains the
-  choice, but check for team preference before introducing a dependency the rest of the app doesn't
-  already use.
+| Feature | Backend status | Approach |
+|---|---|---|
+| Auth (signup/signin/Google/guest/verify/reset) | ✅ Live | Build against the real API |
+| Quota display, 429 handling | ✅ Live | Build against the real API |
+| File upload | ⚠️ Validator only, no route | Mock `api/files.ts`; swap in later |
+| Chat + charts | ⚠️ Pipeline built, no route | Mock `api/chat.ts`; swap in later |
+| Payment / upgrade | ❌ Not implemented | Mock `api/payments.ts`; swap in later |
 
-## Scripts
+## 4. Tech stack & scripts
+
+React 19 + TypeScript + Vite 8 + ESLint 9. Nothing else chosen yet (router, state, CSS, HTTP
+client, charts) — pick deliberately per screen, then stay consistent across the app.
 
 ```bash
-npm install
-npm run dev       # Vite dev server — defaults to http://localhost:5173
-npm run build     # tsc -b && vite build
-npm run lint
-npm run preview
+npm install && npm run dev     # http://localhost:5173 — keep this port, backend CORS is locked to it
+npm run build / npm run lint / npm run preview
 ```
 
-**Keep the dev server on port 5173 (or update the backend to match).** The backend's CORS
-allowlist (`ALLOWED_ORIGIN` in `Backend/app/config.py`) defaults to exactly
-`["http://localhost:5173"]`. If you change the Vite port, the backend config needs a matching
-change or every API call will fail CORS.
+## 5. Environment variables
 
-## TypeScript config notes (`tsconfig.app.json`)
+None exist yet. When wiring real API calls, you'll need: `VITE_API_BASE_URL`,
+`VITE_GOOGLE_CLIENT_ID` (must match the backend's `GOOGLE_CLIENT_ID`), `VITE_RAZORPAY_KEY_ID`
+(public key only, once payments are wired). Vite only exposes `VITE_`-prefixed vars to client code
+— never put a real secret in any frontend `.env`.
 
-Fairly strict already: `noUnusedLocals`, `noUnusedParameters`, `noFallthroughCasesInSwitch`,
-`verbatimModuleSyntax` (type-only imports must use `import type`), `moduleResolution: bundler`.
-Keep new code compliant with these rather than loosening them.
+## 6. Working with `specs/`
 
-## What needs to be built, and the contracts to build against
-
-All shapes below are documented in full (with error cases) in the linked spec file — this is a
-pointer, not the full contract.
-
-- **Auth flows** — signup, signin, Google sign-in, guest access, email verification, forgot/reset
-  password. Backend is implemented; endpoints and exact request/response shapes are in
-  `../specs/01-authentication.md`. Auth is **stateless JWT** (access token, 60 min TTL; refresh
-  token, 7 days) — the frontend owns token storage and refresh-on-expiry entirely; there's no
-  server session to fall back on.
-- **Quota/plan UI** — guest/free/pro tiers with different daily query limits (2/4/40) and a 429
-  response when exhausted (`../specs/02-plan-quota-enforcement.md`). The UI should surface remaining
-  quota and a clear upgrade path on 429, not just a generic error.
-- **File upload** — `.csv`/`.pdf`/`.xlsx` only, plan-based size caps (free ≤3MB, pro ≤10MB), guest
-  users blocked entirely. **Backend note:** only the validation middleware exists — there is no
-  upload route yet, so this can't be wired end-to-end until the backend adds one
-  (`../specs/04-file-upload-ingestion.md`, also flagged in `../Backend/CLAUDE.md`).
-- **Chat / query UI** — natural-language question in, structured answer out. **Backend note:** the
-  insight pipeline exists but isn't reachable from any route yet — there is no `/chat` endpoint to
-  call today (`../specs/06-ai-insight-pipeline.md`).
-- **Visual rendering** — the backend's `PipelineOutput.visuals[]` returns one of exactly 9
-  `visual_type` values that the frontend must know how to render: `line_chart`, `bar_chart`,
-  `pie_chart`, `kpi_card`, `heatmap`, `funnel_chart`, `india_map`, `anomaly_chart`, `ai_summary`.
-  Each visual carries `chart_data` (a `{labels, datasets, meta}`-shaped dict — see
-  `../specs/06-ai-insight-pipeline.md` for the exact schema) and a `title`. Because
-  `visual_type` isn't constrained to an enum on the backend yet, the frontend should defensively
-  handle an unrecognized value (e.g. fall back to `ai_summary` or a plain text render) rather than
-  crashing.
-- **Payment/upgrade UI** — plan upgrade to `pro`. **Design note:** the backend spec
-  (`../specs/03-payment-verification.md`) calls for **Razorpay Checkout** (order created
-  server-side, `key_id` + `order_id` handed to the frontend to open Razorpay's client-side modal,
-  signature returned to the backend for verification). No backend route exists yet for this either
-  — see the payment-module note in `../Backend/CLAUDE.md` before building against it.
-
-## Practical guidance
-
-- Nothing has been decided about project structure (folders for `components/`, `hooks/`, `api/`,
-  etc.) — establish a convention when you build the first real feature rather than guessing at one
-  now, and keep it consistent afterward.
-- Since several backend endpoints referenced above don't exist yet, expect to build UI against a
-  mocked/stubbed API layer in places — keep that boundary explicit (e.g. a single `api/` module)
-  so swapping in the real endpoint later is a one-file change, not a scattered find-and-replace.
-- `src/assets/hero.png` already exists in the scaffold (alongside the default Vite/React logos) —
-  likely intended for a real landing/hero section; the default logos are template leftovers safe to
-  remove once real UI replaces `App.tsx`.
+`../specs/` (shared with the backend) is the authoritative product spec — there's no frontend-only
+spec; build against the API contracts documented there. Format: Problem Statement → Functional
+Requirements → API Contracts → Constraints → Edge Cases → Acceptance Criteria. Open only the file
+for the feature you're building (§2).
