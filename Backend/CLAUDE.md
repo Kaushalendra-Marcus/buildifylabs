@@ -66,6 +66,8 @@ Don't change these without reading `docs/conventions.md` first — each looks si
 - All JWT types share one secret, distinguished by a `type` claim.
 - Auth error messages are deliberately generic (anti-enumeration).
 - SQL safety logic lives only in `sql_sanitizer.py`.
+- SQL user-scoping (tenant isolation) lives only in `app/services/data/executor.py` — per-user data
+  tables (`user_data_table_name`) + `assert_user_scoped`; never add a second scoping check elsewhere.
 
 ## 6. Working with `specs/`
 

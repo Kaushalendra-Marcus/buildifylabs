@@ -93,6 +93,27 @@ caught the same way a top-level one is. If a second safety check gets added else
 regex check before calling the generator"), it reintroduces exactly the class of bypass this design
 was built to eliminate.
 
+## SQL user-scoping (`app/services/data/executor.py`)
+
+**Rule:** tenant isolation for generated SQL lives in exactly one place:
+`app/services/data/executor.py`. Two layers, both there:
+- **Structural:** each user's data lives in a per-user table named by
+  `user_data_table_name(user_id)` (B3 creates it) — a query against it physically can't touch
+  another user's rows.
+- **Post-generation validation:** `assert_user_scoped(query, user_table)` walks the AST and rejects
+  (403) any table reference outside the caller's namespace — shared app tables (`users`,
+  `payments`, `query_logs`), another user's table, or a foreign schema. CTE names the query defines
+  are allowed, since they're derived from the caller's own table.
+
+**Why:** a prompt-level "always add `WHERE user_id = ...`" rule is unverifiable and easy for the
+model to omit or get wrong. Executing against a dedicated per-user table makes isolation structural
+instead of a convention the LLM has to follow correctly every time, and `assert_user_scoped` is the
+independent backstop that rejects a query before it ever reaches the database. Scoping is a
+*different* concern from `sanitize_sql`'s write/DDL safety, so it isn't "a second safety check" in
+the forbidden sense — but it must not be re-implemented elsewhere either (e.g. a second regex in the
+generator), or the two will drift. `execute_sql()` composes both gates plus the `INVALID_QUERY`
+sentinel short-circuit in one place.
+
 ## Plan/quota values failing toward the restrictive side (`rate_limiter.py`, `plan_checker.py`)
 
 **Rule:** an unrecognized `user.plan` value falls back to the restrictive side — the rate limiter

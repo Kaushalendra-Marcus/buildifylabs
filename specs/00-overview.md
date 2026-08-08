@@ -73,7 +73,7 @@ removed. See `13-frontend-migration.md` for full detail and current migration st
 | 2 | Usage quota enforcement (rolling window + lifetime cap) | 🔶 Redesigned, needs rewrite from old daily-tier model | `02-plan-quota-enforcement.md` |
 | 3 | Razorpay payment | ⏸️ Paused — staying free for now, see `02` | `03-payment-verification.md` |
 | 4 | File upload validation + ingestion pipeline | ⚠️ Validator only, no route/pipeline | `04-file-upload-ingestion.md` |
-| 5 | NL→SQL generation + SQL safety sandbox | ⚠️ Sanitizer done, generator incomplete | `05-query-sql-safety.md` |
+| 5 | NL→SQL generation + SQL safety sandbox | ✅ Generation (`clean_sql_response`), sanitizer, executor + user-scoping done; dynamic per-file schema lands with B3 | `05-query-sql-safety.md` |
 | 6 | AI insight/visual pipeline (structured output) | ⚠️ Core done, unreachable via any route; contract updated to match real frontend components | `06-ai-insight-pipeline.md` |
 | 7 | External context (user-directed `own_data`/`live_web`/`both` scope + category web scraping) | ❌ Not started — deferred, see `09` §8 | `07-news-context-module.md` |
 | 8 | Graph knowledge store (Neo4j entity/relationship retrieval) | ❌ Not started — deferred, see `09` §8 | `08-graph-knowledge-store.md` |
@@ -136,9 +136,10 @@ These are called out in detail in their respective module specs, listed here for
    again once Razorpay support/refunds are eventually built. (`03-payment-verification.md`)
 4. **No storage backend chosen** for uploaded files — validation passes but there's nowhere to
    persist the file afterward. (`04-file-upload-ingestion.md`)
-5. **No automatic user-scoping on generated SQL** — nothing currently guarantees a generated query
-   only reads the requesting user's own uploaded data. This is a **blocking security gap** before
-   multi-tenant use. (`05-query-sql-safety.md`; full trust/compliance framing in
+5. **~~No automatic user-scoping on generated SQL~~ — closed in B2.** Generated queries now run
+   against a **per-user data table** (`user_data_table_name`) and `assert_user_scoped()` rejects any
+   query referencing a table outside the caller's namespace — a query can never read another user's
+   rows. (`05-query-sql-safety.md`; full trust/compliance framing in
    `10-trust-safety-compliance.md` §3)
 6. **No route exists yet that connects the pieces** — SQL generation, SQL execution, and the AI
    insight pipeline are all individually functional but nothing calls them end-to-end from an HTTP

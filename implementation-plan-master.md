@@ -98,10 +98,10 @@ corrected to the 7 types + `props` + bounded `confidence` + `clarification` (`sp
 `python-jose` JWT + `passlib[bcrypt<4.1]` + `google-auth` · `aiosmtplib` · Groq→HF interim, target
 multi-LLM cascade (`12`) · `sqlglot` AST SQL safety. Planned/unwired: Pinecone, Redis, Neo4j, Razorpay.
 
-**Current module state:** Auth ✅ (bugs) · Quota ⚠️ old daily-tier · SQL safety ⚠️ (`sanitize_sql` done,
-`clean_sql_response` stub, no `execute_sql`, no user-scoping) · Pipeline ⚠️ (`run_pipeline` done but
-unreachable, old contract) · Upload ⚠️ (validator only) · Payments ⚠️ (old UTR, paused) · `QueryLogs`
-table exists, never written.
+**Current module state:** Auth ✅ (bugs) · Quota ✅ (B1: rolling window + lifetime cap) · SQL safety ✅
+(B2: `clean_sql_response`, `execute_sql`, user-scoping closed; dynamic schema awaits B3) · Pipeline ⚠️
+(`run_pipeline` done but unreachable, old contract) · Upload ⚠️ (validator only) · Payments ⚠️ (old UTR,
+paused) · `QueryLogs` table exists, never written.
 
 **Backend conventions to honor throughout** (`Backend/docs/conventions.md`, `CLAUDE.md` §5 — each looks
 simplifiable but isn't):

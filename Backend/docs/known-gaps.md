@@ -42,12 +42,15 @@ starting; don't fix from this summary alone.
 
 ## NL→SQL (`specs/05-query-sql-safety.md`)
 
-- **[Blocking]** No automatic user-scoping on generated SQL — nothing forces a generated query to
-  filter to the requesting user's own data. Must be closed before any multi-tenant use.
-- `sql_generator.clean_sql_response()` is an empty stub — fenced/prose-wrapped LLM output isn't
-  stripped before hitting the sanitizer.
-- `DATABASE_SCHEMA` in `sql_generator.py` is a placeholder (`sales`/`customers`/`orders`) that
-  doesn't match this app's real tables — must become dynamic per user/file.
+- **[Closed, B2]** User-scoping is now structural (per-user data tables via
+  `app/services/data/executor.py::user_data_table_name`) plus post-generation validation
+  (`assert_user_scoped` rejects any table outside the caller's namespace).
+- **[Closed, B2]** `clean_sql_response()` implemented (plain/fenced/prose extraction) and tested.
+- `build_data_schema()` / `build_sql_prompt(schema=...)` exist, but B3's file ingestion must feed
+  them the **real per-file column metadata** — until then the prompt still falls back to the
+  `sales`/`customers`/`orders` placeholder schema.
+- B2's `INVALID_QUERY` sentinel short-circuits in `execute_sql` (`InvalidQueryError`); the
+  user-facing "couldn't turn that into a query" message renders with B4's `POST /chat`.
 
 ## AI insight pipeline (`specs/06-ai-insight-pipeline.md`)
 
