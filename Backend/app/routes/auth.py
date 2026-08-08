@@ -20,6 +20,7 @@ from app.services.auth.token_service import (
     create_refresh_token,
     verify_refresh_token,
 )
+from app.middlewares.auth_rate_limiter import login_rate_limit, verify_email_rate_limit
 from app.schemas.auth import GuestAuthRequest
 from app.schemas.auth import GoogleAuthRequest
 from app.schemas.auth import TokenResponse
@@ -35,17 +36,21 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 
 @router.post("/signup", response_model=AuthResponse)
 async def signup(data: UserCreate, db: AsyncSession = Depends(get_db)):
+    # register_user raises ValueError for business-rule rejections (already
+    # exists, weak password handled at the schema layer) — surface those as
+    # clean 400s. Anything else (a dropped DB connection, a bug) must propagate
+    # as a real 500, never a 400 with the raw exception text leaked.
     try:
         return await register_user(db, data.email, data.password, data.name)
-    except Exception as e:
+    except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.post("/signin", response_model=AuthResponse)
+@router.post("/signin", response_model=AuthResponse, dependencies=[Depends(login_rate_limit)])
 async def signin(data: LoginRequest, db: AsyncSession = Depends(get_db)):
     try:
         return await login_user(db, data.email, data.password)
-    except Exception as e:
+    except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
@@ -89,7 +94,7 @@ async def refresh(data: RefreshTokenRequest, db: AsyncSession = Depends(get_db))
     }
 
 
-@router.get("/verify-email")
+@router.get("/verify-email", dependencies=[Depends(verify_email_rate_limit)])
 async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
     user_id = UUID(verify_email_token(token))
     result = await db.execute(select(User).where(User.id == user_id))

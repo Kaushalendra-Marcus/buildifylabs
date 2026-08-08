@@ -74,15 +74,15 @@ All responses on success use `AuthResponse` unless noted:
 
 ## 5. Edge Cases & Error Handling
 
-1. **[Gap] `UserCreate.password` is `Optional[str] = None`**, but `register_user()` unconditionally
-   calls `hash_password(password)`. An omitted password on signup will raise inside `passlib`
-   rather than surfacing a clean validation error. **Fix:** make `password` required for the
-   email/password signup path.
-2. **[Gap] Guest lookup can raise `MultipleResultsFound`.** If `device_id` is omitted, the guest
-   lookup filters on `device_fingerprint == None`, which is a Postgres `IS NULL` match — and since a
+1. **[Fixed in B0] `UserCreate.password` was `Optional[str] = None`**, and `register_user()` unconditionally
+   calls `hash_password(password)`. An omitted password on signup raised inside `passlib` rather than
+   surfacing a clean validation error. **Fix (B0):** `password` is now required, so omission produces a
+   clean 422 validation error. *Remaining unsupported: nothing — this gap is closed.*
+2. **[Fixed in B0] Guest lookup could raise `MultipleResultsFound`.** If `device_id` was omitted, the
+   guest lookup filtered on `device_fingerprint == None`, which is a Postgres `IS NULL` match — and since a
    unique constraint treats multiple `NULL`s as distinct, more than one such row can legally exist.
-   `scalar_one_or_none()` throws if more than one row matches. **Fix:** require `device_id`
-   non-null in `GuestAuthRequest`, or switch the query to `.first()`.
+   `scalar_one_or_none()` throws if more than one row matches. **Fix (B0):** `device_id` is now required
+   in `GuestAuthRequest` (clean 422 when omitted), with a defensive guard in `create_guest_user`.
 3. **Guest identity is fully client-trusted.** There is no server-side fingerprint (hash of
    IP + User-Agent) — a user can get a fresh guest quota just by sending a new random `device_id`.
    Accepted as an MVP limitation; revisit before public launch.
@@ -94,16 +94,16 @@ All responses on success use `AuthResponse` unless noted:
 6. **Password reset tokens are time-limited but not single-use.** Nothing invalidates a reset token
    after it's been used once; a leaked link remains valid for the rest of its 20-minute window even
    after a successful reset.
-7. **No rate limiting on `/auth/signin` or `/auth/verify-email`.** `config.py` defines
-   `LOGIN_RATE_LIMIT` and `VERIFY_EMAIL_RATE_LIMIT` but neither is wired into any route or
-   middleware yet — both endpoints are currently brute-forceable.
-8. **[Gap] `signup` and `signin` catch a bare `except Exception`** and convert anything they catch
-   into `HTTPException(400, str(e))` (`app/routes/auth.py`). This is meant to turn the specific
-   `ValueError`s raised inside `register_user`/`login_user` ("User already exists", "Invalid email
-   or password", etc.) into clean 400s — but as written it also catches genuine server-side
-   failures (a dropped DB connection, an unexpected bug) and reports them as 400s with the raw
-   exception string exposed to the client, rather than a normal 500. **Fix:** narrow the `except` to
-   the specific `ValueError`s these functions actually raise; let anything else propagate as a 500.
+7. **[Fixed in B0] No rate limiting on `/auth/signin` or `/auth/verify-email`.** `config.py` defines
+   `LOGIN_RATE_LIMIT` (`5`) and `VERIFY_EMAIL_RATE_LIMIT` (`3`) but neither was wired into any route.
+   **Fix (B0):** wired via `app/middlewares/auth_rate_limiter.py` — `Depends(login_rate_limit)` on
+   `/auth/signin` (keyed IP + email, 1h rolling window) and `Depends(verify_email_rate_limit)` on
+   `/auth/verify-email` (keyed IP, 1h rolling window). Both in-memory per-instance; Redis swap is
+   deferred (plan B7). The window is a module decision (config only defines counts).
+8. **[Fixed in B0] `signup` and `signin` catch a bare `except Exception`** and convert anything they catch
+   into `HTTPException(400, str(e))` (`app/routes/auth.py`). **Fix (B0):** the `except` is narrowed to
+   the specific `ValueError`s these functions raise; genuine server-side failures (dropped DB
+   connection, unexpected bug) now propagate as a 500 instead of a 400 with the raw exception shown.
 
 ## 6. Acceptance Criteria
 
@@ -111,7 +111,8 @@ All responses on success use `AuthResponse` unless noted:
 - [ ] A repeated guest `device_id` reliably reuses the same user row and reflects correct
       remaining quota.
 - [ ] An unverified user cannot sign in even with the correct password.
-- [ ] Gap #1 and #2 above are fixed and covered by tests.
-- [ ] `/auth/signin` and `/auth/verify-email` are rate-limited per the config values already defined.
-- [ ] Gap #8 is fixed: an unexpected server-side failure in signup/signin surfaces as a 500, not a
+- [x] Gap #1 and #2 above are fixed (formal pytest coverage lands with the testing-strategy phase).
+- [x] `/auth/signin` and `/auth/verify-email` are rate-limited per the config values already
+      defined (verifiable via the B0 smoke test).
+- [x] Gap #8 is fixed: an unexpected server-side failure in signup/signin surfaces as a 500, not a
       400 with a leaked exception message.
