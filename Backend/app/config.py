@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     SMTP_PASS: str = Field(..., env="SMTP_PASS")
     EMAIL_FROM: str = Field(..., env="EMAIL_FROM")
 
+    # Recipient for the POST /contact lead-capture form (specs/02 §2 FR5).
+    # A config value rather than a hardcoded address, so it can be changed
+    # without a code edit. Required because /contact ships with this phase.
+    CONTACT_FORM_RECIPIENT_EMAIL: str = Field(..., env="CONTACT_FORM_RECIPIENT_EMAIL")
+
     # Google login is live and uses GOOGLE_CLIENT_ID to verify ID tokens.
     # GOOGLE_CLIENT_SECRET isn't referenced anywhere yet (only needed for a
     # server-side auth-code exchange flow, which isn't implemented), so it

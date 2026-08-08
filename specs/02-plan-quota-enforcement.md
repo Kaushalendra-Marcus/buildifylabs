@@ -1,11 +1,10 @@
 # Spec 02 — Usage Quota Enforcement
 
-**Status:** 🔶 Redesigned, not yet implemented — replaces the daily-calendar/plan-tier model below
-with a rolling-window model. The existing code (`app/middlewares/rate_limiter.py`,
-`app/utils/usage.py`) implements the *old* design; this spec now describes the *target* design it
-needs to be rewritten to match.
-**Source files (need rewriting):** `app/middlewares/rate_limiter.py`, `app/utils/usage.py`,
-`app/db/models/user.py`
+**Status:** ✅ Implemented (phase B1, 2026-08-09) — rolling 6h window (4 questions) + 100 lifetime cap
+live in `app/middlewares/rate_limiter.py` (one atomic `UPDATE ... RETURNING` over both counters + the
+roll condition), the rollover rule lives only in `app/utils/usage.py`, `POST /contact` sends real
+email to `CONTACT_FORM_RECIPIENT_EMAIL`, old `queries_today`/`last_reset`/daily-tier logic fully
+removed. `plan_checker` stays dormant (future tier, `specs/03`) and now logs unrecognized plan values.
 
 ---
 
@@ -107,14 +106,14 @@ calendar-day design being replaced, not a general-purpose field worth keeping ar
 
 ## 7. Acceptance Criteria
 
-- [ ] A user's 5th question within a rolling 6-hour window returns 429 with a clear reset time; the
+- [x] A user's 5th question within a rolling 6-hour window returns 429 with a clear reset time; the
       window rolls forward correctly on the next request after 6 hours have elapsed.
-- [ ] A user's 101st question ever returns 429 with `contact_form: true`, regardless of window
+- [x] A user's 101st question ever returns 429 with `contact_form: true`, regardless of window
       state.
-- [ ] `POST /contact` sends a real email via the existing SMTP service to
+- [x] `POST /contact` sends a real email via the existing SMTP service to
       `CONTACT_FORM_RECIPIENT_EMAIL`.
-- [ ] Load test: concurrent requests at either boundary (window or lifetime) never let more through
+- [x] Load test: concurrent requests at either boundary (window or lifetime) never let more through
       than the stated limit.
-- [ ] No code path branches on `user.plan` to produce a different quota number.
-- [ ] Old calendar-day fields/logic (`queries_today`, `last_reset`,
+- [x] No code path branches on `user.plan` to produce a different quota number.
+- [x] Old calendar-day fields/logic (`queries_today`, `last_reset`,
       `reset_daily_usage_if_needed`) are fully removed, not left dead alongside the new fields.

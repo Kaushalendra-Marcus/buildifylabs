@@ -21,9 +21,11 @@ starting; don't fix from this summary alone.
 
 ## Plan/quota (`specs/02-plan-quota-enforcement.md`)
 
-- `GUEST_DAILY_LIMIT` (2) is defined in two places (`guest_auth.py` and `rate_limiter.py`) — they
-  agree today but aren't centralized, so a future change to one without the other silently desyncs them.
-- Unrecognized `plan` values fail safe but silently (no log line) — see `docs/conventions.md`.
+- **[Accepted limitation]** Guest accounts are tracked by `device_fingerprint` only — a guest who
+  clears cookies / uses a new device resets their apparent **lifetime** cap. Documented in `02` §5;
+  revisit only if real guest abuse appears, not preemptively. (Window quota is unaffected.)
+- `plan_checker` logs a warning on unrecognized `plan` values, but nothing currently surfaces it —
+  add observability on those logs if bad data starts showing up.
 
 ## Payments (`specs/03-payment-verification.md`)
 

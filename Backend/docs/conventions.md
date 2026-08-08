@@ -17,32 +17,44 @@ the very first signup/login call crashes with `InvalidRequestError: failed to lo
 ('FileUpload')` — a failure in a completely unrelated request, triggered by a model you added
 somewhere else entirely.
 
-## Daily-quota reset (`app/utils/usage.py::reset_daily_usage_if_needed`)
+## Quota window rollover (`app/utils/usage.py`)
 
-**Rule:** this is the only function that may decide "has this user's daily quota rolled over."
+**Rule:** the "has this user's 6h rolling window rolled over" rule lives in exactly one place:
+`usage.py`'s `QUOTA_WINDOW` constant and `window_elapsed_clause()` (the SQLAlchemy form the rate
+limiter folds into its atomic `UPDATE`), with `window_reset_at()` for the 429 reset-time message.
 
-**Why:** this logic used to be duplicated — a rolling 24-hour window in `guest_auth.py` vs. a
-UTC-calendar-day check in `rate_limiter.py` — and the two could disagree about whether a given user
-was still within quota. It also used to mix naive and timezone-aware datetimes, which raises
-`can't subtract offset-naive and offset-aware datetimes` under real conditions. The consolidated
-version always compares in UTC using timezone-aware datetimes and is the single source of truth.
-Adding a third copy of this logic anywhere reintroduces the original bug class.
+**Why:** the old `reset_daily_usage_if_needed` used to be duplicated — a rolling 24-hour window in
+`guest_auth.py` vs. a UTC-calendar-day check in `rate_limiter.py` — and the two could disagree about
+whether a given user was still within quota. Adding a third copy of this logic anywhere reintroduces
+the original bug class (and a `date()`-based rule even mixes naive/timezone-aware datetimes, which
+raises `can't subtract offset-naive and offset-aware datetimes`). The rewrite keeps the one rule in
+`usage.py` and makes the rate limiter consume it.
 
 ## Rate limiter's atomic update (`app/middlewares/rate_limiter.py`)
 
-**Rule:** the quota check-and-increment must stay a single statement:
+**Rule:** the quota check-and-increment must stay a single statement, now over **both** counters
+plus the roll condition:
+
 ```sql
-UPDATE users SET queries_today = queries_today + 1
-WHERE id = :id AND queries_today < :limit
-RETURNING queries_today
+UPDATE users
+SET questions_in_window = CASE WHEN (window rolled) THEN 1 ELSE questions_in_window + 1 END,
+    window_started_at    = CASE WHEN (window rolled) THEN now ELSE window_started_at END,
+    questions_lifetime   = questions_lifetime + 1
+WHERE id = :id
+  AND questions_lifetime < 100
+  AND (window rolled OR questions_in_window < 4)
+RETURNING questions_in_window, questions_lifetime, window_started_at
 ```
 
-**Why:** a "read `queries_today`, check it, then `UPDATE`" implementation as two separate statements
-is a race condition — two concurrent requests can both read "under limit" before either commits,
-letting both through and exceeding the quota. Folding the check into the `UPDATE`'s `WHERE` clause
-makes Postgres serialize it at the row level: only requests that still fit under the limit *at the
-moment of the write* succeed. This is the entire reason the limiter looks like one dense query
-instead of three readable lines — don't "clean it up" back into separate statements.
+**Why:** a "read the counters, check both limits, then `UPDATE`" implementation as separate
+statements is a race condition — two concurrent requests can both read "under limit" before either
+commits, letting both through and exceeding the quota. Folding the checks into the `UPDATE`'s
+`WHERE` clause makes Postgres serialize it at the row level: only requests that still fit under the
+limit *at the moment of the write* succeed. Folding the **window roll** into the same statement makes
+a request arriving right as the window rolls take the fresh-window path instead of counting against
+the old window — there is no instant where `window_started_at` has advanced but the count hasn't been
+reset. This is the entire reason the limiter looks like one dense query instead of three readable
+lines — don't "clean it up" back into separate statements.
 
 ## JWT token types share one secret (`app/services/auth/token_service.py`, `email_verification.py`)
 
@@ -83,10 +95,10 @@ was built to eliminate.
 
 ## Plan/quota values failing toward the restrictive side (`rate_limiter.py`, `plan_checker.py`)
 
-**Rule:** an unrecognized `user.plan` value falls back to the `free` quota in the rate limiter and
-to guest-level (0) in the plan hierarchy — both via `.get(value, default)`.
+**Rule:** an unrecognized `user.plan` value falls back to the restrictive side — the rate limiter
+doesn't branch on `plan` for a quota number at all anymore (everyone gets 4-per-6h / 100-lifetime,
+per `../specs/02` §2 FR3), and `plan_checker` falls back to guest-level (0) for an unknown tier.
 
 **Why:** this fails safe (a corrupted or future-tier plan value can't accidentally grant more access
-than intended) but currently does so **silently** — no warning is logged. If you touch this code,
-add the missing log line so bad data gets caught rather than masked; don't just rely on the
-fallback being "safe enough" to ignore.
+than intended). `plan_checker` now **logs a warning** on an unrecognized plan value so bad data gets
+caught rather than masked; don't rely on the "safe enough" fallback alone.

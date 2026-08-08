@@ -14,8 +14,12 @@ class User(Base):
     hashed_password = Column(String, nullable=True)  # "email" / "google" / "guest"
     auth_provider = Column(String, nullable=False)
     google_id = Column(String, unique=True, nullable=True)
-    queries_today = Column(Integer, default=0)
-    last_reset = Column(DateTime(timezone=True), server_default=func.now())
+    # Rolling-window + lifetime quota (specs/02, phase B1). Replaces the old
+    # calendar-day daily-tier fields (queries_today / last_reset) which the
+    # rewrite removed.
+    questions_in_window = Column(Integer, default=0, server_default="0")
+    window_started_at = Column(DateTime(timezone=True), nullable=True)
+    questions_lifetime = Column(Integer, default=0, server_default="0")
     is_active = Column(Boolean, default=True)
     plan = Column(String, default="free")
     device_fingerprint = Column(String(255), unique=True, nullable=True)

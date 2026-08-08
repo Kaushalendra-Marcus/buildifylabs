@@ -42,3 +42,21 @@ async def send_password_reset_email(to_email: str, token: str):
         password=settings.SMTP_PASS,
         start_tls=True,
     )
+
+
+async def send_contact_email(name: str, email: str, message: str):
+    msg = EmailMessage()
+    msg["Subject"] = f"BuildifyLabs contact form: {name}"
+    msg["From"] = settings.EMAIL_FROM
+    msg["To"] = settings.CONTACT_FORM_RECIPIENT_EMAIL
+    msg["Reply-To"] = email
+    msg.set_content(f"Name: {name}\nEmail: {email}\n\nMessage:\n{message}")
+
+    await aiosmtplib.send(
+        msg,
+        hostname=settings.SMTP_HOST,
+        port=settings.SMTP_PORT,
+        username=settings.SMTP_USER,
+        password=settings.SMTP_PASS,
+        start_tls=True,
+    )

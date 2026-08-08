@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from app.config import get_settings
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -9,6 +10,8 @@ import logging
 import app.db.models  # noqa: F401
 
 from app.routes.auth import router as auth_router
+from app.routes.contact import router as contact_router
+from app.middlewares.rate_limiter import QuotaLimitExceeded
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,7 +36,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Quota 429s carry a top-level body of {"detail": ..., "contact_form"?} per the
+# specs/02 §3 contract, so they can't ride the default HTTPException(detail=...)
+# shape; route them through this handler instead (see rate_limiter.py).
+app.add_exception_handler(
+    QuotaLimitExceeded,
+    lambda request, exc: JSONResponse(status_code=429, content=exc.payload),
+)
+
 app.include_router(auth_router)
+app.include_router(contact_router)
 
 
 @app.get("/")

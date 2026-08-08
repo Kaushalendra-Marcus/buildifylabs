@@ -60,8 +60,9 @@ suite exists yet. `docker-compose.yml` is present but empty — don't assume a c
 Don't change these without reading `docs/conventions.md` first — each looks simplifiable but isn't:
 
 - `app/db/models/__init__.py` must import every model.
-- Daily-quota reset logic lives only in `app/utils/usage.py::reset_daily_usage_if_needed`.
-- `rate_limiter`'s quota check is one conditional `UPDATE ... RETURNING` — never `SELECT` + `UPDATE`.
+- The window-rollover rule lives only in `app/utils/usage.py` (`window_elapsed_clause` + `QUOTA_WINDOW`).
+- `rate_limiter`'s quota check is one conditional `UPDATE ... RETURNING` over both counters + the
+  roll condition — never `SELECT` + `UPDATE`.
 - All JWT types share one secret, distinguished by a `type` claim.
 - Auth error messages are deliberately generic (anti-enumeration).
 - SQL safety logic lives only in `sql_sanitizer.py`.
