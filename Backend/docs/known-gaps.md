@@ -10,6 +10,9 @@ starting; don't fix from this summary alone.
   inside `passlib` instead of a clean 400.
 - Guest lookup with no `device_id` can raise `MultipleResultsFound` (`device_fingerprint IS NULL`
   legally matches multiple rows).
+- `signup`/`signin` wrap their whole body in `except Exception as e: raise HTTPException(400, str(e))`
+  — a genuine 500 (DB down, unexpected bug) gets misreported as a 400 validation error, and the raw
+  exception string leaks to the client.
 - No rate limiting on `/auth/signin` or `/auth/verify-email` — both brute-forceable, despite
   `LOGIN_RATE_LIMIT`/`VERIFY_EMAIL_RATE_LIMIT` already existing in config.
 - Password reset tokens are time-limited (20 min) but not single-use — a leaked link stays valid
@@ -52,6 +55,22 @@ starting; don't fix from this summary alone.
 - No truncation/summarization step before large `db_data` is injected into the prompt — risk of
   blowing the model's context window on the input side.
 - No route calls `run_pipeline` yet — it's fully built but unreachable.
+- `langchain_pipeline.py` hasn't actually been updated to match spec `06` §3's contract yet:
+  `VisualOutput.visual_type` is still a plain `str` (not the `Literal[...]` of 7 real types),
+  `PipelineOutput.confidence` is still unbounded, there's no `clarification` field, and
+  `SYSTEM_PROMPT` still tells the model to use the old 9 fictional visual types. The contract is
+  fully designed in `06` §3 — just not applied to the source file.
+- `run_pipeline(news_context: list = [])` uses a mutable default argument — not currently exploited
+  (never mutated in place), but a footgun for the next person who touches this function.
+
+## LLM config (`specs/12-llm-orchestration.md`)
+
+- `config.py`'s `GROQ_MODEL` default (`llama-3.1-70b-versatile`) is a Groq model ID decommissioned
+  since ~Jan 2025. Without an env override, every `generate_response()` call fails 3x (with
+  backoff) before silently falling to the HuggingFace fallback — meaning today's interim pipeline
+  is quietly running on HF, not Groq, on every request. Needs a live model id from
+  `console.groq.com/docs/models` — that lineup moves fast (e.g. the interim replacement
+  `llama-3.3-70b-versatile` is itself being retired Aug 16, 2026).
 
 ## Cross-cutting
 

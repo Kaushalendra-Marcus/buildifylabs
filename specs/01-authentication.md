@@ -97,6 +97,13 @@ All responses on success use `AuthResponse` unless noted:
 7. **No rate limiting on `/auth/signin` or `/auth/verify-email`.** `config.py` defines
    `LOGIN_RATE_LIMIT` and `VERIFY_EMAIL_RATE_LIMIT` but neither is wired into any route or
    middleware yet — both endpoints are currently brute-forceable.
+8. **[Gap] `signup` and `signin` catch a bare `except Exception`** and convert anything they catch
+   into `HTTPException(400, str(e))` (`app/routes/auth.py`). This is meant to turn the specific
+   `ValueError`s raised inside `register_user`/`login_user` ("User already exists", "Invalid email
+   or password", etc.) into clean 400s — but as written it also catches genuine server-side
+   failures (a dropped DB connection, an unexpected bug) and reports them as 400s with the raw
+   exception string exposed to the client, rather than a normal 500. **Fix:** narrow the `except` to
+   the specific `ValueError`s these functions actually raise; let anything else propagate as a 500.
 
 ## 6. Acceptance Criteria
 
@@ -106,3 +113,5 @@ All responses on success use `AuthResponse` unless noted:
 - [ ] An unverified user cannot sign in even with the correct password.
 - [ ] Gap #1 and #2 above are fixed and covered by tests.
 - [ ] `/auth/signin` and `/auth/verify-email` are rate-limited per the config values already defined.
+- [ ] Gap #8 is fixed: an unexpected server-side failure in signup/signin surfaces as a 500, not a
+      400 with a leaked exception message.

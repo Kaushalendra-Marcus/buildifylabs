@@ -73,6 +73,12 @@ up runaway cost even under this more generous policy.
   models produces the JSON, not just Groq/Llama.
 - This spec does not change *what* gets asked of the LLM (`05`, `06`, `11` define that) — only
   *which provider* answers, and *when a stronger one is worth the cost*.
+- **This isn't purely forward-looking:** the *current* interim single-provider setup
+  (`groq_service.py`) already has a live instance of the exact risk this spec exists to reduce —
+  `config.py`'s `GROQ_MODEL` default is a Groq model ID decommissioned since ~Jan 2025, so every
+  call silently falls through to the weak HF fallback today, not just in some future outage
+  scenario (`Backend/docs/known-gaps.md`, "LLM config"). Worth fixing independently of — and
+  before — this spec's full cascade, since it's a one-line config change.
 
 ## 6. Acceptance Criteria
 

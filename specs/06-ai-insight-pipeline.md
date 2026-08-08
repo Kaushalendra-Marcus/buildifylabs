@@ -118,11 +118,24 @@ reference to it.
 7. **A `clarification` response where the user's next message doesn't clearly answer it** — the
    pipeline should still attempt to proceed rather than loop indefinitely; treat an unclear
    follow-up as a fresh query rather than re-asking the same clarification a second time.
+8. **[Gap] `langchain_pipeline.py` has not actually been updated to this file's §3 contract.** The
+   source still has `visual_type: str` (unconstrained), `confidence: float` (unbounded), no
+   `clarification` field, and a `SYSTEM_PROMPT` that instructs the model to use the old 9 fictional
+   visual types (`line_chart`, `kpi_card`, `india_map`, etc.) rather than the 7 real ones. §3's
+   contract is fully designed — this is purely a "hasn't been applied yet" gap, not an open design
+   question.
+9. **[Gap] `run_pipeline(news_context: list = [])` uses a mutable default argument** — a standard
+   Python footgun (the default list object is shared across calls that don't pass their own). Not
+   currently exploited since the function only reads it, but should become `news_context: list |
+   None = None` with an `if news_context is None: news_context = []` guard the next time this
+   function is touched — including when it's updated for gap #8 and for the `include_news` →
+   `source_scope` migration (spec `07`).
 
 ## 6. Acceptance Criteria
 
 - [ ] `visual_type` and `confidence` are constrained at the schema level (Literal + bounded Field,
-      shown in §3) — this closes what used to be listed as open gaps here.
+      shown in §3) — this closes what used to be listed as open gaps here. **Not yet true of
+      `langchain_pipeline.py` itself — see gap #8.**
 - [ ] `visual_type`'s 7 allowed values match `src/lib/schemas/visuals.ts` in the frontend exactly —
       any mismatch is a bug in one of the two places, not an acceptable drift.
 - [ ] `PipelineOutput.clarification` is a working alternate response mode, not just a schema field
