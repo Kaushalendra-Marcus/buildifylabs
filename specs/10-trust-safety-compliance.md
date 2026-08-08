@@ -44,6 +44,12 @@ more disruptive than designing for it up front.
   actually improving prompt/schema quality over time — without it, you're iterating on guesses about
   what people ask and where the model fails, which is the single most important thing to actually
   know for a product like this.
+- **Ask, don't guess, when the pipeline lacks enough information to answer well.** Formalized in
+  `specs/06` FR7 (`PipelineOutput.clarification`) and first used concretely in
+  `11-prediction-and-calculation.md` §4 (competitor benchmarking) — but the principle applies
+  anywhere in the pipeline, not just there. A wrong-but-confident answer is worse than a question
+  back to the user; this is the single biggest lever against the hallucination risk this whole file
+  exists to manage.
 
 ## 3. Security requirement — blocking, not backlog
 
@@ -52,17 +58,37 @@ here because it's a launch blocker, not a normal backlog item: **no automatic us
 generated SQL today.** Nothing currently guarantees a generated query only reads the requesting
 user's own uploaded data. For a product asking real businesses to upload real sales and customer
 data, this has to close before any user outside the founding team's own test data touches the
-system — full stop, before growth work, before additional features, before payments go live.
+system — full stop, before growth work, before additional features.
 
-## 4. Data protection compliance (India, DPDP Act)
+**A concrete instance of exactly this class of risk already happened once in this project**, worth
+keeping in mind as more than a hypothetical: a Tambo AI API key was found committed in a `.env` file
+in the Next.js frontend (`13-frontend-migration.md` §4), exposed client-side via a
+`NEXT_PUBLIC_`-prefixed env var. It needs to be rotated and scrubbed from that repo's git history.
+Small, unglamorous secrets-hygiene mistakes like this are the same category of risk as the SQL
+scoping gap — not exotic, easy to make once and forget about, and exactly the kind of thing worth a
+quick pass ("does anything in this repo expose a secret client-side or commit one to git?") before
+any real user's data is on the line, not just the one gap this section originally called out.
 
-India's Digital Personal Data Protection Act, 2023 is no longer a future concern. Its implementing
-Rules were notified on November 14, 2025, kicking off an 18-month phased rollout: 2026 is
-effectively the "build and be ready" year, with soft enforcement (guidance and warnings) expected
-through 2026 and full/"hard" enforcement expected around mid-May 2027. Startups and MSMEs are not
-exempt — compliance obligations can be calibrated to scale and risk, but they still apply. Penalties
-for non-compliance are substantial (reported ranges run from roughly ₹50 crore up to ₹250 crore per
-violation for serious breaches), which makes this a real business risk, not paperwork.
+## 4. Data protection compliance (wherever your users are)
+
+**Broadened from an earlier draft of this section, which only covered India.** The product is
+global now, so "comply with one country's law" isn't the right frame — the practical checklist
+below (privacy policy, retention, no-training commitment, breach plan) is closer to universal good
+practice than any single regime's specific requirements, which is exactly why it's worth doing
+regardless of exactly which laws end up applying to which user. Two regimes worth naming
+specifically, since they cover a lot of ground:
+
+- **India's DPDP Act, 2023** — relevant given the product's origin and likely early users. Its
+  implementing Rules were notified November 14, 2025, kicking off an 18-month phased rollout: 2026
+  is effectively the "build and be ready" year, with soft enforcement expected through 2026 and
+  full enforcement expected around mid-May 2027. Startups/MSMEs aren't exempt, though obligations
+  can be calibrated to scale and risk. Penalties for serious breaches are substantial (reported
+  ranges run roughly ₹50 crore to ₹250 crore per violation) — a real business risk, not paperwork.
+- **EU GDPR** — relevant the moment any EU-based business signs up, which a global, no-niche
+  product should expect. GDPR is stricter than DPDP on several points (e.g. a harder requirement
+  around lawful basis for processing, and a more developed "right to be forgotten"). A product that
+  meets GDPR's bar tends to satisfy DPDP's too, which makes GDPR-level practice a reasonable
+  default to build toward rather than picking a regime per user.
 
 **What this means practically for this product**, given it stores personal data (customer records
 inside uploaded business files, plus users' own emails/names):
@@ -71,22 +97,25 @@ inside uploaded business files, plus users' own emails/names):
   a user can request deletion. This is table stakes and cheap to do now.
 - **Explicit no-training commitment.** State plainly that uploaded business/customer data is not
   used to train or fine-tune any model, unless a user opts in — this is both a compliance-relevant
-  purpose-limitation point and a genuine trust/marketing asset for a product asking SMBs to upload
-  sensitive sales data.
+  purpose-limitation point and a genuine trust/marketing asset for a product asking businesses to
+  upload sensitive sales data. This now needs to cover every provider in the multi-LLM cascade
+  (`12-llm-orchestration.md`) — Groq, Gemini, the open-source option, and Claude all see query/data
+  content at some point, and the commitment needs to hold across all of them, not just whichever one
+  happens to answer a given request.
 - **Data retention and deletion policy**, with an actual mechanism behind it — not just a policy
   document. `FileUpload` and `QueryLogs` records need a defined retention window and a real deletion
   path once a user requests it or closes their account.
-- **Data processor awareness.** Groq, HuggingFace, and (once wired) Pinecone all process data on
-  this product's behalf when a query or file touches them. Under DPDP, engaging a processor doesn't
-  transfer the underlying responsibility for that data — worth reviewing each provider's own data
+- **Data processor awareness.** Every LLM provider in the cascade, plus Pinecone once wired, all
+  process data on this product's behalf. Engaging a processor doesn't transfer the underlying
+  responsibility for that data under either DPDP or GDPR — worth reviewing each provider's own data
   handling terms before they're in the critical path for real user data, not after.
 - **Breach response plan.** Even a short, honest internal runbook ("who gets notified, what gets
   checked, how affected users are told") is far better than improvising one during an actual
   incident.
-- None of this needs to be enterprise-grade on day one — the DPDP guidance itself expects
-  startups/MSMEs to calibrate to their size and risk. But "we'll deal with it later" stops being a
+- None of this needs to be enterprise-grade on day one — both regimes above expect small
+  operators to calibrate to their size and risk. But "we'll deal with it later" stops being a
   reasonable default once real (non-test) user data is being stored, which lines up with the same
-  point security gap §3 above draws the line at.
+  point the security gap in §3 draws the line at.
 
 ## 5. Acceptance criteria for this file
 
@@ -94,6 +123,9 @@ inside uploaded business files, plus users' own emails/names):
 - [ ] `/chat` (once built, specs/05+06) ships with a visible "show the query behind this" affordance.
 - [ ] `QueryLogs` is actually written to on every query.
 - [ ] A basic "flag this answer" mechanism exists, feeding into `QueryLogs`.
+- [ ] The clarifying-question pattern (§2, `specs/06` FR7) is implemented and exercised by at least
+      one real pipeline path, not just a schema field that's never populated.
 - [ ] The SQL user-scoping gap (specs/05) is closed before any non-test user's data is stored.
+- [ ] The previously-exposed Tambo key (§3) is rotated and scrubbed from git history.
 - [ ] A privacy policy, ToS, and data retention/deletion policy exist and are linked from the app
       before public signup opens.

@@ -1,14 +1,20 @@
-# Spec 03 — Payment: Razorpay Integration
+# Spec 03 — Payment: Razorpay Integration (Paused)
 
-**Status:** ❌ Not implemented — `Payment` model/schema exist but need revision (see below); no
-route or service layer written yet.
+**Status:** ⏸️ Paused, not currently being built — `Payment` model/schema exist but need revision (see
+below); no route or service layer written yet. **The product is staying free while it validates
+real usage; see `02-plan-quota-enforcement.md` for the current interim model** (rolling quota +
+contact form when the lifetime cap is hit, instead of a paid upgrade). This spec is preserved as
+the documented design for **when** monetization is actually pursued — not scheduled now, and not
+next in the build order (see `00-overview.md` §7).
 **Source files (existing, need revision):** `app/db/models/payment.py`, `app/schemas/payment.py`
 **Source files (missing):** `app/routes/payment.py`, `app/services/payment/*`
 
 > **Revision note:** This supersedes the earlier manual UPI + UTR design. That approach was chosen
 > to avoid gateway fees/integration cost; the decision has been reversed in favor of **Razorpay**
 > for reliability (automated capture + webhook verification instead of manual admin review) and
-> lower operational overhead. The `utr`-based fields below are being replaced, not extended.
+> lower operational overhead. The `utr`-based fields below are being replaced, not extended. **A
+> second revision, more recent than the first: don't build any of this yet at all** — see the
+> status line above.
 
 ---
 
