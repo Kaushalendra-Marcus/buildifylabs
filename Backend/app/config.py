@@ -18,7 +18,10 @@ class Settings(BaseSettings):
     # currently uses. They become required again as each feature actually
     # ships.
     GROQ_API_KEY: Optional[str] = Field(None, env="GROQ_API_KEY")
-    GROQ_MODEL: str = "llama-3.1-70b-versatile"
+    # Interim model id — llama-3.1-70b-versatile is decommissioned (every call
+    # fails and silently falls back to HF). This model is itself scheduled to
+    # retire 2026-08-16; needs a durable choice before then (see plan B5).
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
     HF_API_KEY: Optional[str] = Field(None, env="HF_API_KEY")
     HF_MODEL: str = "mistralai/Mixtral-8x7B-Instruct-v0.1"

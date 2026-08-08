@@ -11,6 +11,12 @@ GUEST_DAILY_LIMIT = 2
 
 
 async def create_guest_user(db: AsyncSession, fingerprint: str):
+    if not fingerprint:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Guest access requires a device id",
+        )
+
     result = await db.execute(
         select(User).where(User.device_fingerprint == fingerprint)
     )

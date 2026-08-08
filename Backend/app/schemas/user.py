@@ -10,7 +10,10 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: Optional[str] = None
+    # Required for the email/password signup path — register_user hashes it
+    # unconditionally, so omitting it previously exploded inside passlib instead
+    # of producing a clean validation error.
+    password: str
 
     @field_validator("password")
     @classmethod

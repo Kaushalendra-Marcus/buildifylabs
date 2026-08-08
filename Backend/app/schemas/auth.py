@@ -14,7 +14,11 @@ class GoogleAuthRequest(BaseModel):
 
 
 class GuestAuthRequest(BaseModel):
-    device_id: Optional[str] = None
+    # Required, not Optional: a missing device_id made the lookup filter on
+    # `device_fingerprint IS NULL`, which matches every row that has a NULL
+    # fingerprint (multiple such rows are legal), crashing the query with
+    # MultipleResultsFound.
+    device_id: str
 
 
 class TokenResponse(BaseModel):
