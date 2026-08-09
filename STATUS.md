@@ -8,14 +8,45 @@ Legend: ✅ completed · ⚠️ partial · ⛔ blocked · ⏸ deferred/paused
 
 ## Current task
 
-**Phase F6 — Remaining states** `[IMMEDIATE]` (master plan Part F; `specs/14` §6): **empty thread,
-guest** (invite a question — no upload affordance at all), **empty thread, registered, no files**
-(invite an upload "Add a CSV, PDF, or spreadsheet to get started"; a no-data question routes through
-the no-data messaging, not a generic empty), **assistant "thinking"** indicator (small inline
-indicator under the user's message — distinct from the F5 cold-start). Depends on: F2–F5.
-Acceptance: all `specs/14` §6 states present.
+**🚩 CHECKPOINT — put the core loop in front of real users before any POST-CHECKPOINT phase.**
+`[IMMEDIATE]` (`specs/00` §7, master plan Part F/B boundary). All immediate/MVP frontend phases
+(F0–F6) and backend phases (B0–B4) are complete. **Do not start any POST-CHECKPOINT phase
+(B5+ / F7+) until the "worth continuing" bar is defined** (e.g. % of first-time users asking a 2nd
+question in-session) and the core loop has real-user evidence.
 
 ## Completed tasks
+
+- **F6 — Remaining states** — done, test-verified (`npm run build`, `npm run lint`, `npm test`
+  all green — **65 tests**, up from 56; dev server boots on 5173):
+  - **`EmptyThread.tsx`** (new, `messages/`, specs/14 §6) — the empty thread renders when the
+    store has zero messages. **Guests**: a question invite with **NO upload affordance at all**
+    (the composer's upload button is already absent for guests — never shown disabled). **Registered
+    + no files**: "Add a CSV, PDF, or spreadsheet to get started" with the `UploadPopover` one tap
+    away (its dialog/status chips render inline). **Registered + files**: the question invite. The
+    component reports `hasData` into the chat store by re-checking the **live** `GET /files` (any
+    `completed` file ⇒ `true`); guests are `false` by construction (can't upload, specs/04 FR1).
+  - **No-data question messaging** — `chat-store` grows `hasData: boolean | null` (null = unknown);
+    `AssistantMessage` routes a **fallback-kind** output through the new **`NoDataMessage.tsx`**
+    ("You haven't uploaded any data yet — add a CSV, PDF, or spreadsheet to get started…") whenever
+    `hasData === false` — the 07 edge case 2 "say so directly" messaging, never the generic
+    "Couldn't produce a reliable answer for that". `UploadPopover` sets `hasData=true` on a
+    successful upload. The `EmptyThread` fetch is the null→false/true discovery path.
+  - **`ThinkingIndicator.tsx`** (new) — the small **inline** assistant-thinking indicator (three
+    bouncing dots, right-aligned under the in-flight user message), rendered by `MessageStream`
+    when `pending === 'thinking'` — **distinct from** the F5 cold-start card (which is a named,
+    full-width wake-up state); `prefers-reduced-motion` turns dots static.
+  - **`MessageStream.tsx`** — when `messages.length === 0` the region renders `EmptyThread`;
+    `pending === 'thinking'` renders `ThinkingIndicator`.
+  - **CSS:** `message-stream.css` additions — `.empty-thread` (centered invite, icon/title/body/
+    action + inline popover), `.message--no-data` (warning-tinted no-data notice, row layout) and
+    `.thinking-indicator` (dot bounce, reduced-motion). Tokens only.
+  - **Tests:** `EmptyThread.test.tsx` (6 — guest invite + NO upload affordance + hasData false;
+    registered-no-files invite; popover opens from the invite; upload flips to question invite;
+    registered-with-files invites a question + hasData true; MessageStream wiring shows it on a
+    zero-message thread), `MessageStream.test.tsx` (+4 — cold start keeps its named card once a
+    user message exists [real composer flow appends the user message before `pending`]; thinking
+    indicator under the user message + distinct from cold start; no-data fallback → no-data
+    messaging; generic fallback kept when the user does have data). **65 total.**
 
 - **F5 — Composer + ambient controls** — done, test-verified (`npm run build`, `npm run lint`,
   `npm test` all green — **56 tests**, up from 38; dev server boots on 5173):
@@ -304,16 +335,14 @@ Acceptance: all `specs/14` §6 states present.
 
 ## What's after
 
-F0/F1 completed the frontend foundations + type-contract freeze + the six auth flows; B4 completed
-the backend core loop; F2 landed the Chat Workspace shell; F3 landed the four message-stream
-components against the live `POST /chat`/`/chat/flag` API; F4 landed the 7 visual components into
-the F3 grid seam (plain lookup + unknown-type fallback); F5 landed the composer + ambient controls
-(specs/14 §5) against the live `/chat` + `/files*` + `/contact` API. Next: the last frontend
-pre-checkpoint phase **F6 — remaining states** (empty-thread guest / registered-no-files, and the
-assistant "thinking" indicator) — building on F2–F5 against the live
-`src/api/*` seam. Before any POST-CHECKPOINT
-phase (B5+ / F7+): **define the "worth continuing" bar** (e.g. % of first-time users asking a 2nd
-question in-session) and put the core loop in front of real users (**🚩 CHECKPOINT**, `specs/00` §7).
+F0–F5 completed foundations, auth, the workspace shell, the four message types, the seven visual
+components, and the composer + ambient controls; **F6 completed the last immediate frontend phase** —
+the empty-thread states (guest / registered + no files / registered + files), the no-data question
+messaging, and the inline thinking indicator. Backend B0–B4 (auth/quota/upload/chat core loop) is
+done. **All immediate/MVP scope is complete — this is the 🚩 CHECKPOINT.** Next: **define the
+"worth continuing" bar** (e.g. % of first-time users asking a 2nd question in-session) and **put
+the core loop in front of real users** (`specs/00` §7) — no POST-CHECKPOINT phase (B5+ / F7+)
+starts until there's real-user evidence.
 
 ## Blocked / deferred
 
@@ -396,8 +425,8 @@ is needed; no pytest-asyncio — each async scenario runs via `asyncio.run`):
   429 on window exhaustion and on lifetime cap.
 - **Migration check:** `alembic heads` = `b4code0000` (chain `9eec775a77e0 → b1code0000 → b3code0000 → b4code0000`).
 
-**Frontend (F1–F5)** — from `Frontend/`: `npm run build` (tsc -b + vite build) ✅, `npm run lint` ✅,
-`npm test` ✅ (**56 tests**, up from 38), `npm run dev` boots on **http://localhost:5173** ✅.
+**Frontend (F1–F6)** — from `Frontend/`: `npm run build` (tsc -b + vite build) ✅, `npm run lint` ✅,
+`npm test` ✅ (**65 tests**, up from 56), `npm run dev` boots on **http://localhost:5173** ✅.
 Vitest harness (`vitest.config.ts`, jsdom, `src/test/setup.ts` with jest-dom + explicit RTL cleanup +
 ResizeObserver stub for Recharts):
 `visuals.test.ts` (7 types), `token-storage.test.ts` (access in memory / refresh persisted / clear),
@@ -405,13 +434,16 @@ ResizeObserver stub for Recharts):
 stream + New chat + badge), `auth-screens.test.tsx` (10 tests), `PlanBadge.test.tsx` (labels +
 unknown-plan fallback), `ChatWorkspace.test.tsx` (3 tests — desktop rail open by default;
 narrow <768px collapsed by default + overlay toggle; narrow overlay opens via header toggle;
-matchMedia stubbed since jsdom lacks it), **`MessageStream.test.tsx`** (12 tests — the four
-`specs/14` §4 message types + the F5 §5.6 system notices + §5.7 cold start: user bubble + file chip
-above; normal answer w/ visual grid + graph-wide span + collapsed insights strip + trust footer +
-news row; insights expand; "Show the query" reveals SQL + preview table; flag hits the live
-`/chat/flag` write path; flag disabled with tooltip when no query log; clarification pill tap sends
-verbatim; fallback notice + no trust footer; window-exhausted notice w/ reset countdown; lifetime
-cap card + contact form; form POSTs `/contact` + thanks; cold-start named state),
+matchMedia stubbed since jsdom lacks it), **`MessageStream.test.tsx`** (16 tests — the four
+`specs/14` §4 message types + the F5 §5.6 system notices + §5.7 cold start + the F6 §6 states:
+user bubble + file chip above; normal answer w/ visual grid + graph-wide span + collapsed insights
+strip + trust footer + news row; insights expand; "Show the query" reveals SQL + preview table; flag
+hits the live `/chat/flag` write path; flag disabled with tooltip when no query log; clarification
+pill tap sends verbatim; fallback notice + no trust footer; window-exhausted notice w/ reset
+countdown; lifetime cap card + contact form; form POSTs `/contact` + thanks; cold-start named state
+(with the user message present, as the composer really appends it first); **inline thinking
+indicator under the user message, distinct from cold start; no-data fallback → no-data messaging;
+generic fallback kept when the user has data**),
 **`VisualCard.test.tsx`** (8 tests — the plain type→component lookup renders each of the 7 types
 inline: metric value + change badge, graph line/bar/pie/area, table with sticky headers, comparison
 value/delta/group bars, insight text+context, alert level styling, status pill; unknown type degrades
@@ -420,14 +452,20 @@ segments default/persist + gated hint, §5.3 upload absent for guests + popover 
 disabled only when empty + Enter sends, §5.6 window-429 → notice + input stays enabled, lifetime-429
 → lifetime card notice), **`UploadPopover.test.tsx`** (3 — list w/ status chips + failed reason,
 3MB/10MB caps by plan, upload via picker + active-file), **`QuotaChip.test.tsx`** (3 — §5.5 "N of 4
-left" + live "· resets in", low-warning state, no countdown before first question).
+left" + live "· resets in", low-warning state, no countdown before first question),
+**`EmptyThread.test.tsx`** (6 — the F6 §6 empty-thread states: guest question invite + NO upload
+affordance + hasData false; registered+no-files upload invite; popover opens from the invite;
+upload flips to the question invite; registered+files invites a question + hasData true; the
+MessageStream wiring shows it on a zero-message thread).
 
 ## Last updated
 
-2026-08-09 (F5 complete — composer + ambient controls in `src/features/chat/`: auto-grow text input
-with real-example placeholder, persistent 3-way source-scope selector (Live web/Both B7-gated),
-upload button absent for guests + `UploadPopover` (drag-drop, CSV/PDF/XLSX, 3MB/10MB hints, status
-chips + failed reason), send disabled only when empty, the two distinct 429 states (window-exhausted
-inline notice with live reset countdown / lifetime-cap permanent card with inline `/contact` form),
-QuotaChip "· resets in 4h" live countdown, and the cold-start first-load state — via
-`scope-store.ts`, `useNow`, `composer.css`; 18 new tests; see `git diff` for the exact change set)
+2026-08-09 (**F6 complete — remaining states in `src/features/chat/messages/`**): `EmptyThread`
+(guest → question invite with no upload affordance at all; registered + no files → "Add a CSV,
+PDF, or spreadsheet to get started" with the UploadPopover one tap away; registered + files →
+question invite; live `GET /files` check feeds the chat store's new `hasData` flag),
+`NoDataMessage` (a fallback while the user provably has no data routes through the 07 edge-case-2
+no-data messaging, not the generic empty), `ThinkingIndicator` (small inline bouncing-dots indicator
+under the in-flight user message, distinct from the cold-start card), plus the `MessageStream` empty
+branch — via `chat-store.hasData`/`setHasData` and `message-stream.css`; 9 new tests (65 total);
+see `git diff` for the exact change set)

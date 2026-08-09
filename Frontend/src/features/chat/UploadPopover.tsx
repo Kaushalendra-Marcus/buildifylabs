@@ -53,8 +53,10 @@ export function UploadPopover({ onClose }: { onClose: () => void }) {
       setError(null);
       try {
         const created = await uploadFile(file);
-        // The most recent upload names the chip on the next user bubble.
+        // The most recent upload names the chip on the next user bubble, and
+        // the user now has data (F6: no-data messaging / empty-thread invite).
         useChatStore.getState().setActiveFileName(created.file_name);
+        useChatStore.getState().setHasData(true);
         await loadFiles(); // refresh status chips (processing → completed/failed)
       } catch (caught) {
         setError(getErrorMessage(caught));

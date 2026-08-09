@@ -37,7 +37,15 @@ by quota**, the **two distinct 429 states** in the stream (window-exhausted inli
 reset-time countdown vs the permanent lifetime-cap CARD with the inline `POST /contact` form), the
 QuotaChip's live **"· resets in 4h"** label, and the **cold-start** first-request wake-up state —
 all via the Zustand `chat-store` (system notices + `pending` + `activeFileName`) and `useNow`
-(ticking countdowns; no `Date.now()` during render). Auth, plan/quota, upload, and chat (`POST /chat`) have a live backend to build
+(ticking countdowns; no `Date.now()` during render). **F6 the remaining states are in** —
+`specs/14` §6: the **empty-thread invites** (`messages/EmptyThread.tsx` — guests get a question
+invite with **no upload affordance at all**; registered users with no files get "Add a CSV, PDF,
+or spreadsheet to get started" with the UploadPopover one tap away; the thread's `hasData` store
+flag re-checked live via `GET /files`), **no-data question messaging** (`messages/NoDataMessage.tsx` —
+a degraded response while the user provably has no data routes through the no-data messaging, 07 edge
+case 2, never the generic fallback/empty), and the **small inline thinking indicator**
+(`messages/ThinkingIndicator.tsx` — right-aligned dots under the in-flight user message, distinct
+from the F5 cold-start card). Auth, plan/quota, upload, and chat (`POST /chat`) have a live backend to build
 against today (§3); payment needs mocked data behind a clean API seam until its route ships.
 
 ## 2. What to read, by task

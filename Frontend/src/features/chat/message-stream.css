@@ -559,3 +559,142 @@
     animation: none;
   }
 }
+
+/* ---------- F6 §6 empty thread — two invites, no upload affordance for guests ---------- */
+
+.empty-thread {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 24px;
+  text-align: center;
+  max-width: 460px;
+  margin: 0 auto;
+}
+
+.empty-thread__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-card));
+  margin-bottom: 4px;
+}
+
+.empty-thread__title {
+  margin: 0;
+  font-size: var(--font-size-body);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.empty-thread__body {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+}
+
+.empty-thread__action {
+  margin-top: 8px;
+  font: inherit;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--surface-card);
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.empty-thread__action:hover {
+  filter: brightness(1.06);
+}
+
+.empty-thread__popover {
+  margin-top: 12px;
+  width: min(360px, calc(100vw - 32px));
+}
+
+.empty-thread__popover .upload-popover {
+  width: 100%;
+  margin: 0;
+}
+
+.empty-thread__loading {
+  font-size: var(--font-size-caption);
+  color: var(--text-muted);
+}
+
+/* ---------- F6 §6 no-data messaging (07 edge case 2, not a generic empty) ---------- */
+
+.message--no-data {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface-page));
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.message--no-data svg {
+  color: var(--warning);
+  flex: none;
+  margin-top: 1px;
+}
+
+/* ---------- F6 §6 assistant "thinking" — small inline dots under the user's message ---------- */
+
+.thinking-indicator {
+  align-self: flex-end;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 6px 0;
+}
+
+.thinking-indicator__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  animation: thinking-bounce 1.2s ease-in-out infinite;
+}
+
+.thinking-indicator__dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.thinking-indicator__dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes thinking-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-indicator__dot {
+    animation: none;
+    opacity: 0.6;
+  }
+}

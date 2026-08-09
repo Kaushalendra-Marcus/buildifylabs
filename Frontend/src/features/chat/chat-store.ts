@@ -83,11 +83,18 @@ interface ChatState {
   pending: PendingKind | null;
   /** Name of the latest completed upload — the file chip above user bubbles. */
   activeFileName: string | null;
+  /** Whether the user has at least one completed data file (F6, specs/14 §6):
+   *  `null` = unknown (not yet checked), `true` = has data, `false` = none.
+   *  Drives the empty-thread invite (registered + no files → invite an upload)
+   *  and routes a no-data question through the no-data messaging (07 edge case
+   *  2) instead of a generic empty. */
+  hasData: boolean | null;
   addUserMessage(content: string, fileName?: string | null): void;
   addAssistantMessage(output: PipelineOutput): void;
   addSystemNotice(kind: SystemNoticeKind, resetAt?: number | null, text?: string | null): void;
   setPending(pending: PendingKind | null): void;
   setActiveFileName(fileName: string | null): void;
+  setHasData(hasData: boolean | null): void;
   clearChat(): void;
 }
 
@@ -101,6 +108,7 @@ export const useChatStore = create<ChatState>((set) => ({
   messages: [],
   pending: null,
   activeFileName: null,
+  hasData: null,
 
 addUserMessage: (content, fileName = null) =>
     set((state) => ({
@@ -129,6 +137,8 @@ addUserMessage: (content, fileName = null) =>
   setPending: (pending) => set({ pending }),
 
   setActiveFileName: (fileName) => set({ activeFileName: fileName }),
+
+  setHasData: (hasData) => set({ hasData }),
 
   clearChat: () => set({ messages: [], pending: null }),
 }));

@@ -45,6 +45,7 @@ function makeOutput(overrides: Partial<PipelineOutput> = {}): PipelineOutput {
 beforeEach(() => {
   localStorage.clear()
   useChatStore.getState().clearChat()
+  useChatStore.getState().setHasData(null)
   vi.clearAllMocks()
 })
 
@@ -299,6 +300,9 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
   })
 
   it('shows the named cold-start state on a session first request', () => {
+    // Real flow: the composer appends the user message, THEN marks pending —
+    // so the cold-start card renders inside the (non-empty) list.
+    useChatStore.getState().addUserMessage('Why did revenue drop last week?')
     useChatStore.getState().setPending('cold-start')
     render(<MessageStream />)
 
@@ -306,5 +310,63 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
       screen.getByText('Waking up the server — first load can take up to a minute'),
     ).toBeInTheDocument()
     expect(screen.getByRole('progressbar', { name: 'Waking up the server' })).toBeInTheDocument()
+  })
+
+  it('shows the small inline thinking indicator under the user message, distinct from cold start', () => {
+    useChatStore.getState().addUserMessage('How did Q2 go?')
+    useChatStore.getState().setPending('thinking')
+    render(<MessageStream />)
+
+    expect(
+      screen.getByRole('status', { name: 'Assistant is thinking' }),
+    ).toBeInTheDocument()
+    // Distinct from §5.7 cold start: no named wake-up card.
+    expect(
+      screen.queryByText('Waking up the server — first load can take up to a minute'),
+    ).not.toBeInTheDocument()
+  })
+
+  it('routes a no-data fallback through the no-data messaging, not a generic empty', () => {
+    // User provably has no data (F6, 07 edge case 2) — a degraded response is
+    // the no-data messaging, not "Couldn't produce a reliable answer".
+    useChatStore.getState().setHasData(false)
+    useChatStore.getState().addAssistantMessage(
+      makeOutput({
+        answer: '',
+        visuals: [],
+        confidence: 0,
+        sql_query: null,
+        data_preview: null,
+      }),
+    )
+    render(<MessageStream />)
+
+    expect(
+      screen.getByText(/haven't uploaded any data yet/),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText("Couldn't produce a reliable answer for that"),
+    ).not.toBeInTheDocument()
+  })
+
+  it('keeps the generic fallback notice when the user does have data', () => {
+    useChatStore.getState().setHasData(true)
+    useChatStore.getState().addAssistantMessage(
+      makeOutput({
+        answer: '',
+        visuals: [],
+        confidence: 0,
+        sql_query: null,
+        data_preview: null,
+      }),
+    )
+    render(<MessageStream />)
+
+    expect(
+      screen.getByText("Couldn't produce a reliable answer for that"),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText(/haven't uploaded any data yet/),
+    ).not.toBeInTheDocument()
   })
 })
