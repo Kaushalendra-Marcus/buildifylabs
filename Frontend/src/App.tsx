@@ -6,7 +6,7 @@
  * - `/` → the workspace (guards redirect to /signin when signed out)
  * - `/signin`, `/signup`, `/forgot-password`, `/reset-password`,
  *   `/verify-email` — auth screens (RequireGuest bounces signed-in users away)
- * - `/app` — the authenticated workspace (F2 replaces the placeholder shell)
+ * - `/app` — the Chat Workspace shell (F2)
  *
  * `useTokenRefresh` re-establishes a session from the stored 7-day refresh
  * token on app load (in-memory access token, F0 decision).
@@ -19,7 +19,7 @@ import { RequireAuth, RequireGuest } from './features/auth/route-guards';
 import { SigninScreen } from './features/auth/SigninScreen';
 import { SignupScreen } from './features/auth/SignupScreen';
 import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen';
-import { Workspace } from './features/dashboard/Workspace';
+import { ChatWorkspace } from './features/chat/ChatWorkspace';
 import { useTokenRefresh } from './hooks/useTokenRefresh';
 
 function AppRoutes() {
@@ -28,7 +28,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<Navigate to="/app" replace />} />
-      <Route path="/app" element={<RequireAuth><Workspace /></RequireAuth>} />
+      <Route path="/app" element={<RequireAuth><ChatWorkspace /></RequireAuth>} />
       <Route element={<RequireGuest><AuthLayout /></RequireGuest>}>
         <Route path="/signin" element={<SigninScreen />} />
         <Route path="/signup" element={<SignupScreen />} />

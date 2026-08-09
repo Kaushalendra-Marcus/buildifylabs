@@ -33,7 +33,7 @@ describe('App routing (F1 auth screens)', () => {
     ).toBeInTheDocument()
   })
 
-  it('guards the workspace: authenticated users land on /app with their plan badge', async () => {
+  it('guards the workspace: authenticated users land on the /app Chat Workspace shell', async () => {
     useAuthStore.getState().setSession({
       user: { id: 'user-1', email: 'ada@example.com', name: 'Ada', plan: 'free' },
       access_token: 'access-1',
@@ -42,9 +42,12 @@ describe('App routing (F1 auth screens)', () => {
     })
 
     render(<App />)
+    // F2 shell: the Chat Workspace replaces the F1 Workspace placeholder.
     expect(
-      await screen.findByText('The chat workspace lands in F2.'),
+      await screen.findByRole('button', { name: 'New chat' }),
     ).toBeInTheDocument()
+    expect(screen.getByRole('complementary', { name: 'Chat history' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Message stream' })).toBeInTheDocument()
     expect(screen.getByText('Ada')).toBeInTheDocument()
     expect(screen.getByText('free')).toBeInTheDocument()
   })

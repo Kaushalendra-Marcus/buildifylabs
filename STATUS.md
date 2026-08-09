@@ -8,15 +8,39 @@ Legend: ✅ completed · ⚠️ partial · ⛔ blocked · ⏸ deferred/paused
 
 ## Current task
 
-**Phase F2 — Chat Workspace shell** `[IMMEDIATE]` (master plan Part F; `specs/14` §3):
-Three regions, **one layout**, no separate drawer/workspace surface: **Header (56px)** — logo, quota
-chip, plan badge, account menu, "new chat"; **Chat history rail** (0 / 280px, **collapsed by default
-<768px**, **overlay** — doesn't push content); **Message stream** (the only place visuals render);
-**Composer** (fixed to bottom of the stream column). No resizable panel, no fullscreen affordance.
-Replaces the F1 `Workspace` placeholder. Depends on: F0. Acceptance: matches `specs/14` §3 layout;
-rail overlays on narrow viewports.
+**Phase F3 — Message stream components** `[IMMEDIATE]` (master plan Part F; `specs/14` §4):
+User message (4.1, right-aligned bubble, uploaded-file chip above), assistant normal answer (4.2,
+left-aligned no-bubble: `answer` prose → visual cards grid `repeat(auto-fit, minmax(240px, 1fr))`,
+`graph`+`table` span 2 cols → insights strip "Possible factors" collapsed by default → **trust
+footer** always visible: "Show the query" | confidence meter (render once value in 0..1) | "Flag
+this answer") — clarification (4.3, accent left edge, `options[]` pill buttons, tap sends verbatim)
+and fallback (4.4, neutral "Couldn't produce a reliable answer for that") — news-context row only
+when non-empty. Depends on: F0 (contract), F2. Acceptance: the four message types render per `specs/14`
+§4 with hedged labels; trust footer on every non-fallback/non-clarification answer. The F2 shell's
+`MessageStream` region (`src/features/chat/MessageStream.tsx`) is the seam.
 
 ## Completed tasks
+
+- **F2 — Chat Workspace shell** — done, test-verified (`npm run build`, `npm run lint`, `npm test`
+  all green — **22 tests**, up from 19; dev server boots on 5173):
+  - **`ChatWorkspace`** (`src/features/chat/ChatWorkspace.tsx`) — the three-region **one-layout**
+    shell (specs/14 §3), replacing the F1 `Workspace` placeholder at the same `/app` guard without
+    touching routes (`src/App.tsx` now imports it).
+  - **Header (56px)** (`ChatHeader`): logo + rail-toggle, BuildifyLabs brand, **quota chip**
+    (`QuotaChip` — "N of 4 left" from the client-side `useQuota` mirror; low-window warning state),
+    plan badge, **account menu** (identity + sign out), and a "New chat" button.
+  - **Chat history rail** (0/280px, `HistoryRail`): sits alongside the stream column on desktop;
+    **collapsed by default below 768px** (`useMediaQuery("(max-width: 767.98px)")`, new
+    `src/hooks/useMediaQuery.ts`) and rendered as an **overlay slide-in that never pushes content**,
+    with a dismiss backdrop. All styling uses the F0 design tokens.
+  - **Message stream** (MessageStream: `role="region"`, deliberately empty — "the only place visuals
+    render") and **Composer** (pinned to the foot of the stream column) ship as F3 / F5 seams. No
+    resizable panel, no fullscreen affordance.
+  - **Tests:** `ChatWorkspace.test.tsx` (3 tests — desktop rail open by default, narrow collapsed +
+    overlay toggle, overlay opens on narrow) + updated `App.test.tsx` (guards land on the shell:
+    New chat, rail, stream regions, user name, plan badge). Removed the F1 dashboard placeholder.
+  - **Docs updated in the same change:** `Frontend/CLAUDE.md` §1 (F2 in); master-plan Part F is a
+    planning doc and needs no edit here.
 
 - **F1 — Auth screens** — done, test-verified (`npm run build`, `npm run lint`, `npm test` all
   green — **19 tests**, up from 6; dev server on 5173):
@@ -185,12 +209,12 @@ rail overlays on narrow viewports.
 ## What's after
 
 F0/F1 completed the frontend foundations + type-contract freeze + the six auth flows; B4 completed
-the backend core loop. Next: the remaining frontend pre-checkpoint phases **F2–F6** (chat workspace
-shell, message stream, 7 visual components, composer, remaining states) — F2–F6 build against the
-**live** `POST /chat`/`/chat/flag`/`/files*` API through the F0 `src/api/*` seam. Before any
-POST-CHECKPOINT phase (B5+ / F7+): **define the "worth continuing" bar** (e.g. % of first-time users
-asking a 2nd question in-session) and put the core loop in front of real users (**🚩 CHECKPOINT**,
-`specs/00` §7).
+the backend core loop; F2 landed the Chat Workspace shell (specs/14 §3 layout, overlay rail on
+narrow). Next: the remaining frontend pre-checkpoint phases **F3–F6** (message stream, 7 visual
+components, composer, remaining states) — F3–F6 build against the **live**
+`POST /chat`/`/chat/flag`/`/files*` API through the F0 `src/api/*` seam. Before any POST-CHECKPOINT
+phase (B5+ / F7+): **define the "worth continuing" bar** (e.g. % of first-time users asking a 2nd
+question in-session) and put the core loop in front of real users (**🚩 CHECKPOINT**, `specs/00` §7).
 
 ## Blocked / deferred
 
@@ -273,16 +297,18 @@ is needed; no pytest-asyncio — each async scenario runs via `asyncio.run`):
   429 on window exhaustion and on lifetime cap.
 - **Migration check:** `alembic heads` = `b4code0000` (chain `9eec775a77e0 → b1code0000 → b3code0000 → b4code0000`).
 
-**Frontend (F1)** — from `Frontend/`: `npm run build` (tsc -b + vite build) ✅, `npm run lint` ✅,
-`npm run test` ✅ (**19 tests**, up from 6), `npm run dev` boots on **http://localhost:5173** ✅.
+**Frontend (F1–F2)** — from `Frontend/`: `npm run build` (tsc -b + vite build) ✅, `npm run lint` ✅,
+`npm run test` ✅ (**22 tests**, up from 19), `npm run dev` boots on **http://localhost:5173** ✅.
 Vitest harness (`vitest.config.ts`, jsdom, `src/test/setup.ts` with jest-dom + explicit RTL cleanup):
 `visuals.test.ts` (7 types), `token-storage.test.ts` (access in memory / refresh persisted / clear),
-`App.test.tsx` (routing guards: unauthenticated → sign-in; authenticated → workspace + badge),
-`auth-screens.test.tsx` (10 tests — signin verbatim error + session commit + stable guest
-`device_id`; signup min-8 + confirm guards; forgot/reset/verify happy paths + verbatim errors),
-`PlanBadge.test.tsx` (labels + unknown-plan fallback).
+`App.test.tsx` (routing guards: unauthenticated → sign-in; authenticated → F2 shell with rail +
+stream + New chat + badge), `auth-screens.test.tsx` (10 tests), `PlanBadge.test.tsx` (labels +
+unknown-plan fallback), **`ChatWorkspace.test.tsx`** (3 tests — desktop rail open by default;
+narrow <768px collapsed by default + overlay toggle; narrow overlay opens via header toggle;
+matchMedia stubbed since jsdom lacks it).
 
 ## Last updated
 
-2026-08-09 (F1 complete — six auth flows against the live backend with route guards, plan badge,
-verbatim generic errors; see `git diff` for the exact change set)
+2026-08-09 (F2 complete — Chat Workspace shell: header w/ quota chip + account menu, collapsible
+overlay history rail, message-stream + composer regions, route unchanged at `/app`; see `git diff`
+for the exact change set)

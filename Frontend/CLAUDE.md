@@ -11,7 +11,11 @@ foundations are in** — structure (`src/{api,types,lib/schemas,components,featu
 tokens, the API seam, and the frozen type contract (`src/lib/schemas/visuals.ts`) exist. **F1 auth
 screens are in** — signup / signin / Google (GIS) / guest (`device_id`) / verify-email /
 forgot- / reset-password, wired to the live backend with route guards (`src/App.tsx` routes them to
-`/app`, guarded). Auth, plan/quota, upload, and chat (`POST /chat`) have a live backend to build
+`/app`, guarded). **F2 Chat Workspace shell is in** — the `/app` surface is now the real shell
+(`src/features/chat/`, specs/14 §3): 56px header (logo, quota chip, plan badge, account menu, new
+chat), 0/280px chat-history rail (collapsed by default <768px, **overlay** on narrow viewports),
+message stream, and a composer pinned to the foot of the stream column — no resizable panel, no
+fullscreen affordance. Auth, plan/quota, upload, and chat (`POST /chat`) have a live backend to build
 against today (§3); payment needs mocked data behind a clean API seam until its route ships.
 
 ## 2. What to read, by task
