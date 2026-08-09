@@ -8,16 +8,48 @@ Legend: ✅ completed · ⚠️ partial · ⛔ blocked · ⏸ deferred/paused
 
 ## Current task
 
-**Phase F0 — Frontend foundations + type-contract freeze** `[IMMEDIATE]` (master plan Part F; pre-checkpoint,
-buildable now): make deliberate stack choices once (router, Zustand, fetch wrapper, CSS, Recharts, lucide-react,
-Google Identity Services, Vitest/RTL), stand up `src/{api,types,lib/schemas,components,features,hooks}`, replace
-boilerplate `App.tsx`, implement design-token roles (`specs/14` §7), and freeze the shared type contract —
-create `src/lib/schemas/visuals.ts` as the per-`visual_type` props source of truth (the Chat section of
-`Frontend/docs/type-contracts.md` was already corrected to the 7 types in B4; `visuals.ts` itself is the
-outstanding piece). Mirror auth/upload/chat/payment types in `src/types/`; build `api/*.ts` mocks behind the real
-contract signatures (auth/quota/upload/chat are now live and one-file-swappable).
+**Phase F1 — Auth screens** `[IMMEDIATE]` (master plan Part F; pre-checkpoint, live backend):
+Signup, Signin, Google (GIS), Guest (`device_id`), Verify-email (`GET /auth/verify-email?token`),
+Forgot-password, Reset-password (min 8 chars). `AuthResponse` handling (user + access + refresh)
+via the F0 `useAuth` hook/store; plan badge (`guest|free|pro`); display generic auth errors
+**verbatim** (anti-enumeration — never re-word client-side); route guards → authenticated workspace;
+styled with F0 tokens.
 
 ## Completed tasks
+
+- **F0 — Frontend foundations + type-contract freeze** — done, test-verified (`npm run build`,
+  `npm run lint`, `npm test` all green; dev server on 5173):
+  - **Stack decided once** (master plan Part F): **react-router** · **Zustand** (stores in
+    `features/*`) · thin **fetch wrapper** (`src/lib/http.ts`) · **plain CSS with custom-property
+    design tokens** · **Recharts** · **lucide-react** · **Google Identity Services** (script in
+    `index.html`) · **Vitest + React Testing Library** (tests).
+  - **Structure** `src/{api,types,lib/schemas,components,features,hooks}` created; boilerplate
+    `App.tsx`/`App.css`/`index.css` replaced (`App.tsx` is a router-wired placeholder awaiting F1).
+  - **Design tokens (`specs/14` §7 roles)** in `index.css`: `surface-page|card|raised`,
+    `text-primary|secondary|muted`, `accent`, `success|danger|warning`, type scale 13px captions /
+    15px body / 22px metric / 12px floor; light + dark themes; values are **placeholders flagged for
+    Figma reconciliation** (roles are the contract, values are follow-up).
+  - **Type-contract freeze (shared gate):** `src/lib/schemas/visuals.ts` landed as the
+    per-`visual_type` props **single source of truth** — discriminated union `VisualProps` +
+    `isVisualType` runtime guard, exactly the 7 B4 types. Auth/upload/chat/payment/contact types
+    mirrored in `src/types/` (upload now includes the B3 `error` field).
+  - **API seam** `src/api/{auth,files,chat,contact,payments}.ts`: auth/files/chat/contact hit the
+    **live** backend; payments is **mocked** to the contract shape (one-file swap at F7). Components
+    call `src/api/*` only — never `http` directly — so mock↔real is a one-file change.
+  - **Auth/token plumbing:** token-storage decision documented and implemented
+    (`src/lib/token-storage.ts`) — **access token in memory**, refresh token in localStorage
+    (backend expects a Bearer header; localStorage holds a risk for business data). `useAuth`,
+    `useTokenRefresh` (60 min access / 7 d refresh), `useQuota` (client-side rolling-window tracker
+    mirroring `specs/02`; the backend 429 stays authoritative) + Zustand stores in
+    `features/{auth,chat}`. Quota hook avoids `Date.now()` during render (react-hooks/purity);
+    the live countdown label is the F5 chip's job from the exposed `resetsAt` timestamp.
+  - **Docs updated in the same change:** `docs/type-contracts.md` (Upload `error` field + visuals.ts
+    landed note), `docs/structure.md` (stale "resets at UTC midnight" quota line → rolling-window /
+    `contact_form` 429 distinction), `Frontend/CLAUDE.md` (F0 stack, env vars, token storage),
+    `index.html` (title + GIS script), master plan (F0 status + contract-freeze line).
+  - **Tests (Vitest harness):** `visuals.test.ts` (exactly the 7 types; guard rejects the old 9-type
+    values), `token-storage.test.ts` (access in memory / refresh persisted / clear), `App.test.tsx`
+    (placeholder smoke). **6 tests, all green.**
 
 - **B4 — End-to-end `POST /chat`** — done, test-verified (**149 tests**, up from 112):
   - **`langchain_pipeline.py` migrated to the `specs/06` §3 contract** — 7 real `visual_type`s
@@ -123,12 +155,12 @@ contract signatures (auth/quota/upload/chat are now live and one-file-swappable)
 
 ## What's after
 
-B4 completed the last **pre-checkpoint** backend phase; the full backend core loop is live and test-verified.
-Next: the frontend pre-checkpoint phases F0–F6 (foundations, auth screens, chat workspace, 7 visual
-components, composer, upload UI) — now buildable against the **live** `POST /chat`/`/chat/flag`/`/files*`
-API instead of mocks. Before any POST-CHECKPOINT phase (B5+ / F7+): **define the "worth continuing" bar**
-(e.g. % of first-time users asking a 2nd question in-session) and put the core loop in front of real users
-(**🚩 CHECKPOINT**, `specs/00` §7).
+F0 completed the frontend foundations + type-contract freeze; B4 completed the backend core loop.
+Next: the frontend pre-checkpoint phases **F1–F6** (auth screens, chat workspace shell, message
+stream, 7 visual components, composer, remaining states) — F1–F6 build against the **live**
+`POST /chat`/`/chat/flag`/`/files*` API through the F0 `src/api/*` seam. Before any POST-CHECKPOINT
+phase (B5+ / F7+): **define the "worth continuing" bar** (e.g. % of first-time users asking a 2nd
+question in-session) and put the core loop in front of real users (**🚩 CHECKPOINT**, `specs/00` §7).
 
 ## Blocked / deferred
 
@@ -141,6 +173,17 @@ API instead of mocks. Before any POST-CHECKPOINT phase (B5+ / F7+): **define the
 
 ## Important decisions
 
+- **Frontend stack (F0, locked):** react-router · Zustand · thin fetch wrapper (`src/lib/http.ts`) ·
+  plain CSS + custom-property tokens · Recharts · lucide-react · Google Identity Services ·
+  Vitest/RTL. Applied consistently app-wide; see `Frontend/CLAUDE.md` §4.
+- **Token storage (F0):** access token **in memory**, refresh token in localStorage. Backend expects a
+  Bearer header (cookie would need a backend change); localStorage is an XSS-read vector for business
+  data, so the access token never touches it (`src/lib/token-storage.ts`). `useTokenRefresh`
+  rehydrates the in-memory access token from the stored refresh on load.
+- **Quota display is client-side mirror (F0):** the backend has no GET-quota endpoint, so `useQuota`
+  tracks the rolling window/lifetime client-side (`features/chat/quota-store.ts`, persisted) and is
+  kept honest by real API outcomes (successful `/chat` → `recordQuestion`; 429 body → the two
+  `applyWindowExhausted`/`applyLifetimeExhausted` states). The backend 429 remains authoritative.
 - **Per-user data tables (B2↔B3 co-design):** each user's uploaded data lands in a dedicated table
   `user_<uuid-hex>_data` (`executor.user_data_table_name()`). User-scoping is *structural* (that
   table only ever holds the owner's rows) plus post-generation `assert_user_scoped()` validation —
@@ -159,10 +202,11 @@ API instead of mocks. Before any POST-CHECKPOINT phase (B5+ / F7+): **define the
   the real Pinecone namespace is wired.
 - `.xlsx`/`.pdf` uploads pass validation but land `status="failed"` with a stored reason (parsing
   beyond CSV deferred); raw file is still persisted.
-- **7-type visual contract (B4, frozen):** `visual_type` is `Literal["metric","graph","table","comparison",
-  "insight","alert","status"]` with `props: Dict`; `src/lib/schemas/visuals.ts` (frontend, F0) is the
-  authoritative per-type props source of truth — backend only constrains the type values. `confidence` is
-  `Field(ge=0.0, le=1.0)`.
+- **7-type visual contract (B4, frozen; visuals.ts landed in F0):** `visual_type` is
+  `Literal["metric","graph","table","comparison","insight","alert","status"]` with `props: Dict`;
+  `src/lib/schemas/visuals.ts` (frontend) is now the landed authoritative per-type props source of
+  truth (discriminated union + runtime guard) — backend only constrains the type values.
+  `confidence` is `Field(ge=0.0, le=1.0)`.
 - **LLM never does arithmetic (B4, `specs/11` §2):** `stats.py` computes averages/totals/growth/ratios
   deterministically in pandas; `run_pipeline` receives them as `computed_numbers` to **narrate**, never
   calculate. `GROQ_MODEL` interim = `llama-3.3-70b-versatile`; retires **2026-08-16** → pick a durable model in B5.
@@ -179,7 +223,7 @@ API instead of mocks. Before any POST-CHECKPOINT phase (B5+ / F7+): **define the
 
 ## Tests / verification (this run)
 
-`pytest` run from `Backend/` — **149 tests, all green** (temp venv `/tmp/opencode/blvenv`,
+**Backend** — `pytest` run from `Backend/` — **149 tests, all green** (temp venv `/tmp/opencode/blvenv`,
 Python 3.12; `conftest.py` supplies dummy env vars incl. `GROQ_API_KEY`/`HF_API_KEY` so no `.env`
 is needed; no pytest-asyncio — each async scenario runs via `asyncio.run`):
 
@@ -199,6 +243,12 @@ is needed; no pytest-asyncio — each async scenario runs via `asyncio.run`):
   429 on window exhaustion and on lifetime cap.
 - **Migration check:** `alembic heads` = `b4code0000` (chain `9eec775a77e0 → b1code0000 → b3code0000 → b4code0000`).
 
+**Frontend (F0)** — from `Frontend/`: `npm run build` (tsc -b + vite build) ✅, `npm run lint` ✅,
+`npm run test` ✅ (**6 tests**), `npm run dev` boots on **http://localhost:5173** ✅.
+Vitest harness (`vitest.config.ts`, jsdom, `src/test/setup.ts` with jest-dom): `visuals.test.ts`
+(exactly the 7 types; guard rejects old 9-type values), `token-storage.test.ts` (access in memory /
+refresh persisted / clear), `App.test.tsx` (placeholder smoke).
+
 ## Last updated
 
-2026-08-09 (B4 complete — see `git diff` for the exact change set)
+2026-08-09 (F0 complete — frontend foundations + type-contract freeze; see `git diff` for the exact change set)

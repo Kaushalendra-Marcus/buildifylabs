@@ -42,7 +42,7 @@ back on. Decide deliberately between `localStorage` and a cookie-backed approach
 change too) — don't default to `localStorage` without weighing the tradeoff for a product handling
 business data.
 
-## Upload — `specs/04-file-upload-ingestion.md` (validator exists, route doesn't yet)
+## Upload — `specs/04-file-upload-ingestion.md` (live: `POST /files/upload`, `GET /files*`, B3)
 
 ```ts
 interface FileResponse {
@@ -50,9 +50,10 @@ interface FileResponse {
   file_name: string;
   file_type: string;
   file_size: number | null;
-  status: "processing" | "completed" | "failed";   // completed/failed transition not implemented server-side yet
+  status: "processing" | "completed" | "failed";
   pinecone_namespace: string | null;
-  created_at: string;                               // ISO 8601
+  error: string | null;                         // stored failure reason when status === "failed"
+  created_at: string;                           // ISO 8601
 }
 ```
 
@@ -118,9 +119,9 @@ backend's prompt tells the model to produce):
 - `status` → `{ state: "on_track" | "at_risk" | "off_track", detail: string }`
 
 Build one renderer per `visual_type` (7 total) plus the fallback for unrecognized values. When
-`clarification` is non-null, don't render charts — render the quick-pick prompt. Expect `props` to
-be loosely structured beyond these shapes until `visuals.ts` lands as the single source of truth
-(frontend F0).
+`clarification` is non-null, don't render charts — render the quick-pick prompt. The per-type prop
+shapes are authoritative in `src/lib/schemas/visuals.ts` — the single source of truth landed in F0
+and is what the renderers (F4) are built against; this section only summarizes them.
 
 ## Payment — `specs/03-payment-verification.md` (designed, not implemented)
 

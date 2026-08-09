@@ -77,8 +77,9 @@ blocked** on backend for immediate progress.
 **Both sides now agree on the 7 types** — B4 migrated the pipeline to
 `Literal["metric","graph","table","comparison","insight","alert","status"]` + `props` + bounded
 `confidence` + `clarification` + traceability fields, and `Frontend/docs/type-contracts.md`'s Chat
-section was corrected to match (`specs/14` §10 acceptance). Only `src/lib/schemas/visuals.ts` itself
-is still outstanding (frontend F0).
+section was corrected to match (`specs/14` §10 acceptance). **`src/lib/schemas/visuals.ts` itself
+landed in F0** — the authoritative per-`visual_type` props source of truth now exists (discriminated
+union + runtime guard).
 
 ### Sequencing dependencies
 - Frontend **F0–F1** (foundations + auth) and quota display depend only on the **live** backend → can
@@ -383,6 +384,15 @@ backend `GOOGLE_CLIENT_ID`), `VITE_RAZORPAY_KEY_ID` (public key, later). **Dev s
 ---
 
 ## Phase F0 — Foundations + type-contract freeze `[IMMEDIATE]`
+**Status: ✅ DONE (2026-08-09; frontend `build`/`lint`/Vitest green, 6 tests).** Stack decided once
+(react-router · Zustand · thin fetch wrapper · plain-CSS design tokens · Recharts · lucide-react ·
+GIS · Vitest/RTL); structure `src/{api,types,lib/schemas,components,features,hooks}` created;
+boilerplate replaced; `specs/14` §7 token roles implemented with placeholders (Figma
+reconciliation pending); `src/lib/schemas/visuals.ts` landed as the per-`visual_type` props source
+of truth; auth/upload/chat/payment/contact types mirrored in `src/types/`; `src/api/*.ts` seam
+(live auth/files/chat/contact, mocked payments); token-storage decision + `useAuth`,
+`useTokenRefresh`, `useQuota` hooks; `docs/type-contracts.md`, `docs/structure.md`, `CLAUDE.md`,
+`index.html` updated in the same change.
 **Goal:** make deliberate stack choices once, stand up the structure + API seam + design tokens, and
 **freeze the shared type contract** before any renderer is written.
 

@@ -33,9 +33,12 @@ call `api/chat.ts`'s `sendQuery()` and not know or care whether it's currently m
 - **Generic auth errors:** the backend deliberately returns the same message for "no such user" and
   "wrong password" (anti-enumeration). Display it as-is — don't try to infer or re-word a more
   specific client-side message, that defeats the design.
-- **429 vs. upgrade messaging:** distinguish "you're out for today, resets at UTC midnight"
-  (guest/free tier) from "upgrade to unlock more" — both currently surface as the same 429 status
-  code, so the UI needs to add the distinction itself based on the user's current plan.
+- **429 vs. 429:** the two quota states (specs/02 FR5, specs/14 §5.6) are both a 429 status code but
+  mean different things. Window exhausted (`contact_form` absent, resets after the rolling 6h window)
+  is an inline "come back later" notice with the reset time. Lifetime cap (`contact_form: true`, never
+  resets) is a distinct, more permanent-feeling card with the contact form inline. The UI must branch
+  on the `contact_form` flag in the 429 body — don't guess from the status code alone. There is no
+  upgrade messaging in MVP (payments paused, `specs/03`).
 
 ## What's already in the scaffold
 

@@ -6,10 +6,12 @@ read all of `docs/` or `specs/` up front** — use §2's table.
 
 ## 1. Orientation
 
-Frontend for **BuildifyLabs** (see `../Backend/CLAUDE.md` for the product description). **Still the
-unmodified Vite/React/TS scaffold** — `src/App.tsx` is template boilerplate, nothing product-
-specific exists yet. Auth, plan/quota, upload, and chat (`POST /chat`) have a live backend to build
-against today (§3); payment needs mocked data behind a clean API seam until its route ships.
+Frontend for **BuildifyLabs** (see `../Backend/CLAUDE.md` for the product description). **F0
+foundations are in** — structure (`src/{api,types,lib/schemas,components,features,hooks}`), design
+tokens, the API seam, and the frozen type contract (`src/lib/schemas/visuals.ts`) exist; `src/App.tsx`
+is still a placeholder awaiting the F1 auth screens. Auth, plan/quota, upload, and chat
+(`POST /chat`) have a live backend to build against today (§3); payment needs mocked data behind a
+clean API seam until its route ships.
 
 ## 2. What to read, by task
 
@@ -40,20 +42,24 @@ against today (§3); payment needs mocked data behind a clean API seam until its
 
 ## 4. Tech stack & scripts
 
-React 19 + TypeScript + Vite 8 + ESLint 9. Nothing else chosen yet (router, state, CSS, HTTP
-client, charts) — pick deliberately per screen, then stay consistent across the app.
+React 19 + TypeScript + Vite 8 + ESLint 9. Deliberate stack choices made once in F0 and held
+consistent: **react-router** · **Zustand** (stores in `features/*`) · a thin **fetch wrapper**
+(`src/lib/http.ts`) · **plain CSS with custom-property design tokens** (no framework; `index.css`) ·
+**Recharts** (charts) · **lucide-react** (icons) · **Google Identity Services** (sign-in, script in
+`index.html`) · **Vitest + React Testing Library** (tests).
 
 ```bash
 npm install && npm run dev     # http://localhost:5173 — keep this port, backend CORS is locked to it
-npm run build / npm run lint / npm run preview
+npm run build / npm run lint / npm test / npm run preview
 ```
 
 ## 5. Environment variables
 
-None exist yet. When wiring real API calls, you'll need: `VITE_API_BASE_URL`,
-`VITE_GOOGLE_CLIENT_ID` (must match the backend's `GOOGLE_CLIENT_ID`), `VITE_RAZORPAY_KEY_ID`
-(public key only, once payments are wired). Vite only exposes `VITE_`-prefixed vars to client code
-— never put a real secret in any frontend `.env`.
+`VITE_API_BASE_URL` (defaults to `http://localhost:8000`), `VITE_GOOGLE_CLIENT_ID` (must match the
+backend's `GOOGLE_CLIENT_ID`), `VITE_RAZORPAY_KEY_ID` (public key only, once payments are wired).
+Vite only exposes `VITE_`-prefixed vars to client code — never put a real secret in any frontend
+`.env`. Token storage: access token in memory only, refresh token in localStorage
+(`src/lib/token-storage.ts`).
 
 ## 6. Working with `specs/`
 

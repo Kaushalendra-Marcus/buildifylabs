@@ -4,10 +4,13 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <title>BuildifyLabs</title>
   </head>
   <body>
     <div id="root"></div>
+    <!-- Google Identity Services (F0 decision) — `google.accounts.id` is
+         initialized by the Google sign-in screen in F1. -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

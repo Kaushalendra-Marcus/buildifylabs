@@ -1,111 +1,90 @@
+/**
+ * Design tokens — BuildifyLabs (specs/14 §7 roles).
+ *
+ * CSS approach (F0 decision): plain CSS with custom-property tokens; no
+ * preprocessor or framework, applied consistently app-wide. The token ROLE
+ * names below are the contract; the exact hex/HSL/spacing VALUES are
+ * placeholders pending Figma reconciliation (specs/14 §7 note) — change the
+ * values here, never the role names.
+ *
+ * Roles to resolve (specs/14 §7): surface-page|card|raised, text-primary|
+ * secondary|muted, accent, success|danger|warning, and a type scale with
+ * nothing below 12px.
+ */
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  /* Surfaces — three elevation steps */
+  --surface-page: #f7f7f5;
+  --surface-card: #ffffff;
+  --surface-raised: #ffffff;
+  --elevation-card:
+    0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
+  --elevation-raised:
+    0 4px 8px rgba(16, 24, 40, 0.08), 0 8px 24px rgba(16, 24, 40, 0.12);
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  /* Text — body / supporting / captions */
+  --text-primary: #1c1917;
+  --text-secondary: #57534e;
+  --text-muted: #a8a29e;
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
+  /* Semantic colors */
+  --accent: #2563eb;
+  --success: #16a34a;
+  --danger: #dc2626;
+  --warning: #d97706;
+
+  /* Type scale — nothing below 12px (specs/14 §7) */
+  --font-size-xs: 12px;
+  --font-size-caption: 13px;
+  --font-size-body: 15px;
+  --font-size-metric: 22px;
+
+  --font-family:
+    system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  color: var(--text-primary);
+  background: var(--surface-page);
+  font-family: var(--font-family);
+  font-size: var(--font-size-body);
+  line-height: 1.5;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
 }
 
+/* Same roles, dark values — contrast on both themes (specs/14 cross-cutting) */
 @media (prefers-color-scheme: dark) {
   :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
+    --surface-page: #121212;
+    --surface-card: #1c1c1c;
+    --surface-raised: #262626;
+    --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --elevation-raised: 0 4px 12px rgba(0, 0, 0, 0.5);
 
-  #social .button-icon {
-    filter: invert(1) brightness(2);
+    --text-primary: #f5f5f4;
+    --text-secondary: #d6d3d1;
+    --text-muted: #a8a29e;
+
+    --accent: #60a5fa;
+    --success: #4ade80;
+    --danger: #f87171;
+    --warning: #fbbf24;
   }
 }
 
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
 body {
   margin: 0;
+  min-height: 100svh;
 }
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
-}
-
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
-}
-
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
 }
