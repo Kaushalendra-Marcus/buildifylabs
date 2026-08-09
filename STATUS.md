@@ -8,21 +8,58 @@ Legend: ✅ completed · ⚠️ partial · ⛔ blocked · ⏸ deferred/paused
 
 ## Current task
 
-**Phase F5 — Composer + ambient controls** `[IMMEDIATE]` (master plan Part F; `specs/14` §5):
-**Text input** (5.1 — multiline auto-grow, placeholder **"Why did revenue drop last week?"**),
-**source-scope selector** (5.2 — 3-way segmented **Your data / Live web / Both**, always visible,
-default **Your data**, persists across queries; non-`own_data` is gated/mocked until B7), **upload**
-(5.3 — icon button **absent** for guests; popover with drag-drop, "CSV, PDF, or XLSX", size hint 3MB
-free / 10MB pro, file list + `processing`/`completed`/`failed` status chips), **send** (5.4 —
-disabled **only when input is empty**, never for quota), **quota chip** (5.5 — "3 of 4 left · resets
-in 4h" from the rolling window), **two 429 states** (5.6 — window-exhausted inline notice with reset
-time, input stays enabled; lifetime cap → distinct permanent-feeling card with the inline contact
-form), **cold start** (5.7 — named "Waking up the server — first load can take up to a minute",
-first request of a session only, distinct from the per-message thinking indicator). Depends on: F2,
-quota live (B1). Acceptance: `specs/14` §5 behaviors; two distinct 429 states; upload absent for
-guests; send never blocked by quota.
+**Phase F6 — Remaining states** `[IMMEDIATE]` (master plan Part F; `specs/14` §6): **empty thread,
+guest** (invite a question — no upload affordance at all), **empty thread, registered, no files**
+(invite an upload "Add a CSV, PDF, or spreadsheet to get started"; a no-data question routes through
+the no-data messaging, not a generic empty), **assistant "thinking"** indicator (small inline
+indicator under the user's message — distinct from the F5 cold-start). Depends on: F2–F5.
+Acceptance: all `specs/14` §6 states present.
 
 ## Completed tasks
+
+- **F5 — Composer + ambient controls** — done, test-verified (`npm run build`, `npm run lint`,
+  `npm test` all green — **56 tests**, up from 38; dev server boots on 5173):
+  - **`Composer.tsx`** (rebuilt) — all of `specs/14` §5: **multiline auto-grow textarea** (5.1,
+    capped, scrolls past max; placeholder **"Why did revenue drop last week?"**, Shift+Enter makes
+    a newline), **3-way segmented source-scope selector** (5.2 — Your data / Live web / Both,
+    always visible, default `own_data`, persisted to localStorage via new `scope-store.ts`
+    (zustand persist); Live web/Both are **gated** until B7 — a hint shows "not available yet …
+    answers fall back to your own data", the backend's honest fallback answers, never a silent
+    switch), **upload button ABSENT — not disabled — for `guest` plans** (5.3; opens the
+    `UploadPopover`), **Send disabled ONLY when the input is empty** (5.4 — quota never disables
+    it; the 429 flows through as a proper notice). `useChatStore` grew **system messages**
+    (`window-exhausted` / `lifetime-cap` / `error`), a `pending` field, and `activeFileName` for
+    the user-bubble file chip.
+  - **`UploadPopover.tsx`** (new, 5.3): drag-drop zone + browse (`accept=".csv,.pdf,.xlsx"`),
+    hint "CSV, PDF, or XLSX · 3MB free / 10MB pro" from `plan`, live `GET /files` list with
+    `processing`/`completed`/`failed` status chips and the stored `failed` reason; a completed
+    upload becomes the file chip above the next user message (`setActiveFileName`).
+  - **Two distinct 429 states** (5.6) rendered **in the message stream** from the store's system
+    notices: **`WindowExhaustedNotice`** — transient inline notice with a **live reset-time
+    countdown** (input stays enabled), and **`LifetimeCapNotice`** — a permanent-feeling card
+    (not a toast) with the inline **name/email/message → `POST /contact`** form and the
+    "Thanks — we'll be in touch." reply. Composer send handles the `isQuotaError` branch →
+    `applyWindowExhausted`/`applyLifetimeExhausted` + respective notice; other failures surface a
+    small transient error notice (generic defensive text via `getErrorMessage`).
+  - **Cold start** (5.7) — `MessageStream` renders `ColdStartNotice` ("Waking up the server —
+    first load can take up to a minute", determinate-feeling progress) whenever the session's
+    **first** send is in-flight (`pending === 'cold-start'`; a module flag marks it done) —
+    distinct from the per-message thinking indicator (F6's job).
+  - **QuotaChip (5.5)** now renders the live "· resets in 4h" countdown from the client mirror's
+    `resetsAt` via a new ticking `useNow` hook (`src/hooks/useNow.ts` + `src/lib/format.ts`
+    `formatRemaining` — no `Date.now()` during render, react-hooks/purity).
+  - **CSS:** new `composer.css` (segmented control, auto-grow input, icon/send buttons, popover
+    layer + dropzone + status chips) and `message-stream.css` additions (window/lifetime notice,
+    cold-start sweep, `prefers-reduced-motion`). Tokens only.
+  - **Tests:** `Composer.test.tsx` (7 — placeholder + 3-way selector, send w/ scope + quota
+    recording + store messages, Enter sends, upload absent for guests, upload popover + size
+    hint, scope persistence via localStorage + gated hint, window-429 notice + input stays
+    enabled, lifetime-429 → lifetime card notice), `UploadPopover.test.tsx` (3 — list files w/
+    status chips + failed reason, 3MB/10MB caps by plan, upload via picker + active-file),
+    `MessageStream.test.tsx` (+4 — window-exhausted notice w/ countdown, lifetime card + contact
+    form, form POSTs `/contact` + thanks, cold-start), `QuotaChip.test.tsx` (3). **56 total.**
+  - **Docs updated in the same change:** `Frontend/CLAUDE.md` §1 (F5 in). Master-plan Part F is a
+    planning doc and needs no edit here.
 
 - **F4 — Seven visual components** — done, test-verified (`npm run build`, `npm run lint`,
   `npm test` all green — **38 tests**, up from 30; dev server boots on 5173):
@@ -270,9 +307,10 @@ guests; send never blocked by quota.
 F0/F1 completed the frontend foundations + type-contract freeze + the six auth flows; B4 completed
 the backend core loop; F2 landed the Chat Workspace shell; F3 landed the four message-stream
 components against the live `POST /chat`/`/chat/flag` API; F4 landed the 7 visual components into
-the F3 grid seam (plain lookup + unknown-type fallback). Next: the remaining frontend
-pre-checkpoint phases **F5–F6** (composer + ambient controls, remaining states) — they build against
-the **live** `/chat`/`/chat/flag`/`/files*` API through the F0
+the F3 grid seam (plain lookup + unknown-type fallback); F5 landed the composer + ambient controls
+(specs/14 §5) against the live `/chat` + `/files*` + `/contact` API. Next: the last frontend
+pre-checkpoint phase **F6 — remaining states** (empty-thread guest / registered-no-files, and the
+assistant "thinking" indicator) — building on F2–F5 against the live
 `src/api/*` seam. Before any POST-CHECKPOINT
 phase (B5+ / F7+): **define the "worth continuing" bar** (e.g. % of first-time users asking a 2nd
 question in-session) and put the core loop in front of real users (**🚩 CHECKPOINT**, `specs/00` §7).
@@ -358,8 +396,8 @@ is needed; no pytest-asyncio — each async scenario runs via `asyncio.run`):
   429 on window exhaustion and on lifetime cap.
 - **Migration check:** `alembic heads` = `b4code0000` (chain `9eec775a77e0 → b1code0000 → b3code0000 → b4code0000`).
 
-**Frontend (F1–F4)** — from `Frontend/`: `npm run build` (tsc -b + vite build) ✅, `npm run lint` ✅,
-`npm test` ✅ (**38 tests**, up from 30), `npm run dev` boots on **http://localhost:5173** ✅.
+**Frontend (F1–F5)** — from `Frontend/`: `npm run build` (tsc -b + vite build) ✅, `npm run lint` ✅,
+`npm test` ✅ (**56 tests**, up from 38), `npm run dev` boots on **http://localhost:5173** ✅.
 Vitest harness (`vitest.config.ts`, jsdom, `src/test/setup.ts` with jest-dom + explicit RTL cleanup +
 ResizeObserver stub for Recharts):
 `visuals.test.ts` (7 types), `token-storage.test.ts` (access in memory / refresh persisted / clear),
@@ -367,19 +405,29 @@ ResizeObserver stub for Recharts):
 stream + New chat + badge), `auth-screens.test.tsx` (10 tests), `PlanBadge.test.tsx` (labels +
 unknown-plan fallback), `ChatWorkspace.test.tsx` (3 tests — desktop rail open by default;
 narrow <768px collapsed by default + overlay toggle; narrow overlay opens via header toggle;
-matchMedia stubbed since jsdom lacks it), **`MessageStream.test.tsx`** (8 tests — the four
-`specs/14` §4 message types: user bubble + file chip above; normal answer w/ visual grid +
-graph-wide span + collapsed insights strip + trust footer + news row; insights expand; "Show the
-query" reveals SQL + preview table; flag hits the live `/chat/flag` write path; flag disabled with
-tooltip when no query log; clarification pill tap sends verbatim; fallback notice + no trust footer),
+matchMedia stubbed since jsdom lacks it), **`MessageStream.test.tsx`** (12 tests — the four
+`specs/14` §4 message types + the F5 §5.6 system notices + §5.7 cold start: user bubble + file chip
+above; normal answer w/ visual grid + graph-wide span + collapsed insights strip + trust footer +
+news row; insights expand; "Show the query" reveals SQL + preview table; flag hits the live
+`/chat/flag` write path; flag disabled with tooltip when no query log; clarification pill tap sends
+verbatim; fallback notice + no trust footer; window-exhausted notice w/ reset countdown; lifetime
+cap card + contact form; form POSTs `/contact` + thanks; cold-start named state),
 **`VisualCard.test.tsx`** (8 tests — the plain type→component lookup renders each of the 7 types
 inline: metric value + change badge, graph line/bar/pie/area, table with sticky headers, comparison
 value/delta/group bars, insight text+context, alert level styling, status pill; unknown type degrades
-to the fallback).
+to the fallback), **`Composer.test.tsx`** (7 — §5.1 auto-grow + real placeholder, §5.2 scope
+segments default/persist + gated hint, §5.3 upload absent for guests + popover size hint, §5.4 send
+disabled only when empty + Enter sends, §5.6 window-429 → notice + input stays enabled, lifetime-429
+→ lifetime card notice), **`UploadPopover.test.tsx`** (3 — list w/ status chips + failed reason,
+3MB/10MB caps by plan, upload via picker + active-file), **`QuotaChip.test.tsx`** (3 — §5.5 "N of 4
+left" + live "· resets in", low-warning state, no countdown before first question).
 
 ## Last updated
 
-2026-08-09 (F4 complete — seven visual components in `src/components/visuals/` built to `visuals.ts`
-props + `VisualCard` plain type→component lookup + `UnknownVisualCard` fallback filled into the F3
-grid seam, Recharts graph + `visuals.css` tokens; 8 new tests; see `git diff` for the exact change
-set)
+2026-08-09 (F5 complete — composer + ambient controls in `src/features/chat/`: auto-grow text input
+with real-example placeholder, persistent 3-way source-scope selector (Live web/Both B7-gated),
+upload button absent for guests + `UploadPopover` (drag-drop, CSV/PDF/XLSX, 3MB/10MB hints, status
+chips + failed reason), send disabled only when empty, the two distinct 429 states (window-exhausted
+inline notice with live reset countdown / lifetime-cap permanent card with inline `/contact` form),
+QuotaChip "· resets in 4h" live countdown, and the cold-start first-load state — via
+`scope-store.ts`, `useNow`, `composer.css`; 18 new tests; see `git diff` for the exact change set)

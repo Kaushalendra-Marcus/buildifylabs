@@ -12,10 +12,15 @@ import { MessageStream } from './MessageStream'
 import { useChatStore } from './chat-store'
 import type { PipelineOutput } from '../../types/chat'
 import { flagAnswer } from '../../api/chat'
+import { sendContact } from '../../api/contact'
 
 vi.mock('../../api/chat', () => ({
   sendQuery: vi.fn(),
   flagAnswer: vi.fn(),
+}))
+
+vi.mock('../../api/contact', () => ({
+  sendContact: vi.fn(),
 }))
 
 function makeOutput(overrides: Partial<PipelineOutput> = {}): PipelineOutput {
@@ -242,5 +247,64 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
     expect(
       screen.queryByRole('button', { name: 'Show the query' }),
     ).not.toBeInTheDocument()
+  })
+
+  it('renders the window-exhausted inline 429 notice with its reset countdown', async () => {
+    useChatStore.getState().addSystemNotice('window-exhausted', Date.now() + 4 * 60 * 60 * 1000)
+
+    render(<MessageStream />)
+
+    expect(
+      screen.getByText(/You've used your 4 questions for this 6-hour window/),
+    ).toBeInTheDocument()
+    // Live countdown to the window reset — the input stays enabled (§5.6).
+    const remaining = await screen.findByText(
+      (_text, element) => element?.tagName === 'STRONG' && /^in /.test(element.textContent ?? ''),
+    )
+    expect(remaining.textContent).toMatch(/^in \d/)
+  })
+
+  it('renders the permanent lifetime-cap card with the inline contact form, distinct from the window notice', () => {
+    useChatStore.getState().addSystemNotice('lifetime-cap')
+
+    render(<MessageStream />)
+
+    expect(
+      screen.getByText("You've reached the 100-question limit for now").closest(
+        '.lifetime-cap-notice__heading',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Name')).toBeInTheDocument()
+    expect(screen.getByLabelText('Email')).toBeInTheDocument()
+    expect(screen.getByLabelText('Message')).toBeInTheDocument()
+  })
+
+  it('the lifetime-cap form POSTs /contact and shows the thanks message', async () => {
+    vi.mocked(sendContact).mockResolvedValue({ message: "Thanks — we'll be in touch." })
+    useChatStore.getState().addSystemNotice('lifetime-cap')
+    const user = userEvent.setup()
+    render(<MessageStream />)
+
+    await user.type(screen.getByLabelText('Name'), 'Ada')
+    await user.type(screen.getByLabelText('Email'), 'ada@example.com')
+    await user.type(screen.getByLabelText('Message'), 'I need more questions.')
+    await user.click(screen.getByRole('button', { name: 'Tell us' }))
+
+    expect(sendContact).toHaveBeenCalledWith({
+      name: 'Ada',
+      email: 'ada@example.com',
+      message: 'I need more questions.',
+    })
+    expect(await screen.findByText("Thanks — we'll be in touch.")).toBeInTheDocument()
+  })
+
+  it('shows the named cold-start state on a session first request', () => {
+    useChatStore.getState().setPending('cold-start')
+    render(<MessageStream />)
+
+    expect(
+      screen.getByText('Waking up the server — first load can take up to a minute'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('progressbar', { name: 'Waking up the server' })).toBeInTheDocument()
   })
 })

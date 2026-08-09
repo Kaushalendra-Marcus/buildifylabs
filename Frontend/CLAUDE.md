@@ -26,7 +26,18 @@ classes are the seams F4's visual lookup consumes. **F4 seven visual components 
 `src/components/visuals/` (`MetricCard`, `GraphCard` [Recharts line/bar/pie/area], `BusinessSummaryTable`,
 `ComparisonCard`, `InsightCard`, `AlertList`, `StatusBadge`) built to `visuals.ts` props; `VisualCard` is
 the **plain type→component lookup** the F3 grid seam calls, with `UnknownVisualCard` as the defensive
-fallback for an unrecognized `visual_type`. Auth, plan/quota, upload, and chat (`POST /chat`) have a live backend to build
+fallback for an unrecognized `visual_type`. **F5 the composer + ambient controls are in** —
+`src/features/chat/Composer.tsx` (specs/14 §5) now delivers the multiline auto-grow text input
+(placeholder "Why did revenue drop last week?"), the always-visible **3-way source-scope selector**
+(`scope-store.ts`, defaults to/persists "Your data"; Live web/Both are B7-gated with a hint, never
+silently switched), a **upload button that is entirely ABSENT for `guest` plans** opening the
+`UploadPopover` (drag-drop, "CSV, PDF, or XLSX", 3MB-free/10MB-pro hint, file list with
+processing/completed/failed chips + stored failed reason), **Send disabled ONLY when empty — never
+by quota**, the **two distinct 429 states** in the stream (window-exhausted inline notice with a live
+reset-time countdown vs the permanent lifetime-cap CARD with the inline `POST /contact` form), the
+QuotaChip's live **"· resets in 4h"** label, and the **cold-start** first-request wake-up state —
+all via the Zustand `chat-store` (system notices + `pending` + `activeFileName`) and `useNow`
+(ticking countdowns; no `Date.now()` during render). Auth, plan/quota, upload, and chat (`POST /chat`) have a live backend to build
 against today (§3); payment needs mocked data behind a clean API seam until its route ships.
 
 ## 2. What to read, by task

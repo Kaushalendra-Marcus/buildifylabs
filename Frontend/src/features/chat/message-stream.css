@@ -376,3 +376,186 @@
     animation: none;
   }
 }
+
+/* ---------- F5 §5.6 quota 429 notices — two DISTINCT states ----------
+ * Window-exhausted: a transient inline notice (resets in…), the input stays
+ * enabled. Lifetime-cap: a permanent-feeling CARD with the inline contact
+ * form — a ceiling, not a rate limit. Tokens only. */
+
+.quota-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface-page));
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.quota-notice--window svg {
+  color: var(--warning);
+  flex: none;
+}
+
+.quota-notice--window strong {
+  color: var(--text-primary);
+}
+
+.quota-notice--error {
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface-page));
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  color: var(--danger);
+}
+
+.lifetime-cap-notice {
+  background: var(--surface-card);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 12px;
+  box-shadow: var(--elevation-card);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lifetime-cap-notice__heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.lifetime-cap-notice__heading svg {
+  color: var(--accent);
+}
+
+.lifetime-cap-notice__blurb {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+}
+
+.lifetime-cap-notice__form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.lifetime-cap-notice__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.lifetime-cap-notice__form input,
+.lifetime-cap-notice__form textarea {
+  font: inherit;
+  font-size: var(--font-size-body);
+  color: var(--text-primary);
+  background: var(--surface-page);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 40%, transparent);
+  border-radius: 8px;
+  padding: 7px 10px;
+  resize: vertical;
+}
+
+.lifetime-cap-notice__form input:focus,
+.lifetime-cap-notice__form textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+  border-color: transparent;
+}
+
+.lifetime-cap-notice__form button {
+  align-self: flex-start;
+  font: inherit;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--surface-card);
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.lifetime-cap-notice__form button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.lifetime-cap-notice__sent {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--success);
+}
+
+.lifetime-cap-notice__error {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--danger);
+}
+
+/* ---------- F5 §5.7 cold start: named, determinate-feeling, first load only ---------- */
+
+.cold-start-notice {
+  align-self: stretch;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--surface-card);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 25%, transparent);
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cold-start-notice__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-caption);
+}
+
+.cold-start-notice__row svg {
+  color: var(--accent);
+  flex: none;
+}
+
+.cold-start-notice__progress {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 25%, transparent);
+  overflow: hidden;
+}
+
+.cold-start-notice__progress-bar {
+  height: 100%;
+  width: 40%;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: cold-start-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes cold-start-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cold-start-notice__progress-bar {
+    animation: none;
+  }
+}

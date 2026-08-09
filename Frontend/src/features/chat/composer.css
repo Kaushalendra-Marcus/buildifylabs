@@ -1,0 +1,313 @@
+/* Composer + ambient controls (F5) — specs/14 §5. Text input (5.1),
+ * source-scope selector (5.2), upload (5.3), send (5.4, disabled only when
+ * empty), quota chip label (5.5, in chat-workspace.css), the two 429 states +
+ * cold start render in the stream (message-stream.css). Tokens only; never
+ * hardcode colors/sizes here. Popover sits one elevation step above cards
+ * (specs/14 §7: surface-raised). */
+
+.composer {
+  flex: none;
+  position: relative;
+  padding: 10px 16px 14px;
+  background: var(--surface-card);
+  border-top: 1px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
+}
+
+/* ----- 5.2 gating hint (Live web / Both are B7-deferred, never silent) ----- */
+
+.composer__gated-hint {
+  margin: 0 0 8px;
+  font-size: var(--font-size-xs);
+  color: var(--warning);
+}
+
+/* ----- Source-scope selector: always visible, segmented, accent active ----- */
+
+.composer__scope {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: 8px;
+  background: color-mix(in srgb, var(--text-secondary) 8%, transparent);
+  border-radius: 999px;
+}
+
+.composer__scope-segment {
+  font: inherit;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.composer__scope-segment:hover {
+  color: var(--text-primary);
+}
+
+.composer__scope-segment[aria-pressed='true'] {
+  color: var(--surface-card);
+  background: var(--accent);
+  font-weight: 600;
+}
+
+/* ----- Input row: auto-grow textarea + upload + send ----- */
+
+.composer__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.composer__input {
+  flex: 1;
+  min-width: 0;
+  max-height: 160px;
+  resize: none;
+  font: inherit;
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: var(--surface-page);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 40%, transparent);
+  border-radius: 12px;
+  padding: 9px 12px;
+}
+
+.composer__input::placeholder {
+  color: var(--text-muted);
+}
+
+.composer__input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+  border-color: transparent;
+}
+
+.composer__icon-button,
+.composer__send {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.composer__icon-button {
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--text-muted) 40%, transparent);
+}
+
+.composer__icon-button:hover,
+.composer__icon-button[aria-expanded='true'] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-card));
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+.composer__send {
+  color: var(--surface-card);
+  background: var(--accent);
+  border: none;
+}
+
+.composer__send:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.composer__send:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ----- Upload popover layer (raised above everything in the column) ----- */
+
+.composer__popover-layer {
+  position: absolute;
+  inset: auto 0 100% auto;
+  right: 0;
+  bottom: 100%;
+  z-index: 60;
+}
+
+.composer__popover-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 58;
+  border: none;
+  padding: 0;
+  background: color-mix(in srgb, var(--text-primary) 20%, transparent);
+  cursor: default;
+}
+
+.upload-popover {
+  position: relative;
+  z-index: 59;
+  width: min(360px, calc(100vw - 32px));
+  margin: 0 12px 12px auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--surface-raised);
+  border-radius: 12px;
+  box-shadow: var(--elevation-raised);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
+}
+
+.upload-popover__title {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.upload-popover__dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 12px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--accent) 4%, var(--surface-card));
+}
+
+.upload-popover__dropzone[data-dragging='true'] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-card));
+}
+
+.upload-popover__dropzone svg {
+  color: var(--accent);
+}
+
+.upload-popover__dropzone-text {
+  font-size: var(--font-size-caption);
+}
+
+.upload-popover__browse {
+  font: inherit;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.upload-popover__file-input {
+  display: none;
+}
+
+.upload-popover__hints,
+.upload-popover__uploading {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.upload-popover__error {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--danger);
+}
+
+.upload-popover__list {
+  margin: 0;
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+}
+
+.upload-popover__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  background: var(--surface-page);
+  border-radius: 8px;
+  padding: 6px 8px;
+  flex-wrap: wrap;
+}
+
+.upload-popover__item svg {
+  color: var(--text-muted);
+  flex: none;
+}
+
+.upload-popover__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-popover__status {
+  flex: none;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+}
+
+.upload-popover__status[data-status='processing'] {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+
+.upload-popover__status[data-status='completed'] {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+}
+
+.upload-popover__status[data-status='failed'] {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.upload-popover__reason {
+  flex-basis: 100%;
+  color: var(--danger);
+}
+
+.upload-popover__close {
+  align-self: flex-end;
+  font: inherit;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+@media (max-width: 767.98px) {
+  .composer__popover-layer {
+    left: 0;
+  }
+  .upload-popover {
+    margin: 0 12px 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer * {
+    transition: none;
+    animation: none;
+  }
+}
