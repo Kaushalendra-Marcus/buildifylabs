@@ -1,0 +1,378 @@
+/* Message stream component styles (F3) — specs/14 §4. Four message types:
+ * user (4.1, right-aligned bubble + file chip above), assistant normal answer
+ * (4.2, no bubble: prose, visual-cards grid, insights row, trust bar),
+ * clarification (4.3, accent left edge, pill options), fallback (4.4, neutral
+ * notice). Tokens only. The `.message-stream` base rule lives in
+ * chat-workspace.css. */
+
+.message-stream__list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px 24px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+/* ---------- Message wrapper ---------- */
+
+.message {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- 4.1 User message ---------- */
+
+.message--user {
+  align-items: flex-end;
+}
+
+.message__file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 280px;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 45%, transparent);
+  border-radius: 999px;
+  padding: 3px 10px;
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message__user-bubble {
+  max-width: min(70%, 560px);
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-card));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius: 14px 14px 4px 14px;
+  padding: 10px 14px;
+  white-space: pre-wrap;
+}
+
+/* ---------- 4.2 Assistant normal answer (no bubble) ---------- */
+
+.message--assistant-answer {
+  align-items: stretch;
+  gap: 14px;
+}
+
+.message__answer-prose {
+  margin: 0;
+  font-size: var(--font-size-body);
+  line-height: 1.55;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+/* Visual cards grid: repeat(auto-fit, minmax(240px, 1fr));
+ * graph + table span two columns (specs/14 §4.2). */
+.visual-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.visual-cards-grid__card {
+  background: var(--surface-card);
+  border-radius: 10px;
+  box-shadow: var(--elevation-card);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
+  padding: 14px;
+  min-height: 120px;
+}
+
+.visual-cards-grid__card--wide {
+  grid-column: span 2;
+}
+
+@media (max-width: 767.98px) {
+  .visual-cards-grid__card--wide {
+    grid-column: span 1;
+  }
+}
+
+.visual-cards-grid__title {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+}
+
+/* ---------- Insights strip ---- "Possible factors" (hedged, specs/10 §2) ---------- */
+
+.insights-strip {
+  border-left: 2px solid color-mix(in srgb, var(--text-muted) 40%, transparent);
+  padding-left: 10px;
+}
+
+.insights-strip__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 2px 6px 2px 0;
+  cursor: pointer;
+}
+
+.insights-strip__toggle:hover {
+  color: var(--text-primary);
+}
+
+.insights-strip__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.insights-strip__group {
+  margin: 0;
+}
+
+.insights-strip__heading {
+  margin: 0 0 4px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+
+.insights-strip__list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.insights-strip__list li {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+/* ---------- Trust footer ---- always visible on normal answers ---------- */
+
+.trust-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.trust-footer__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.trust-footer__action:hover:not(:disabled) {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.trust-footer__action:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.trust-footer__confidence {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trust-footer__confidence-label {
+  color: var(--text-muted);
+}
+
+.trust-footer__confidence-track {
+  position: relative;
+  width: 90px;
+  height: 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 25%, transparent);
+  overflow: hidden;
+}
+
+.trust-footer__confidence-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  background: var(--success);
+  border-radius: 999px;
+}
+
+.trust-footer__confidence-value {
+  min-width: 34px;
+  color: var(--text-secondary);
+}
+
+.trust-footer__error {
+  color: var(--danger);
+}
+
+.trust-footer__query {
+  flex-basis: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.trust-footer__details summary {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+
+.trust-footer__sql {
+  margin: 0;
+  padding: 10px 12px;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  background: var(--surface-page);
+  border-radius: 8px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+.trust-footer__table-wrap {
+  max-height: 220px;
+  overflow: auto;
+  background: var(--surface-page);
+  border-radius: 8px;
+}
+
+.trust-footer__table {
+  border-collapse: collapse;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+.trust-footer__table th,
+.trust-footer__table td {
+  padding: 4px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text-muted) 25%, transparent);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.trust-footer__table th {
+  color: var(--text-muted);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  background: var(--surface-page);
+}
+
+/* ---------- News context (only when non-empty; "from the web") ---------- */
+
+.news-context-row {
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-page));
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.news-context-row__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.news-context-row__list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.news-context-row__list li {
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+/* ---------- 4.3 Clarification (accent left edge, pill options) ---------- */
+
+.message--clarification {
+  align-items: stretch;
+  border-left: 3px solid var(--accent);
+  padding-left: 12px;
+}
+
+.message__clarification-question {
+  margin: 0 0 8px;
+  font-size: var(--font-size-body);
+  color: var(--text-primary);
+}
+
+.message__clarification-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.message__clarification-option {
+  font: inherit;
+  font-size: var(--font-size-caption);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-card));
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.message__clarification-option:hover {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-card));
+}
+
+/* ---------- 4.4 Fallback (neutral notice) ---------- */
+
+.message--fallback {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+
+.message--fallback svg {
+  color: var(--text-muted);
+  flex: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message * {
+    transition: none;
+    animation: none;
+  }
+}

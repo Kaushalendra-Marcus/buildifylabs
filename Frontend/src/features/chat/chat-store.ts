@@ -1,0 +1,84 @@
+/**
+ * Chat message store (Zustand) — the source of truth for the message stream
+ * (specs/14 §4). The four message types live here as a discriminated union:
+ *   - user (4.1): right-aligned bubble + optional uploaded-file chip above
+ *   - assistant:kind="answer" (4.2): structured answer block
+ *   - assistant:kind="clarification" (4.3): quick-pick prompt
+ *   - assistant:kind="fallback" (4.4): degraded neutral notice
+ *
+ * Assistant messages always carry the raw `PipelineOutput`; `classifyOutput`
+ * decides at render time which of the three assistant kinds it is — a
+ * `clarification` response is never treated as an answer, and a degraded
+ * fallback (empty visuals + confidence 0) is never shown as a normal answer
+ * block next to an empty confidence meter (specs/14 §4.4).
+ */
+import { create } from 'zustand';
+import type { PipelineOutput } from '../../types/chat';
+
+export interface UserChatMessage {
+  id: string;
+  role: 'user';
+  content: string;
+  /** Uploaded-file chip rendered ABOVE the bubble (4.1) — F5 fills it. */
+  fileName?: string | null;
+}
+
+export interface AssistantChatMessage {
+  id: string;
+  role: 'assistant';
+  output: PipelineOutput;
+}
+
+export type ChatMessage = UserChatMessage | AssistantChatMessage;
+
+export type AssistantMessageKind =
+  | 'answer'
+  | 'clarification'
+  | 'fallback';
+
+/** Map a `PipelineOutput` to the assistant message kind it renders as.
+ *  A non-null `clarification` always wins (quick-pick prompt, never an
+ *  answer block); otherwise an empty-visuals + confidence 0 pipeline is the
+ *  degraded fallback; everything else is a normal answer (specs/14 §4.2–4.4). */
+export function classifyAssistantOutput(
+  output: PipelineOutput,
+): AssistantMessageKind {
+  if (output.clarification) return 'clarification';
+  if (output.visuals.length === 0 && output.confidence === 0) return 'fallback';
+  return 'answer';
+}
+
+interface ChatState {
+  messages: ChatMessage[];
+  addUserMessage(content: string, fileName?: string | null): void;
+  addAssistantMessage(output: PipelineOutput): void;
+  clearChat(): void;
+}
+
+let nextId = 0;
+function makeId(): string {
+  nextId += 1;
+  return `m-${nextId}`;
+}
+
+export const useChatStore = create<ChatState>((set) => ({
+  messages: [],
+
+  addUserMessage: (content, fileName = null) =>
+    set((state) => ({
+      messages: [
+        ...state.messages,
+        { id: makeId(), role: 'user', content, fileName },
+      ],
+    })),
+
+  addAssistantMessage: (output) =>
+    set((state) => ({
+      messages: [
+        ...state.messages,
+        { id: makeId(), role: 'assistant', output },
+      ],
+    })),
+
+  clearChat: () => set({ messages: [] }),
+}));

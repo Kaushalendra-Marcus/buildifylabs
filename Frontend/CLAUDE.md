@@ -15,7 +15,14 @@ forgot- / reset-password, wired to the live backend with route guards (`src/App.
 (`src/features/chat/`, specs/14 §3): 56px header (logo, quota chip, plan badge, account menu, new
 chat), 0/280px chat-history rail (collapsed by default <768px, **overlay** on narrow viewports),
 message stream, and a composer pinned to the foot of the stream column — no resizable panel, no
-fullscreen affordance. Auth, plan/quota, upload, and chat (`POST /chat`) have a live backend to build
+fullscreen affordance. **F3 message stream components are in** — the `MessageStream` region now
+renders the four `specs/14` §4 message types from the Zustand `chat-store` (`src/features/chat/`):
+user bubble (file chip above), assistant normal answer (prose → `repeat(auto-fit, minmax(240px,
+1fr))` visual cards grid with graph/table spanning 2 cols → hedged "Possible factors" insights strip
+collapsed by default → **always-visible trust footer**: show-the-query / confidence meter (gated on
+0..1) / flag-this-answer wired to `POST /chat/flag`), clarification quick-pick with tap-sends-verbatim
+(`chat-store.addUserMessage`), and the neutral fallback notice — the `data-visual-type` + wide card
+classes are the seams F4's visual lookup consumes. Auth, plan/quota, upload, and chat (`POST /chat`) have a live backend to build
 against today (§3); payment needs mocked data behind a clean API seam until its route ships.
 
 ## 2. What to read, by task
