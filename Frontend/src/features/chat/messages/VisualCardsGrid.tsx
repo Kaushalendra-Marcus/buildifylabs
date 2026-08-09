@@ -3,12 +3,12 @@
  * specs/14 §4.2: `repeat(auto-fit, minmax(240px, 1fr))`, with `graph` and
  * `table` spanning two columns.
  *
- * F3 lays the GRID and renders a placeholder card per visual (title + type);
- * F4 replaces the placeholder content with the real per-`visual_type`
- * renderers via its plain type→component lookup. The `data-visual-type`
- * attribute and the definitive span class are the seams F4 consumes.
+ * F3 lays the GRID (title + `data-visual-type` + wide-span classes);
+ * F4 fills each card with the real per-`visual_type` component via the
+ * plain type→component lookup in `VisualCard`.
  */
 import type { VisualOutput } from '../../../types/chat';
+import { VisualCard } from '../../../components/visuals/VisualCard';
 
 const WIDE_VISUAL_TYPES = new Set(['graph', 'table']);
 
@@ -31,7 +31,7 @@ export function VisualCardsGrid({ visuals }: { visuals: VisualOutput[] }) {
             data-visual-type={visual.visual_type}
           >
             <p className="visual-cards-grid__title">{visual.title}</p>
-            {/* F4 renders the per-type component inside the card. */}
+            <VisualCard visual={visual} />
           </div>
         );
       })}

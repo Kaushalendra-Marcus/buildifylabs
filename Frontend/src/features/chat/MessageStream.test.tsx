@@ -81,10 +81,12 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
       'message__answer-prose',
     )
 
-    // 2. Visual cards grid, min 240px; graph spans two columns.
+    // 2. Visual cards grid, min 240px; graph spans two columns. The metric
+    //    label, grid title, and chart legend can all legitimately read
+    //    "Revenue", so allow several matches.
     const grid = screen.getByLabelText('Visual results')
     expect(grid).toHaveClass('visual-cards-grid')
-    expect(screen.getByText('Revenue')).toBeInTheDocument()
+    expect(screen.getAllByText('Revenue').length).toBeGreaterThan(0)
     const graphCard = screen
       .getByText('Revenue over time')
       .closest('.visual-cards-grid__card')

@@ -7,3 +7,13 @@ import { afterEach } from 'vitest'
 afterEach(() => {
   cleanup()
 })
+
+// jsdom doesn't implement ResizeObserver; Recharts' ResponsiveContainer needs
+// it to measure the chart area, so stub it for the F4 graph tests.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+}

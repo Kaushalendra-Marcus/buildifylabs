@@ -8,20 +8,48 @@ Legend: ✅ completed · ⚠️ partial · ⛔ blocked · ⏸ deferred/paused
 
 ## Current task
 
-**Phase F4 — Seven visual components** `[IMMEDIATE]` (master plan Part F; `specs/14` §2.11, `06`
-FR3, `src/lib/schemas/visuals.ts`):
-**MetricCard**(`metric`), **GraphCard**(`graph` — Recharts line/bar/pie/area), **BusinessSummaryTable**
-(`table`), **ComparisonCard**(`comparison`), **InsightCard**(`insight`), **AlertList**(`alert`),
-**StatusBadge**(`status`). Plain type→component lookup (no interception layer); fallback component for
-an unrecognized type (defensive). Built to `visuals.ts` props; lucide-react icons. F3's
-`VisualCardsGrid` placeholder cards (`data-visual-type` + `--wide` span classes) are the seam where
-the per-type components slot in. Depends on: F0 (`visuals.ts`), F3. Acceptance: each of the 7 types
-renders inline in its message; unknown type degrades gracefully.
+**Phase F5 — Composer + ambient controls** `[IMMEDIATE]` (master plan Part F; `specs/14` §5):
+**Text input** (5.1 — multiline auto-grow, placeholder **"Why did revenue drop last week?"**),
+**source-scope selector** (5.2 — 3-way segmented **Your data / Live web / Both**, always visible,
+default **Your data**, persists across queries; non-`own_data` is gated/mocked until B7), **upload**
+(5.3 — icon button **absent** for guests; popover with drag-drop, "CSV, PDF, or XLSX", size hint 3MB
+free / 10MB pro, file list + `processing`/`completed`/`failed` status chips), **send** (5.4 —
+disabled **only when input is empty**, never for quota), **quota chip** (5.5 — "3 of 4 left · resets
+in 4h" from the rolling window), **two 429 states** (5.6 — window-exhausted inline notice with reset
+time, input stays enabled; lifetime cap → distinct permanent-feeling card with the inline contact
+form), **cold start** (5.7 — named "Waking up the server — first load can take up to a minute",
+first request of a session only, distinct from the per-message thinking indicator). Depends on: F2,
+quota live (B1). Acceptance: `specs/14` §5 behaviors; two distinct 429 states; upload absent for
+guests; send never blocked by quota.
 
 ## Completed tasks
 
-- **F3 — Message stream components** — done, test-verified (`npm run build`, `npm run lint`,
-  `npm test` all green — **30 tests**, up from 22; dev server boots on 5173):
+- **F4 — Seven visual components** — done, test-verified (`npm run build`, `npm run lint`,
+  `npm test` all green — **38 tests**, up from 30; dev server boots on 5173):
+  - **Seven components in `src/components/visuals/`**, each built to `src/lib/schemas/visuals.ts`
+    props, lucide-react icons, token-only styling (`visuals.css`):
+    **MetricCard** (`metric` — metric-scale value + label + directional change badge; up→success,
+    down→danger, flat→muted), **GraphCard** (`graph` — Recharts **line/bar/pie/area** switched on
+    `chart_type`, dataset colors from the design tokens so both themes work, `role="img"` +
+    `aria-label` per chart), **BusinessSummaryTable** (`table` — real sticky-header table of
+    columns/values), **ComparisonCard** (`comparison` — value vs baseline with computed delta +
+    proportional group bars), **InsightCard** (`insight` — statement + supporting context),
+    **AlertList** (`alert` — level-styled info/warning/critical row), **StatusBadge** (`status` —
+    on_track/at_risk/off_track pill + detail), and **UnknownVisualCard** (defensive fallback for an
+    unrecognized type).
+  - **`VisualCard.tsx`** — the **plain type→component lookup** (specs/14 §8, no interception
+    layer): switch on `visual_type`, props casts are the single boundary between the frozen union
+    type and each narrowed props shape; `default` → `UnknownVisualCard` so an unknown type degrades
+    gracefully.
+  - **F3 seam filled:** `VisualCardsGrid.tsx` now renders `<VisualCard>` inside each
+    `data-visual-type` card (title header kept; graph/table still span 2 cols).
+  - **Tests:** `VisualCard.test.tsx` (8 tests — all 7 types render their component inline; graph
+    across line/bar/pie/area; unknown type degrades to the fallback without crashing) + updated
+    `MessageStream.test.tsx` (grid title / metric label / chart legend can legitimately share text
+    like "Revenue" → `getAllByText`). `src/test/setup.ts` stubs `ResizeObserver` (jsdom lacks it;
+    Recharts' ResponsiveContainer needs it).
+  - **Docs updated in the same change:** `Frontend/CLAUDE.md` §1 (F4 in); master-plan Part F is a
+    planning doc and needs no edit here.
   - **`chat-store.ts`** (new, Zustand) — the message stream's source of truth: a `ChatMessage`
     union (`user` with optional `fileName` chip; `assistant` carrying the raw `PipelineOutput`) +
     `classifyAssistantOutput()` (clarification wins, degraded fallback = empty visuals + confidence
@@ -241,9 +269,10 @@ renders inline in its message; unknown type degrades gracefully.
 
 F0/F1 completed the frontend foundations + type-contract freeze + the six auth flows; B4 completed
 the backend core loop; F2 landed the Chat Workspace shell; F3 landed the four message-stream
-components against the live `POST /chat`/`/chat/flag` API. Next: the remaining frontend
-pre-checkpoint phases **F4–F6** (the 7 visual components into the F3 grid seam, composer, remaining
-states) — they build against the **live** `/chat`/`/chat/flag`/`/files*` API through the F0
+components against the live `POST /chat`/`/chat/flag` API; F4 landed the 7 visual components into
+the F3 grid seam (plain lookup + unknown-type fallback). Next: the remaining frontend
+pre-checkpoint phases **F5–F6** (composer + ambient controls, remaining states) — they build against
+the **live** `/chat`/`/chat/flag`/`/files*` API through the F0
 `src/api/*` seam. Before any POST-CHECKPOINT
 phase (B5+ / F7+): **define the "worth continuing" bar** (e.g. % of first-time users asking a 2nd
 question in-session) and put the core loop in front of real users (**🚩 CHECKPOINT**, `specs/00` §7).
@@ -329,9 +358,10 @@ is needed; no pytest-asyncio — each async scenario runs via `asyncio.run`):
   429 on window exhaustion and on lifetime cap.
 - **Migration check:** `alembic heads` = `b4code0000` (chain `9eec775a77e0 → b1code0000 → b3code0000 → b4code0000`).
 
-**Frontend (F1–F3)** — from `Frontend/`: `npm run build` (tsc -b + vite build) ✅, `npm run lint` ✅,
-`npm test` ✅ (**30 tests**, up from 22), `npm run dev` boots on **http://localhost:5173** ✅.
-Vitest harness (`vitest.config.ts`, jsdom, `src/test/setup.ts` with jest-dom + explicit RTL cleanup):
+**Frontend (F1–F4)** — from `Frontend/`: `npm run build` (tsc -b + vite build) ✅, `npm run lint` ✅,
+`npm test` ✅ (**38 tests**, up from 30), `npm run dev` boots on **http://localhost:5173** ✅.
+Vitest harness (`vitest.config.ts`, jsdom, `src/test/setup.ts` with jest-dom + explicit RTL cleanup +
+ResizeObserver stub for Recharts):
 `visuals.test.ts` (7 types), `token-storage.test.ts` (access in memory / refresh persisted / clear),
 `App.test.tsx` (routing guards: unauthenticated → sign-in; authenticated → F2 shell with rail +
 stream + New chat + badge), `auth-screens.test.tsx` (10 tests), `PlanBadge.test.tsx` (labels +
@@ -341,10 +371,15 @@ matchMedia stubbed since jsdom lacks it), **`MessageStream.test.tsx`** (8 tests 
 `specs/14` §4 message types: user bubble + file chip above; normal answer w/ visual grid +
 graph-wide span + collapsed insights strip + trust footer + news row; insights expand; "Show the
 query" reveals SQL + preview table; flag hits the live `/chat/flag` write path; flag disabled with
-tooltip when no query log; clarification pill tap sends verbatim; fallback notice + no trust footer).
+tooltip when no query log; clarification pill tap sends verbatim; fallback notice + no trust footer),
+**`VisualCard.test.tsx`** (8 tests — the plain type→component lookup renders each of the 7 types
+inline: metric value + change badge, graph line/bar/pie/area, table with sticky headers, comparison
+value/delta/group bars, insight text+context, alert level styling, status pill; unknown type degrades
+to the fallback).
 
 ## Last updated
 
-2026-08-09 (F3 complete — message stream components: `chat-store` + four `specs/14` §4 message
-types, trust footer wired to live `/chat/flag`, visual-cards grid seam for F4; see `git diff` for
-the exact change set)
+2026-08-09 (F4 complete — seven visual components in `src/components/visuals/` built to `visuals.ts`
+props + `VisualCard` plain type→component lookup + `UnknownVisualCard` fallback filled into the F3
+grid seam, Recharts graph + `visuals.css` tokens; 8 new tests; see `git diff` for the exact change
+set)

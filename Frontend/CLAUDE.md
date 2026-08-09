@@ -22,7 +22,11 @@ user bubble (file chip above), assistant normal answer (prose → `repeat(auto-f
 collapsed by default → **always-visible trust footer**: show-the-query / confidence meter (gated on
 0..1) / flag-this-answer wired to `POST /chat/flag`), clarification quick-pick with tap-sends-verbatim
 (`chat-store.addUserMessage`), and the neutral fallback notice — the `data-visual-type` + wide card
-classes are the seams F4's visual lookup consumes. Auth, plan/quota, upload, and chat (`POST /chat`) have a live backend to build
+classes are the seams F4's visual lookup consumes. **F4 seven visual components are in** —
+`src/components/visuals/` (`MetricCard`, `GraphCard` [Recharts line/bar/pie/area], `BusinessSummaryTable`,
+`ComparisonCard`, `InsightCard`, `AlertList`, `StatusBadge`) built to `visuals.ts` props; `VisualCard` is
+the **plain type→component lookup** the F3 grid seam calls, with `UnknownVisualCard` as the defensive
+fallback for an unrecognized `visual_type`. Auth, plan/quota, upload, and chat (`POST /chat`) have a live backend to build
 against today (§3); payment needs mocked data behind a clean API seam until its route ships.
 
 ## 2. What to read, by task

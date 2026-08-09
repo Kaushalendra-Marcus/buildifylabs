@@ -1,0 +1,318 @@
+/* Visual card components (F4) — the seven per-`visual_type` renderers plus
+ * the unknown-type fallback. Tokens only (specs/14 §7 roles). */
+
+/* ---------- MetricCard (metric) ---------- */
+
+.visual-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.visual-metric__label {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+}
+
+.visual-metric__value {
+  margin: 0;
+  font-size: var(--font-size-metric);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.visual-metric__change {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 0;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+}
+
+.visual-metric__change--up {
+  color: var(--success);
+}
+
+.visual-metric__change--down {
+  color: var(--danger);
+}
+
+.visual-metric__change--flat {
+  color: var(--text-muted);
+}
+
+/* ---------- GraphCard (graph) — Recharts, sized parent + fixed chart height ---------- */
+
+.visual-graph {
+  width: 100%;
+  height: 220px;
+  margin-top: 6px;
+}
+
+/* ---------- BusinessSummaryTable (table) ---------- */
+
+.visual-table-wrap {
+  max-height: 260px;
+  overflow: auto;
+}
+
+.visual-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+}
+
+.visual-table th,
+.visual-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text-muted) 25%, transparent);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.visual-table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-card);
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+/* ---------- ComparisonCard (comparison) ---------- */
+
+.visual-comparison {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.visual-comparison__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.visual-comparison__value {
+  margin: 0;
+  font-size: var(--font-size-metric);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.visual-comparison__delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+}
+
+.visual-comparison__delta--up {
+  color: var(--success);
+}
+
+.visual-comparison__delta--down {
+  color: var(--danger);
+}
+
+.visual-comparison__baseline {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--text-muted);
+}
+
+.visual-comparison__groups {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.visual-comparison__group {
+  display: grid;
+  grid-template-columns: 90px 1fr 44px;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-xs);
+}
+
+.visual-comparison__group-label {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visual-comparison__group-track {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 20%, transparent);
+  overflow: hidden;
+}
+
+.visual-comparison__group-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.visual-comparison__group-value {
+  color: var(--text-primary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- InsightCard (insight) ---------- */
+
+.visual-insight {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.visual-insight__text {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--text-primary);
+}
+
+.visual-insight__text svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--accent);
+}
+
+.visual-insight__context {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+/* ---------- AlertList (alert) ---------- */
+
+.visual-alert-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.visual-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.visual-alert svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.visual-alert--info svg {
+  color: var(--accent);
+}
+
+.visual-alert--warning svg {
+  color: var(--warning);
+}
+
+.visual-alert--critical svg {
+  color: var(--danger);
+}
+
+.visual-alert__body {
+  min-width: 0;
+}
+
+.visual-alert__summary {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.visual-alert__reason {
+  margin: 2px 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-secondary);
+}
+
+/* ---------- StatusBadge (status) ---------- */
+
+.visual-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.visual-status__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  margin: 0;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.visual-status__badge--on_track {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.visual-status__badge--at_risk {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.visual-status__badge--off_track {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+.visual-status__detail {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+}
+
+/* ---------- UnknownVisualCard — defensive fallback (specs/14 §8) ---------- */
+
+.visual-unknown {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.visual-unknown svg {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.visual-unknown__text {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+}
+
+.visual-unknown__type {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
