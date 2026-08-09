@@ -60,6 +60,11 @@ async def rate_limiter(
         .returning(
             User.questions_in_window, User.questions_lifetime, User.window_started_at
         )
+        # synchronize_session=False: this is a pure-Core UPDATE - the generated SQL
+        # is untouched, but SQLAlchemy won't try to re-evaluate the CASE/WHERE in
+        # Python against in-session objects (which compares a DB-loaded naive
+        # window_started_at against the tz-aware `now` and crashes on SQLite).
+        .execution_options(synchronize_session=False)
     )
     granted = result.first()
 

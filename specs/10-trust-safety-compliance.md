@@ -119,13 +119,20 @@ inside uploaded business files, plus users' own emails/names):
 
 ## 5. Acceptance criteria for this file
 
-- [ ] `PipelineOutput.confidence` is a bounded field before any UI displays it.
-- [ ] `/chat` (once built, specs/05+06) ships with a visible "show the query behind this" affordance.
-- [ ] `QueryLogs` is actually written to on every query.
-- [ ] A basic "flag this answer" mechanism exists, feeding into `QueryLogs`.
-- [ ] The clarifying-question pattern (§2, `specs/06` FR7) is implemented and exercised by at least
-      one real pipeline path, not just a schema field that's never populated.
-- [ ] The SQL user-scoping gap (specs/05) is closed before any non-test user's data is stored.
+- [x] `PipelineOutput.confidence` is a bounded field before any UI displays it.
+      *(`Field(ge=0.0, le=1.0)`, B4.)*
+- [x] `/chat` (specs/05+06) ships with a visible "show the query behind this" affordance.
+      *(`PipelineOutput.sql_query` + `data_preview` carry the exact SQL and raw row slice
+      end-to-end, B4.)*
+- [x] `QueryLogs` is actually written to on every query. *(Written per `/chat` request incl.
+      graceful fallbacks, B4.)*
+- [x] A basic "flag this answer" mechanism exists, feeding into `QueryLogs`. *(`POST /chat/flag`,
+      own-only, sets `QueryLogs.flagged`, B4.)*
+- [x] The clarifying-question pattern (§2, `specs/06` FR7) is implemented and exercised by at least
+      one real pipeline path, not just a schema field that's never populated. *(The pipeline's
+      SYSTEM_PROMPT ask-don't-guess path; benchmarking's first concrete use lands with B6.)*
+- [x] The SQL user-scoping gap (specs/05) is closed before any non-test user's data is stored.
+      *(B2: structural per-user tables + `assert_user_scoped`.)*
 - [ ] The previously-exposed Tambo key (§3) is rotated and scrubbed from git history.
 - [ ] A privacy policy, ToS, and data retention/deletion policy exist and are linked from the app
       before public signup opens.

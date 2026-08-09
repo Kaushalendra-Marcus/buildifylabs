@@ -10,10 +10,12 @@ to the right file.
 FastAPI backend for **BuildifyLabs**, an AI Business Intelligence Copilot for Indian SMBs: upload
 business data → ask questions in plain English → get the right chart, a root-cause explanation, and
 recommendations. Async FastAPI + SQLAlchemy, Neon Postgres (not Supabase — blocked in India),
-stateless JWT auth, Groq LLM primary / HuggingFace fallback. **Auth, plan/quota, and file upload
-(CSV → per-user data table) are wired end-to-end today** — SQL generation, the insight pipeline,
-payments, and news are all mid-build. Don't assume a module's status from memory; check
-`../specs/00-overview.md`'s module map if it matters for the task (one read, not a habit).
+stateless JWT auth, Groq LLM primary / HuggingFace fallback. **Auth, plan/quota, file upload
+(CSV → per-user data table), and chat (`POST /chat` — SQL generation → user-scoped execution →
+pandas stats → insight pipeline) are wired end-to-end today** — payments and news are still to
+build, and forecasting/what-if/benchmarking (specs/11 §3.2–3.4) extend the same chat route. Don't
+assume a module's status from memory; check `../specs/00-overview.md`'s module map if it matters
+for the task (one read, not a habit).
 
 ## 2. What to read, by task
 
@@ -25,6 +27,7 @@ payments, and news are all mid-build. Don't assume a module's status from memory
 | Building payments | `../specs/03-payment-verification.md` |
 | Building file upload/ingestion | `../specs/04-file-upload-ingestion.md` |
 | Building NL→SQL or the safety sandbox | `../specs/05-query-sql-safety.md` |
+| Building/fixing chat (`POST /chat`, flag, stats) | `../specs/06-ai-insight-pipeline.md` + `../specs/11-prediction-and-calculation.md` |
 | Building the AI insight/visual pipeline | `../specs/06-ai-insight-pipeline.md` |
 | Building news context | `../specs/07-news-context-module.md` |
 | Building the graph knowledge store | `../specs/08-graph-knowledge-store.md` |
@@ -53,7 +56,7 @@ uvicorn app.main:app --reload     # http://localhost:8000
 Required env vars: `DATABASE_URL`, `JWT_SECRET`, `FRONTEND_URL`, `SMTP_HOST/PORT/USER/PASS`,
 `EMAIL_FROM`, `GOOGLE_CLIENT_ID`. Everything else is optional until its module ships — full list
 and reasoning is in `app/config.py` itself (inline comments), don't duplicate it here. Tests run
-from `Backend/` via `python -m pytest` (112 tests; conftest supplies dummy env vars so no `.env`
+from `Backend/` via `python -m pytest` (149 tests; conftest supplies dummy env vars so no `.env`
 is needed; the `pandas` dependency is expected for the ingestion parser). `docker-compose.yml` is
 present but empty — don't assume a container workflow.
 

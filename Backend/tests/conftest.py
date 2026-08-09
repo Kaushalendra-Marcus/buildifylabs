@@ -20,6 +20,11 @@ _REQUIRED_ENV = {
     "EMAIL_FROM": "t@example.com",
     "CONTACT_FORM_RECIPIENT_EMAIL": "t@example.com",
     "GOOGLE_CLIENT_ID": "test-client",
+    # B4 wires the LLM route (app/services/llm/groq_service.py constructs its
+    # AsyncGroq client at import time, which requires an api_key) - dummy values
+    # keep the whole import chain testable without a real provider.
+    "GROQ_API_KEY": "test-groq-key",
+    "HF_API_KEY": "test-hf-key",
 }
 for _key, _value in _REQUIRED_ENV.items():
     os.environ.setdefault(_key, _value)

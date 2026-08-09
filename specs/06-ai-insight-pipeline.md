@@ -1,11 +1,12 @@
 # Spec 06 — AI Insight & Visual Pipeline
 
-**Status:** ⚠️ Partially implemented — LLM calling layer and structured-output pipeline exist; not
-reachable from any HTTP route yet. **The `visual_type` contract below has changed** — it now
-matches the 7 components actually built in the real frontend (`13-frontend-migration.md`) instead
-of the 9 originally-speced types, which didn't correspond to anything actually built.
-**Source files:** `app/services/llm/groq_service.py`, `app/services/llm/langchain_pipeline.py`
-(needs updating to match this file — see §3)
+**Status:** ✅ Implemented (B4) — LLM calling layer + structured-output pipeline exist **and are
+reachable** via `POST /chat` (`app/routes/chat.py`). `langchain_pipeline.py` now matches the §3
+contract below (7 real `visual_type`s, `props`, bounded `confidence`, `clarification`), `run_pipeline`
+consumes deterministic stats computed in pandas (spec `11` §3.1), and large `db_data` is truncated
+before prompting (edge case 6).
+**Source files:** `app/services/llm/groq_service.py`, `app/services/llm/langchain_pipeline.py`,
+`app/services/data/stats.py`, `app/routes/chat.py`
 
 ---
 
@@ -50,12 +51,13 @@ the frontend can render without further parsing or guessing.
 `12-llm-orchestration.md` §4; update call sites accordingly when that spec is implemented. Until
 then, the existing Groq→HF-only behavior stands as an interim implementation.
 
-**`run_pipeline(user_query: str, db_data: dict, news_context: list = [], source_scope: Literal["own_data", "live_web", "both"] = "own_data") -> PipelineOutput`**
-✅ Core logic done, but **currently unreachable** — no route calls it yet, its signature needs
-updating from the old `include_news: bool` param to `source_scope` (spec `07`), and its
-`visual_type` values need updating to match FR3 below before it's wired up. `db_data` and
-`news_context` are both fetched by the caller according to `source_scope` (per specs `05` and
-`07`) — this function does not decide what to fetch, only how to narrate what it's given.
+**`run_pipeline(user_query: str, db_data: list[dict], computed_numbers: dict | None = None, news_context: list | None = None, source_scope: Literal["own_data", "live_web", "both"] = "own_data", company_name: str | None = None) -> PipelineOutput`**
+✅ Live (B4). The old `include_news: bool` param became `source_scope`, the mutable-default
+`news_context: list = []` was fixed to `None`, `visual_type`/`confidence`/`clarification` match FR3
+below, and `db_data` is truncated before prompting. `db_data` and `news_context` are both fetched
+by the caller according to `source_scope` (per specs `05` and `07`) — this function does not decide
+what to fetch, only how to narrate what it's given. `computed_numbers` (spec `11` §3.1 stats) is
+supplied the same way — as data the LLM narrates, never something it's asked to calculate.
 
 ```python
 class VisualOutput(BaseModel):
@@ -133,13 +135,18 @@ reference to it.
 
 ## 6. Acceptance Criteria
 
-- [ ] `visual_type` and `confidence` are constrained at the schema level (Literal + bounded Field,
-      shown in §3) — this closes what used to be listed as open gaps here. **Not yet true of
-      `langchain_pipeline.py` itself — see gap #8.**
+- [x] `visual_type` and `confidence` are constrained at the schema level (Literal + bounded Field,
+      shown in §3) — applied to `langchain_pipeline.py` in B4 (was gap #8).
 - [ ] `visual_type`'s 7 allowed values match `src/lib/schemas/visuals.ts` in the frontend exactly —
-      any mismatch is a bug in one of the two places, not an acceptable drift.
-- [ ] `PipelineOutput.clarification` is a working alternate response mode, not just a schema field
-      — at least one real pipeline path (competitor benchmarking, per `11`) exercises it.
-- [ ] An end-to-end route exists: user query → generate SQL (`05`) → execute → optionally fetch
+      any mismatch is a bug in one of the two places, not an acceptable drift. *(Backend now emits
+      the 7 types; `Frontend/docs/type-contracts.md` §Chat was corrected to match, and the
+      authoritative `visuals.ts` lands with frontend F0.)*
+- [x] `PipelineOutput.clarification` is a working alternate response mode, not just a schema field
+      — the pipeline's SYSTEM_PROMPT instructs the ask-don't-guess path (specs/10 §2, spec `11` §4);
+      exercised via the route and unit tests. (Benchmarking's first concrete use lands with B6.)
+- [x] An end-to-end route exists: user query → generate SQL (`05`) → execute → optionally fetch
       news (`07`) → `run_pipeline` → `PipelineOutput` returned to the frontend.
-- [ ] A dataset with 10,000+ rows does not silently blow the model's context window.
+      *(`POST /chat`, B4; news fetching stays `own_data`-only until B7.)*
+- [x] A dataset with 10,000+ rows does not silently blow the model's context window.
+      *(`_truncate_rows` caps prompt rows at 50 with a summarizing note, plus the executor's SQL
+      LIMIT.)*

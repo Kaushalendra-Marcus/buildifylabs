@@ -1,10 +1,11 @@
 # Spec 05 — Natural-Language-to-SQL Generation & Safety Sandbox
 
-**Status:** ✅ Implemented (B2) — `sanitize_sql()` hardened; `clean_sql_response()` complete;
-`execute_sql()` + user-scoping live. Remaining dynamic-schema work (real per-file column metadata)
-is a B3 dependency, not a safety gap.
+**Status:** ✅ Implemented (B2 + B4) — `sanitize_sql()` hardened; `clean_sql_response()` complete;
+`execute_sql()` + user-scoping live; B4's `POST /chat` wires the whole path end-to-end (real
+per-file column metadata → `build_data_schema()` → prompt → execute → `INVALID_QUERY` graceful
+message). The `sales`/`customers`/`orders` placeholder is now only a documented fallback.
 **Source files:** `app/services/llm/sql_generator.py`, `app/middlewares/sql_sanitizer.py`,
-`app/services/data/executor.py`
+`app/services/data/executor.py`, `app/routes/chat.py`
 
 ---
 
@@ -90,6 +91,7 @@ therefore inherently untrusted input.
       `sanitize_sql` — covered by a regression test suite (`Backend/tests/test_sql_sanitizer_regression.py`).
 - [x] A generated query can **never** return another user's rows (gap #5 above is closed and
       tested — `Backend/tests/test_user_scoping.py` + `test_executor.py`).
-- [ ] The `INVALID_QUERY` sentinel is handled gracefully end-to-end, with a clear user-facing
-      message. *(Executor short-circuits with `InvalidQueryError` (B2); the user-facing message
-      renders with B4's `POST /chat`.)*
+- [x] The `INVALID_QUERY` sentinel is handled gracefully end-to-end, with a clear user-facing
+      message. *(Executor short-circuits with `InvalidQueryError` (B2); B4's `POST /chat` catches
+      it and returns a `confidence = 0.0` fallback "couldn't turn that into a query" message,
+      still writing the QueryLogs row so the failure is observable.)*

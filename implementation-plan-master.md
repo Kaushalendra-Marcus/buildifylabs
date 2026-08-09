@@ -54,7 +54,7 @@ graph (`08`) · 12. Payment (`03`, paused).
 *(copied into both deliverable docs)*
 
 The **API seam** is the decoupling mechanism: the frontend builds every domain behind `src/api/*.ts`.
-Auth + quota call the **live** backend today; upload, chat, payments call **mocks that match the
+Auth, quota, upload, and chat call the **live** backend today; payments calls **mocks that match the
 contracts below** and become a one-file swap when the real routes land. Frontend is therefore **not
 blocked** on backend for immediate progress.
 
@@ -66,17 +66,19 @@ blocked** on backend for immediate progress.
 | **Quota** | `rate_limiter` dep → `429 {detail}` (window) / `429 {detail, contact_form:true}` (lifetime) | Quota chip, two 429 states | **LIVE after B1** |
 | **Contact** | `POST /contact {name,email,message}` → `200 {message}` | Lifetime-cap contact form | B1 |
 | **Upload** | `POST /files/upload` (multipart, non-guest) → `202 FileResponse`; `GET /files`, `GET /files/{id}` | Upload popover, file list + status chips | **LIVE after B3** |
-| **Chat** | `POST /chat {query, source_scope="own_data", company_name?}` → `PipelineOutput` | Message stream, visuals, trust footer, clarification | mocked → **B4** |
-| **Visual types** | `visual_type: Literal["metric","graph","table","comparison","insight","alert","status"]` + `props: Dict` | 7 visual components via plain type→component lookup | contract frozen **before** B4/F4 |
-| **PipelineOutput** | `answer, visuals[], insights[], summary, root_causes[], recommendations[], news_context[], anomalies[], confidence(0..1), clarification?` | All assistant-message rendering | schema migrated in **B4** |
+| **Chat** | `POST /chat {query, source_scope="own_data", company_name?}` → `PipelineOutput` (+ `POST /chat/flag`) | Message stream, visuals, trust footer, clarification | **LIVE after B4** |
+| **Visual types** | `visual_type: Literal["metric","graph","table","comparison","insight","alert","status"]` + `props: Dict` | 7 visual components via plain type→component lookup | contract frozen — **B4** applied it to the pipeline |
+| **PipelineOutput** | `answer, visuals[], insights[], summary, root_causes[], recommendations[], news_context[], anomalies[], confidence(0..1), clarification?, sql_query?, data_preview?, query_log_id?` | All assistant-message rendering | schema migrated in **B4** |
 | **Payments** | `POST /payments/{create-order,verify,webhook}`, `GET /payments/me` (Razorpay) | Payment/upgrade UI | mocked / **paused** |
 
 ### The single most important cross-cutting rule
 `src/lib/schemas/visuals.ts` (frontend) is the **single source of truth** for per-`visual_type` `props`
 (`specs/06` §3 defers to it explicitly). The backend's `run_pipeline` MUST emit `props` matching it.
-**Both sides must agree on the 7 types before backend B4 and frontend F4.** Prerequisite for both:
-`Frontend/docs/type-contracts.md`'s Chat section (currently the stale 9-type `chart_data` shape) is
-corrected to the 7 types + `props` + bounded `confidence` + `clarification` (`specs/14` §10 acceptance).
+**Both sides now agree on the 7 types** — B4 migrated the pipeline to
+`Literal["metric","graph","table","comparison","insight","alert","status"]` + `props` + bounded
+`confidence` + `clarification` + traceability fields, and `Frontend/docs/type-contracts.md`'s Chat
+section was corrected to match (`specs/14` §10 acceptance). Only `src/lib/schemas/visuals.ts` itself
+is still outstanding (frontend F0).
 
 ### Sequencing dependencies
 - Frontend **F0–F1** (foundations + auth) and quota display depend only on the **live** backend → can
@@ -99,11 +101,13 @@ corrected to the 7 types + `props` + bounded `confidence` + `clarification` (`sp
 multi-LLM cascade (`12`) · `sqlglot` AST SQL safety. Planned/unwired: Pinecone, Redis, Neo4j, Razorpay.
 
 **Current module state:** Auth ✅ (bugs) · Quota ✅ (B1: rolling window + lifetime cap) · SQL safety ✅
-(B2: `clean_sql_response`, `execute_sql`, user-scoping closed; dynamic schema feeds off B3's tables) · Upload ⚠️
+(B2: `clean_sql_response`, `execute_sql`, user-scoping closed; B4 feeds real per-file columns into the
+prompt) · Upload ⚠️
 (B3: `POST /files/upload` + `GET /files*`, local-disk storage, defensive CSV → per-user table; PDF/XLSX +
-Pinecone deferred) · Pipeline ⚠️
-(`run_pipeline` done but unreachable, old contract) · Payments ⚠️ (old UTR,
-paused) · `QueryLogs` table exists, never written.
+Pinecone deferred) · Pipeline ✅
+(B4: `run_pipeline` live via `POST /chat`; 7 real types + `props` + bounded `confidence` +
+`clarification`; `stats.py` computes deterministic numbers it narrates) · Payments ⚠️ (old UTR,
+paused) · `QueryLogs` ✅ written on every `/chat`, flaggable via `POST /chat/flag`.
 
 **Backend conventions to honor throughout** (`Backend/docs/conventions.md`, `CLAUDE.md` §5 — each looks
 simplifiable but isn't):
@@ -229,38 +233,37 @@ Tasks:
 processed CSV is queryable via its per-user table.
 
 ## Phase B4 — End-to-end `POST /chat` (the critical path) `[IMMEDIATE]` (build step 6; `05`+`06`+`11` §3.1+`10` §2)
-**Goal:** the first working demo loop — query → SQL → execute → stats → pipeline → structured response,
-with trust requirements built in from the start.
+**Status: ✅ DONE (37 new tests; full suite 149 passed).** Goal met: the first working demo loop —
+query → SQL → execute → stats → pipeline → structured response, with trust requirements built in.
 
-Tasks:
-- **Migrate `langchain_pipeline.py` to the `specs/06` §3 contract:**
-  - `VisualOutput.visual_type` → `Literal["metric","graph","table","comparison","insight","alert","status"]`
-    (7 real types); `chart_data` → `props: Dict`.
-  - `PipelineOutput.confidence` → `Field(ge=0.0, le=1.0)`; add `clarification: Optional[ClarificationRequest]`.
-  - `run_pipeline` signature `include_news: bool` → `source_scope: Literal["own_data","live_web","both"]="own_data"`;
-    fix mutable default (`news_context: list | None = None`).
-  - Rewrite `SYSTEM_PROMPT` to teach the **7 real types + props** (drop the old 9 fictional types).
-  - Add **db_data truncation/summarization** before prompting (edge case 6: 10k+ rows must not blow context).
-- **`POST /chat`** — `{query, source_scope (default own_data), company_name?}` → `PipelineOutput`.
-  Flow: `rate_limiter` (quota) → build SQL prompt → LLM → `clean_sql_response` → `sanitize_sql` →
-  user-scoped `execute_sql` → **statistical calcs (`11` §3.1: averages, growth %, ratios) computed in
-  pandas** → `run_pipeline(db_data, computed_numbers)` → response. **LLM never does arithmetic** — it
-  narrates precomputed numbers. `INVALID_QUERY` → graceful message.
-- **Trust requirements (`specs/10` §2) built in now, not retrofitted:**
-  - Response carries the **SQL + raw data slice** so the UI's "show the query" is real (traceability).
-  - **Hedged causal language** enforced in the prompt for `root_causes`/`recommendations`.
-  - **`QueryLogs` written** on every query+response (wire the existing, never-written table).
-  - **Flag mechanism** — an endpoint/field to flag an answer, feeding `QueryLogs`.
-  - **Clarifying-question pattern** — `clarification` is a working alternate response mode.
-- MVP `source_scope` = `own_data` only (Live web / Both deferred to B7).
+What shipped:
+- **`langchain_pipeline.py` migrated to the `specs/06` §3 contract:** 7 real `visual_type`s +
+  `props: Dict` (no `chart_data`); `confidence` `Field(ge=0.0, le=1.0)`; `clarification` alternate
+  mode; `run_pipeline` takes `source_scope` (no `include_news`), `news_context: list | None = None`
+  (no mutable default); `SYSTEM_PROMPT` teaches the 7 real types + hedged causal language;
+  `_truncate_rows` caps prompt rows at 50 (edge case 6).
+- **`POST /chat`** (`app/routes/chat.py`): `rate_limiter` → build SQL prompt from the user's **real**
+  uploaded columns (`get_table_columns` → `build_data_schema`) → LLM → `clean_sql_response` →
+  `sanitize_sql` → user-scoped `execute_sql` → **pandas stats (`11` §3.1)** → `run_pipeline` →
+  response. `INVALID_QUERY` → graceful message. `source_scope` is `own_data` only (B7 deferred).
+- **Trust requirements (`10` §2):** response carries `sql_query` + `data_preview` (real "show the
+  query"); hedged causal language enforced; **`QueryLogs` written on every request+response**
+  (incl. fallbacks); **`POST /chat/flag`** sets `QueryLogs.flagged` (own-only); `clarification` is a
+  working output mode.
+- **Migration `b4code0000`** adds `QueryLogs.flagged`.
 
-**Files:** new `app/routes/chat.py`, `app/services/llm/langchain_pipeline.py`,
-`app/services/llm/groq_service.py` (reuse), new `app/services/data/stats.py`,
-`app/db/models/query_logs.py`, `app/schemas/*` (chat req/resp, flag), `app/main.py`.
+**Files:** `app/routes/chat.py`, `app/services/llm/langchain_pipeline.py` (migrated),
+`app/services/data/stats.py`, `app/services/data/executor.py::get_table_columns`,
+`app/db/models/query_logs.py` (flagged), `app/schemas/chat.py`, `app/main.py`,
+`alembic/versions/b4code0000_query_logs_flag.py`; tests `tests/test_stats.py`,
+`tests/test_pipeline_contract.py`, `tests/test_chat_api.py`.
 **Depends on:** B2 (SQL exec + scoping), B3 (data), **type-contract freeze** (7 types). **Acceptance
 (`06` §6 + `10` §5):** end-to-end route returns valid `PipelineOutput`; `visual_type`/`confidence`
-schema-constrained; `clarification` exercised by ≥1 real path; every answer traceable to SQL; `QueryLogs`
-written per query; 10k+ rows don't blow context.
+schema-constrained; `clarification` exercised by ≥1 real path; every answer traceable to SQL;
+`QueryLogs` written per query; 10k+ rows don't blow context. **All met and covered by tests.**
+**Noted during build:** `rate_limiter`'s atomic UPDATE needed `synchronize_session=False` — its
+ORM evaluate path compared a SQLite-loaded naive `window_started_at` against the tz-aware `now`
+(crashed on commit once `/chat` started hitting it; SQL unchanged).
 
 > ### 🚩 CHECKPOINT — put this in front of real users before continuing.
 > Steps 7+ below are **priority-ordered, not committed scope** (`specs/00` §7, `09` §8). **Define the
@@ -335,8 +338,10 @@ status/checkboxes updated in the same change.
 3. **Where parsed data lands** — per-user tables in the same Neon DB (schema-per-user vs table-per-file);
    affects B2 scoping, sanitizer, and dynamic-schema generation.
 4. **Live `GROQ_MODEL` id** — interim `llama-3.3-70b-versatile` retires 2026-08-16; needs a durable choice.
-5. **Dynamic schema generation** per user/file — mechanism to describe tables to the SQL prompt.
-6. Stale docs: `Backend/CLAUDE.md` "Indian SMBs"; empty `docker-compose.yml` (no container workflow assumed).
+5. **~~Dynamic schema generation~~ — resolved in B4**: `get_table_columns()` introspects the real
+   per-file columns (information_schema → PRAGMA fallback) and feeds `build_data_schema()` into the
+   `/chat` prompt; the `sales`/`customers`/`orders` placeholder is now only a documented fallback.
+6. Stale docs: ~~`Backend/CLAUDE.md`~~ updated for B4; empty `docker-compose.yml` (no container workflow assumed).
 
 ---
 ---
@@ -358,8 +363,8 @@ against Figma once accessible** (build to `specs/14`'s token *roles* meanwhile).
 **Recharts** (charts) · **lucide-react** (icons) · **Google Identity Services** (Google sign-in) ·
 **Vitest + React Testing Library** (tests). CSS approach chosen at F0 and applied consistently.
 
-**Buildable vs mocked (`Frontend/CLAUDE.md` §3):** Auth + quota → **live**; Upload + Chat → **mock** the
-`api/*` module, swap later; Payments → **mock** (paused).
+**Buildable vs mocked (`Frontend/CLAUDE.md` §3):** Auth + quota + Upload + Chat → **live** (upload B3,
+chat B4); Payments → **mock** (paused).
 
 **Structure (`Frontend/docs/structure.md`):**
 ```

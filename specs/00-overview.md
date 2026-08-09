@@ -73,18 +73,18 @@ removed. See `13-frontend-migration.md` for full detail and current migration st
 | 2 | Usage quota enforcement (rolling window + lifetime cap) | 🔶 Redesigned, needs rewrite from old daily-tier model | `02-plan-quota-enforcement.md` |
 | 3 | Razorpay payment | ⏸️ Paused — staying free for now, see `02` | `03-payment-verification.md` |
 | 4 | File upload validation + ingestion pipeline | ⚠️ Partial — routes/storage/defensive CSV → per-user data table done (B3); PDF/XLSX parse + Pinecone deferred | `04-file-upload-ingestion.md` |
-| 5 | NL→SQL generation + SQL safety sandbox | ✅ Generation (`clean_sql_response`), sanitizer, executor + user-scoping done; dynamic per-file schema lands with B3 | `05-query-sql-safety.md` |
-| 6 | AI insight/visual pipeline (structured output) | ⚠️ Core done, unreachable via any route; contract updated to match real frontend components | `06-ai-insight-pipeline.md` |
+| 5 | NL→SQL generation + SQL safety sandbox | ✅ Generation (`clean_sql_response`), sanitizer, executor + user-scoping done; B4 feeds real per-file schema into the `/chat` prompt | `05-query-sql-safety.md` |
+| 6 | AI insight/visual pipeline (structured output) | ✅ Reachable end-to-end via `POST /chat` (B4): 7 real types + `props`, bounded `confidence`, `clarification`, deterministic stats narration, trust fields | `06-ai-insight-pipeline.md` |
 | 7 | External context (user-directed `own_data`/`live_web`/`both` scope + category web scraping) | ❌ Not started — deferred, see `09` §8 | `07-news-context-module.md` |
 | 8 | Graph knowledge store (Neo4j entity/relationship retrieval) | ❌ Not started — deferred, see `09` §8 | `08-graph-knowledge-store.md` |
-| 11 | Prediction, calculation & benchmarking | ❌ Not started, core capability not a later add-on | `11-prediction-and-calculation.md` |
+| 11 | Prediction, calculation & benchmarking | ⚠️ §3.1 stats done (B4); forecasting/what-if/benchmarking pending | `11-prediction-and-calculation.md` |
 | 12 | Multi-LLM orchestration | ❌ Not started, extends existing Groq/HF pattern | `12-llm-orchestration.md` |
 | 13 | Frontend consolidation (Tambo removal, Next.js migration) | 🔶 Decision made, physical migration pending | `13-frontend-migration.md` |
 
 **Strategy & requirements docs** (not implementation modules, so not status-tracked the same way):
 `09-differentiation-and-gtm.md` (positioning, distribution, retention, monetization posture) and
-`10-trust-safety-compliance.md` (AI-output trust requirements, the blocking security gap in row 5,
-and global data-protection compliance).
+`10-trust-safety-compliance.md` (AI-output trust requirements — now implemented on the live `/chat`
+route, B4 — plus global data-protection compliance).
 
 ## 4. Tech Stack (current target)
 
@@ -167,7 +167,7 @@ These are called out in detail in their respective module specs, listed here for
    module) in the same pass since they depend on the same data-fetch path. Build in the trust
    requirements from `10-trust-safety-compliance.md` §2 (traceable SQL, hedged causal language,
    `QueryLogs` writes, the clarifying-question pattern) at the same time — much cheaper to include
-   now than retrofit onto a shipped chat UI later.
+   now than retrofit onto a shipped chat UI later. **✅ Done in B4** (`app/routes/chat.py`).
 
    **→ Checkpoint: put this in front of real users before continuing.** Steps 7+ below are ordered
    by priority, not committed scope — see `09-differentiation-and-gtm.md` §8. Define what "worth

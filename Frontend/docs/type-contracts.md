@@ -60,41 +60,67 @@ Accepted types: `.csv`, `.pdf`, `.xlsx` only, checked by both extension and MIME
 send the real file, don't rely on spoofing `content_type`. Size caps: `free` ≤ 3 MB, `pro` ≤ 10 MB.
 Guest users are rejected entirely (403) — don't show the upload UI to guests at all.
 
-## Chat / insight pipeline — `specs/06-ai-insight-pipeline.md` (shape stable, no route yet)
+## Chat / insight pipeline — `specs/06-ai-insight-pipeline.md` (route live: `POST /chat`, B4)
 
 ```ts
 type VisualType =
-  | "line_chart" | "bar_chart" | "pie_chart" | "kpi_card"
-  | "heatmap" | "funnel_chart" | "india_map" | "anomaly_chart" | "ai_summary";
+  | "metric" | "graph" | "table" | "comparison"
+  | "insight" | "alert" | "status";
 
 interface VisualOutput {
-  visual_type: VisualType;              // ⚠️ not enum-enforced server-side yet — handle an
-                                         // unrecognized value defensively, don't assume it's
-                                         // always one of the 9
-  chart_data: {
-    labels: unknown[];
-    datasets: unknown[];
-    meta: Record<string, unknown>;
-  };
+  visual_type: VisualType;              // server-enforced Literal since B4, but keep a defensive
+                                         // fallback for unrecognized values anyway
+  props: Record<string, unknown>;        // shape depends on visual_type — see src/lib/schemas/visuals.ts
   title: string;
 }
 
-interface PipelineOutput {
+interface ClarificationRequest {         // alternate response mode (specs/10 §2 "ask, don't guess")
+  question: string;
+  options: string[];                     // quick-pick choices; empty if none fit
+}
+
+interface PipelineOutput {               // POST /chat returns this directly
   answer: string;
   visuals: VisualOutput[];
   insights: string[];
   summary: string;
-  root_causes: string[];
+  root_causes: string[];                 // hedged causal language by design (specs/10 §2)
   recommendations: string[];
-  news_context: string[];
+  news_context: string[];                // empty for now — news lands with specs/07
   anomalies: string[];
-  confidence: number;                   // ⚠️ not bounded server-side yet (spec says should be 0..1)
+  confidence: number;                    // Field(ge=0.0, le=1.0), bounded server-side
+  clarification: ClarificationRequest | null;  // non-null ⇒ the other answer fields are empty:
+                                         // render as a quick-pick prompt, not a chat answer
+  sql_query: string | null;              // exact SQL behind this answer (traceability)
+  data_preview: Array<Record<string, unknown>> | null;  // raw row slice the SQL ran on
+  query_log_id: string | null;           // UUID — drives "show the query" + flagging
 }
+
+interface ChatRequest {
+  query: string;
+  source_scope?: "own_data" | "live_web" | "both";   // only "own_data" is fully supported today
+  company_name?: string | null;          // reserved for benchmarking (specs/11), unused in B4
+}
+
+interface FlagRequest { query_log_id: string; }          // POST /chat/flag
+interface FlagResponse { query_log_id: string; flagged: boolean; }
 ```
 
-Build one renderer per `visual_type` (9 total) plus a fallback for unrecognized values.
-`chart_data`'s exact `labels`/`datasets` shape isn't pinned down further in the spec — treat it as
-loosely structured until a real `/chat` route exists to observe real payloads against.
+Per-type `props` shape (authoritative detail is `src/lib/schemas/visuals.ts`; these are what the
+backend's prompt tells the model to produce):
+
+- `metric` → `{ label: string, value: number, change_pct: number | null, direction: "up" | "down" | "flat" }`
+- `graph` → `{ chart_type: "line" | "bar" | "pie" | "area", labels: string[], datasets: [{ name: string, values: number[] }] }`
+- `table` → `{ columns: string[], values: Array<Array<string | number>> }`
+- `comparison` → `{ value: number, baseline: number, groups: [{ label: string, value: number }] }`
+- `insight` → `{ text: string, context: string }`
+- `alert` → `{ level: "info" | "warning" | "critical", summary: string, reason: string }`
+- `status` → `{ state: "on_track" | "at_risk" | "off_track", detail: string }`
+
+Build one renderer per `visual_type` (7 total) plus the fallback for unrecognized values. When
+`clarification` is non-null, don't render charts — render the quick-pick prompt. Expect `props` to
+be loosely structured beyond these shapes until `visuals.ts` lands as the single source of truth
+(frontend F0).
 
 ## Payment — `specs/03-payment-verification.md` (designed, not implemented)
 

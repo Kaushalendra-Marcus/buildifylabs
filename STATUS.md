@@ -8,14 +8,47 @@ Legend: ✅ completed · ⚠️ partial · ⛔ blocked · ⏸ deferred/paused
 
 ## Current task
 
-**Phase B4 — End-to-end `POST /chat`** `[IMMEDIATE]` (build step 6; `05`+`06`+`11` §3.1+`10` §2):
-the first working demo loop — `rate_limiter` → build SQL prompt (feed B3's real per-user columns
-via `build_data_schema`) → LLM → `clean_sql_response` → `sanitize_sql` → user-scoped `execute_sql`
-→ stats (pandas) → `run_pipeline` → response, with trust requirements (traceable SQL, hedged
-causal language, `QueryLogs` writes, flag mechanism, `clarification`) built in. `INVALID_QUERY`
-sentinel → graceful message.
+**Phase F0 — Frontend foundations + type-contract freeze** `[IMMEDIATE]` (master plan Part F; pre-checkpoint,
+buildable now): make deliberate stack choices once (router, Zustand, fetch wrapper, CSS, Recharts, lucide-react,
+Google Identity Services, Vitest/RTL), stand up `src/{api,types,lib/schemas,components,features,hooks}`, replace
+boilerplate `App.tsx`, implement design-token roles (`specs/14` §7), and freeze the shared type contract —
+create `src/lib/schemas/visuals.ts` as the per-`visual_type` props source of truth (the Chat section of
+`Frontend/docs/type-contracts.md` was already corrected to the 7 types in B4; `visuals.ts` itself is the
+outstanding piece). Mirror auth/upload/chat/payment types in `src/types/`; build `api/*.ts` mocks behind the real
+contract signatures (auth/quota/upload/chat are now live and one-file-swappable).
 
 ## Completed tasks
+
+- **B4 — End-to-end `POST /chat`** — done, test-verified (**149 tests**, up from 112):
+  - **`langchain_pipeline.py` migrated to the `specs/06` §3 contract** — 7 real `visual_type`s
+    (`metric`/`graph`/`table`/`comparison`/`insight`/`alert`/`status`) with `props: Dict` (no `chart_data`);
+    `confidence` `Field(ge=0.0, le=1.0)`; `clarification: Optional[ClarificationRequest]` alternate mode;
+    `run_pipeline(..., source_scope="own_data", company_name=None)` (old `include_news` gone); mutable default
+    `news_context: list = []` → `None`; `SYSTEM_PROMPT` teaches the 7 types + hedged causal language
+    (`specs/10` §2); `_truncate_rows` caps prompt rows at 50 (edge case 6).
+  - **`app/routes/chat.py`** (new): `POST /chat` — `rate_limiter` (quota) → SQL prompt from the user's **real**
+    uploaded columns (`get_table_columns` → `build_data_schema`) → LLM → `clean_sql_response` → `sanitize_sql`
+    → user-scoped `execute_sql` → deterministic pandas stats (`specs/11` §3.1, `app/services/data/stats.py`) →
+    `run_pipeline` → `PipelineOutput`. `INVALID_QUERY` → graceful fallback message. Every request+response
+    written to `QueryLogs` (incl. fallbacks). `source_scope` = `own_data` only (B7 deferred). **Trust
+    requirements (`specs/10` §2) built in:** `sql_query` + `data_preview` on the response (real "show the
+    query"), hedged language, `clarification` as a working mode.
+  - **`POST /chat/flag`** — own-only flag (other user → 404) setting new `QueryLogs.flagged` column; migration
+    `b4code0000_query_logs_flag.py` (`alembic heads` = `b4code0000`).
+  - **`app/services/data/executor.py::get_table_columns()`** — introspects real per-file columns
+    (information_schema → PRAGMA fallback); the `sales/customers/orders` placeholder is now only a fallback.
+  - **`rate_limiter` fix surfaced by `/chat`:** the atomic quota `UPDATE` needed
+    `synchronize_session=False` — its ORM evaluate path compared a SQLite-loaded naive `window_started_at`
+    against the tz-aware `now` and crashed on commit (SQL unchanged; Postgres unaffected).
+  - **Tests:** `test_stats.py` (deterministic stats incl. datetime/NaN), `test_pipeline_contract.py` (7 types,
+    bounded confidence, truncation, fallbacks, clarification mode, mutable-default regression),
+    `test_chat_api.py` (10 e2e: happy loop, clarification, invalid query, source_scope fallback, flag own/other,
+    quota 429 window + lifetime, no-data response). `conftest.py` adds dummy `GROQ_API_KEY`/`HF_API_KEY` (the
+    Groq client is constructed at import time).
+  - **Docs updated in the same change:** `specs/05`, `06`, `10`, `11`, `00` module map + build order,
+    `implementation-plan-master.md` (contract table, module state, B4 section, risks #5–6), `Backend/CLAUDE.md`,
+    `Frontend/CLAUDE.md` (chat + upload now live), `Frontend/docs/type-contracts.md` Chat section (7 types),
+    `Backend/docs/known-gaps.md`.
 
 - **B3 — File upload + minimal ingestion** — done, test-verified (112 tests):
   - **`app/routes/files.py`** (new): `POST /files/upload` → **202** `FileResponse`; `GET /files`,
@@ -90,9 +123,12 @@ sentinel → graceful message.
 
 ## What's after
 
-B4 is the last **pre-checkpoint** phase. When it's done: define the "worth continuing" bar
-(e.g. % of first-time users asking a 2nd question in-session) and put the core loop in front of
-real users (**🚩 CHECKPOINT**) before starting B5+ (`specs/00` §7).
+B4 completed the last **pre-checkpoint** backend phase; the full backend core loop is live and test-verified.
+Next: the frontend pre-checkpoint phases F0–F6 (foundations, auth screens, chat workspace, 7 visual
+components, composer, upload UI) — now buildable against the **live** `POST /chat`/`/chat/flag`/`/files*`
+API instead of mocks. Before any POST-CHECKPOINT phase (B5+ / F7+): **define the "worth continuing" bar**
+(e.g. % of first-time users asking a 2nd question in-session) and put the core loop in front of real users
+(**🚩 CHECKPOINT**, `specs/00` §7).
 
 ## Blocked / deferred
 
@@ -110,9 +146,9 @@ real users (**🚩 CHECKPOINT**) before starting B5+ (`specs/00` §7).
   table only ever holds the owner's rows) plus post-generation `assert_user_scoped()` validation —
   resolving the "inject `WHERE user_id` vs per-user table" question in favor of per-user tables
   (`specs/05` §5.5). Also satisfies `specs/08` FR5 later.
-- **Dynamic schema:** `build_sql_prompt(schema=...)` + `build_data_schema(table, columns)` exist;
-  B3 lands real, typed per-file columns in each user's data table — B4's `/chat` must feed them
-  (removing the `sales/customers/orders` placeholder fallback).
+- **Dynamic schema (B4, resolved):** `get_table_columns()` introspects real, typed per-file columns into
+  the `/chat` prompt via `build_data_schema()`; the `sales/customers/orders` placeholder is only a
+  documented fallback. B3's per-user tables feed it.
 - **Upload storage backend (B3):** local disk for dev (`app/services/data/storage.py`,
   `UPLOAD_DIR`); object store (S3) for prod — module is the swap seam (resolved gap #4).
 - **Per-type EXT↔MIME validation (B3):** the "double-check" is enforced per file type (`.csv` →
@@ -123,7 +159,16 @@ real users (**🚩 CHECKPOINT**) before starting B5+ (`specs/00` §7).
   the real Pinecone namespace is wired.
 - `.xlsx`/`.pdf` uploads pass validation but land `status="failed"` with a stored reason (parsing
   beyond CSV deferred); raw file is still persisted.
-- `GROQ_MODEL` interim = `llama-3.3-70b-versatile`; retires **2026-08-16** → pick a durable model in B5.
+- **7-type visual contract (B4, frozen):** `visual_type` is `Literal["metric","graph","table","comparison",
+  "insight","alert","status"]` with `props: Dict`; `src/lib/schemas/visuals.ts` (frontend, F0) is the
+  authoritative per-type props source of truth — backend only constrains the type values. `confidence` is
+  `Field(ge=0.0, le=1.0)`.
+- **LLM never does arithmetic (B4, `specs/11` §2):** `stats.py` computes averages/totals/growth/ratios
+  deterministically in pandas; `run_pipeline` receives them as `computed_numbers` to **narrate**, never
+  calculate. `GROQ_MODEL` interim = `llama-3.3-70b-versatile`; retires **2026-08-16** → pick a durable model in B5.
+- **Trust traceability (B4, `specs/10` §2):** `PipelineOutput.sql_query` + `data_preview` carry the exact SQL
+  and raw row slice end-to-end (filled by the route, never the LLM); `QueryLogs` written on every `/chat`;
+  `POST /chat/flag` sets `QueryLogs.flagged` (own-only).
 - Quota constants (`4` / `6h` / `100`) are a **module decision** in `app/utils/usage.py` (config only
   defines auth rate-limit *counts*); single source of truth for the window rule stays in one place.
 - Guest lifetime cap is best-effort (`device_fingerprint`) — accepted tradeoff, `specs/02` §5.
@@ -134,26 +179,26 @@ real users (**🚩 CHECKPOINT**) before starting B5+ (`specs/00` §7).
 
 ## Tests / verification (this run)
 
-`pytest` run from `Backend/` — **112 tests, all green** (temp venv `/tmp/opencode/blvenv`,
-Python 3.12; `conftest.py` supplies dummy env vars so no `.env` is needed; no pytest-asyncio —
-each async scenario runs via `asyncio.run`):
+`pytest` run from `Backend/` — **149 tests, all green** (temp venv `/tmp/opencode/blvenv`,
+Python 3.12; `conftest.py` supplies dummy env vars incl. `GROQ_API_KEY`/`HF_API_KEY` so no `.env`
+is needed; no pytest-asyncio — each async scenario runs via `asyncio.run`):
 
-- **B2 modules (unchanged):** `clean_sql_response`, `sanitize_sql` regression, `assert_user_scoped`,
-  `execute_sql` E2E — all still pass.
-- **`test_file_validator.py`** (new): guest 403, invalid plan 403, `.exe` as `.csv` 415, `.csv` +
-  `application/pdf` 415, free 4MB 413, pro 15MB 413, 0-byte 400, valid passes.
-- **`test_parser.py`** (new): parse rows / BOM / latin-1 / ragged tolerance / empty-csv error;
-  cleaning (snake-case columns, dup-row drop, all-NaN row drop, ₹-currency + date coercion,
-  header-only); ingest E2E (typed queryable table on exact `user_data_table_name()`, second upload
-  replaces, header-only & `.xlsx` → error).
-- **`test_files_api.py`** (new): TestClient e2e on file-backed SQLite + temp `UPLOAD_DIR` with
-  `get_current_user`/`get_db` overrides — 403/400/415/413 rejection matrix; valid CSV → 202 body
-  (`completed`, raw file saved on disk, `pinecone_namespace` = per-user table name); processed CSV
-  queryable via the per-user table; `GET /files` + `GET /files/{id}` + 404 for another user's file;
-  `.xlsx`/`.pdf` → 202 with `failed` + stored reason.
-- **B2↔B3 combo smoke** (manual script): B2's `execute_sql` returned correct `SUM/GROUP BY`
-  aggregates against a B3-ingested table.
+- **B1–B3 modules (unchanged):** auth, quota (incl. `synchronize_session=False` atomic UPDATE now
+  exercised by `/chat`), upload validator/parser/files e2e — all still pass.
+- **`test_stats.py`** (new): `compute_statistics` — averages/totals/mins/maxs on numeric cols
+  (`id` excluded), totals ratios, period-over-period growth %, `<2` periods → no `growth_pct`,
+  ISO-string and `datetime` date drivers, NaN/empty/header-only inputs.
+- **`test_pipeline_contract.py`** (new): 7 `visual_type`s + `props` (no `chart_data`); bounded
+  `confidence`; `clarification` mode; SYSTEM_PROMPT hedged-language + 7-type teaching; 50-row
+  truncation with summarizing note; `run_pipeline` fallbacks (bad JSON / empty visuals / exception →
+  fallback with `reason`); mutable-default regression.
+- **`test_chat_api.py`** (new, file-backed SQLite + seed users/tables, monkeypatched `generate_response`):
+  happy `/chat` loop returns `PipelineOutput` with SQL + data_preview; clarification mode;
+  `INVALID_QUERY` → graceful fallback still logged; non-`own_data` scope fallback; no-uploaded-data
+  response; flag own answer lands on the `QueryLogs` row; flagging another user's log → 404; quota
+  429 on window exhaustion and on lifetime cap.
+- **Migration check:** `alembic heads` = `b4code0000` (chain `9eec775a77e0 → b1code0000 → b3code0000 → b4code0000`).
 
 ## Last updated
 
-2026-08-09 (B3 complete — see `git diff` for the exact change set)
+2026-08-09 (B4 complete — see `git diff` for the exact change set)

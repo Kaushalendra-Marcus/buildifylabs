@@ -1,7 +1,13 @@
 # 11 — Prediction, Calculation & Benchmarking
 
-**Status:** ❌ Not started. Depends on `05` (SQL execution) and `06` (pipeline) being wired first —
-this extends the same `/chat` route, it doesn't add a new one.
+**Status:** ⚠️ §3.1 done (B4), §3.2–3.4 not started. §3.1's deterministic statistical calculations
+(§3.1 + §5's no-new-infrastructure constraint) are implemented in `app/services/data/stats.py` and
+consumed by B4's `POST /chat` — the LLM narrates precomputed numbers, never computes them. §3.4's
+"ask, don't guess" interaction pattern (§4) is implemented in the pipeline's SYSTEM_PROMPT; its
+first concrete benchmarking use lands with B6. §3.2 (forecasting) and §3.3 (what-if) are the next
+build steps and extend the same `/chat` route.
+**Source files:** `app/services/data/stats.py`, `app/services/llm/langchain_pipeline.py`,
+`app/routes/chat.py`
 
 ---
 
@@ -86,12 +92,17 @@ chat answer, closing the loop back into the same request once answered.
 
 ## 6. Acceptance Criteria
 
-- [ ] Every numeric answer this module produces is traceable to a deterministic calculation, never
+- [x] Every numeric answer this module produces is traceable to a deterministic calculation, never
       an LLM-generated number — verifiable by inspecting the prompt sent to the LLM (the number is
-      an input to the prompt, not something asked of it).
-- [ ] The clarifying-question pattern (§4) is implemented as a first-class `PipelineOutput` mode,
-      not a special case bolted onto benchmarking alone.
+      an input to the prompt, not something asked of it). *(`stats.py` computes
+      averages/totals/growth/ratios; `run_pipeline` receives `computed_numbers` as data to narrate,
+      and the SYSTEM_PROMPT forbids calculating. §3.2–3.3 will extend this to forecasts/what-ifs.)*
+- [x] The clarifying-question pattern (§4) is implemented as a first-class `PipelineOutput` mode,
+      not a special case bolted onto benchmarking alone. *(`clarification: ClarificationRequest | None`
+      is a real pipeline output mode driven by the ask-don't-guess prompt, B4; benchmarking's first
+      concrete use lands with B6.)*
 - [ ] A forecast always states its method and a confidence range, never a bare number.
+      *(§3.2, pending.)*
 - [ ] A what-if scenario always states its assumptions (e.g. "assumes quantity is unaffected")
       alongside the result.
 - [ ] Benchmarking never presents a guessed competitor number as fact — it either clearly labels

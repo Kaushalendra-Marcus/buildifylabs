@@ -12,6 +12,7 @@ import app.db.models  # noqa: F401
 from app.routes.auth import router as auth_router
 from app.routes.contact import router as contact_router
 from app.routes.files import router as files_router
+from app.routes.chat import router as chat_router
 from app.middlewares.rate_limiter import QuotaLimitExceeded
 
 logging.basicConfig(level=logging.INFO)
@@ -48,6 +49,7 @@ app.add_exception_handler(
 app.include_router(auth_router)
 app.include_router(contact_router)
 app.include_router(files_router)
+app.include_router(chat_router)
 
 
 @app.get("/")

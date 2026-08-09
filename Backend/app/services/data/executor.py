@@ -77,6 +77,34 @@ def assert_user_scoped(query: str, user_table: str) -> None:
             )
 
 
+async def get_table_columns(db: AsyncSession, table_name: str) -> list[str]:
+    """Introspect a table's columns (cross-dialect) for the dynamic SQL schema.
+
+    B4's /chat calls this to feed the user's *real* uploaded columns into
+    `build_data_schema()` / the SQL prompt, removing the placeholder
+    `sales/customers/orders` fallback (specs/05 §4). Postgres uses
+    `information_schema.columns`; SQLite (tests/dev) falls back to
+    `PRAGMA table_info`.
+    """
+    table_name = table_name.lower()
+    try:
+        result = await db.execute(
+            text(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = :t ORDER BY ordinal_position"
+            ),
+            {"t": table_name},
+        )
+        columns = [row["column_name"] for row in result.mappings()]
+        if columns:
+            return columns
+    except Exception:
+        pass
+
+    result = await db.execute(text(f'PRAGMA table_info("{table_name}")'))
+    return [row["name"] for row in result.mappings()]
+
+
 async def execute_sql(query: str, db: AsyncSession, user_table: str) -> list[dict]:
     """Run a sanitized, user-scoped SELECT and return rows as a list of dicts.
 

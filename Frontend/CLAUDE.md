@@ -8,8 +8,8 @@ read all of `docs/` or `specs/` up front** — use §2's table.
 
 Frontend for **BuildifyLabs** (see `../Backend/CLAUDE.md` for the product description). **Still the
 unmodified Vite/React/TS scaffold** — `src/App.tsx` is template boilerplate, nothing product-
-specific exists yet. Only auth and plan/quota have a live backend to build against today (§3);
-chat, upload, and payment need mocked data behind a clean API seam until their routes ship.
+specific exists yet. Auth, plan/quota, upload, and chat (`POST /chat`) have a live backend to build
+against today (§3); payment needs mocked data behind a clean API seam until its route ships.
 
 ## 2. What to read, by task
 
@@ -34,8 +34,8 @@ chat, upload, and payment need mocked data behind a clean API seam until their r
 |---|---|---|
 | Auth (signup/signin/Google/guest/verify/reset) | ✅ Live | Build against the real API |
 | Quota display, 429 handling | ✅ Live | Build against the real API |
-| File upload | ⚠️ Validator only, no route | Mock `api/files.ts`; swap in later |
-| Chat + charts | ⚠️ Pipeline built, no route | Mock `api/chat.ts`; swap in later |
+| File upload | ✅ Live (upload + list + status) | Build against the real API |
+| Chat + charts | ✅ Live (`POST /chat` + `/chat/flag`) | Build against the real API; `api/chat.ts` seam |
 | Payment / upgrade | ❌ Not implemented | Mock `api/payments.ts`; swap in later |
 
 ## 4. Tech stack & scripts
