@@ -1,4 +1,4 @@
-# BuildifyLabs — STATUS
+# BuildifyLabs — STATUS Docs
 
 Tracks one-task-at-a-time progress against
 [`implementation-plan-master.md`](./implementation-plan-master.md). Source of truth for product
