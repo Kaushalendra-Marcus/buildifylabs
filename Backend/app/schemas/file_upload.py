@@ -17,6 +17,7 @@ class FileResponse(BaseModel):
     file_size: Optional[int] = None
     status: str
     pinecone_namespace: Optional[str] = None
+    error: Optional[str] = None
     created_at: datetime
 
     class Config:

@@ -65,7 +65,7 @@ blocked** on backend for immediate progress.
 | **Auth** | `POST /auth/{signup,signin,guest,google,refresh}`, `GET /auth/verify-email`, `POST /auth/{forgot,reset}-password` → `AuthResponse{user{id,email,name,plan},access_token,refresh_token,token_type}` (refresh → `TokenResponse`, no `user`) | Auth screens, token store, plan badge | **LIVE now** (after B0 bugfixes) |
 | **Quota** | `rate_limiter` dep → `429 {detail}` (window) / `429 {detail, contact_form:true}` (lifetime) | Quota chip, two 429 states | **LIVE after B1** |
 | **Contact** | `POST /contact {name,email,message}` → `200 {message}` | Lifetime-cap contact form | B1 |
-| **Upload** | `POST /files/upload` (multipart, non-guest) → `202 FileResponse`; `GET /files`, `GET /files/{id}` | Upload popover, file list + status chips | mocked → **B3** |
+| **Upload** | `POST /files/upload` (multipart, non-guest) → `202 FileResponse`; `GET /files`, `GET /files/{id}` | Upload popover, file list + status chips | **LIVE after B3** |
 | **Chat** | `POST /chat {query, source_scope="own_data", company_name?}` → `PipelineOutput` | Message stream, visuals, trust footer, clarification | mocked → **B4** |
 | **Visual types** | `visual_type: Literal["metric","graph","table","comparison","insight","alert","status"]` + `props: Dict` | 7 visual components via plain type→component lookup | contract frozen **before** B4/F4 |
 | **PipelineOutput** | `answer, visuals[], insights[], summary, root_causes[], recommendations[], news_context[], anomalies[], confidence(0..1), clarification?` | All assistant-message rendering | schema migrated in **B4** |
@@ -99,8 +99,10 @@ corrected to the 7 types + `props` + bounded `confidence` + `clarification` (`sp
 multi-LLM cascade (`12`) · `sqlglot` AST SQL safety. Planned/unwired: Pinecone, Redis, Neo4j, Razorpay.
 
 **Current module state:** Auth ✅ (bugs) · Quota ✅ (B1: rolling window + lifetime cap) · SQL safety ✅
-(B2: `clean_sql_response`, `execute_sql`, user-scoping closed; dynamic schema awaits B3) · Pipeline ⚠️
-(`run_pipeline` done but unreachable, old contract) · Upload ⚠️ (validator only) · Payments ⚠️ (old UTR,
+(B2: `clean_sql_response`, `execute_sql`, user-scoping closed; dynamic schema feeds off B3's tables) · Upload ⚠️
+(B3: `POST /files/upload` + `GET /files*`, local-disk storage, defensive CSV → per-user table; PDF/XLSX +
+Pinecone deferred) · Pipeline ⚠️
+(`run_pipeline` done but unreachable, old contract) · Payments ⚠️ (old UTR,
 paused) · `QueryLogs` table exists, never written.
 
 **Backend conventions to honor throughout** (`Backend/docs/conventions.md`, `CLAUDE.md` §5 — each looks
@@ -309,11 +311,14 @@ written per query; 10k+ rows don't blow context.
   the cascade; data-processor awareness; breach-response runbook.
 
 ## Backend — testing strategy
-- **No suite exists yet** — establish `pytest` + `pytest-asyncio` + `httpx.AsyncClient`.
+- **Suite live** (`Backend/tests/`, run `python -m pytest` from `Backend/`, no pytest-asyncio —
+  each async scenario is driven with `asyncio.run`): 112 tests green across B1–B3.
 - **Unit:** `clean_sql_response` (plain/fenced/prose); `sanitize_sql` regression (100% write/DDL incl.
-  CTE/subquery); `roll_window_if_needed`; stats calcs.
+  CTE/subquery); quota window rule; validator (403/415/413/400); parser/cleaning (encoding, ragged,
+  dedup, date/₹-coercion, typed columns).
 - **Integration:** auth flows; quota (5th→429, 101st→`contact_form`); **user-scoping** (never another
-  user's rows); upload (403/413/415/400); `/chat` end-to-end (valid `PipelineOutput`, `QueryLogs` written).
+  user's rows); upload routes end-to-end (403/413/415/400, 202, per-user table queryable,
+  `GET /files*` ownership, xlsx/pdf → `failed` with stored reason); `/chat` end-to-end (B4).
 - **Load:** concurrent at quota boundaries never exceed caps.
 
 ## Backend — definition of done (immediate/MVP)
@@ -323,8 +328,8 @@ contact flow; every answer logged to `QueryLogs`; SQL provably user-scoped; each
 status/checkboxes updated in the same change.
 
 ## Backend — risks & unresolved questions
-1. **Storage backend** for uploads (gap #4) — undecided; blocks B3. *(Recommend: local disk dev → object
-   store prod.)*
+1. **~~Storage backend~~ — decided in B3**: local disk for dev (`app/services/data/storage.py`,
+   `UPLOAD_DIR`), object store (S3) for prod; the module is the swap seam.
 2. **User-scoping mechanism** — plan chooses per-user tables/schema; confirm it fits Neon + Alembic and
    later Neo4j scoping.
 3. **Where parsed data lands** — per-user tables in the same Neon DB (schema-per-user vs table-per-file);

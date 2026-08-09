@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     LOGIN_RATE_LIMIT: int = 5
     VERIFY_EMAIL_RATE_LIMIT: int = 3
 
+    # Where uploaded raw files are persisted (Phase B3 storage backend, gap #4):
+    # local disk for dev; swap storage.py for an object-store backend in prod.
+    # Optional with a sane default, so upload works without extra env setup.
+    UPLOAD_DIR: str = "data/uploads"
+
     REQUESTS_PER_MINUTE: int = 60
 
     class Config:

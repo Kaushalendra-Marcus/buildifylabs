@@ -72,7 +72,7 @@ removed. See `13-frontend-migration.md` for full detail and current migration st
 | 1 | Authentication (email/Google/guest, verify, reset) | ✅ Implemented | `01-authentication.md` |
 | 2 | Usage quota enforcement (rolling window + lifetime cap) | 🔶 Redesigned, needs rewrite from old daily-tier model | `02-plan-quota-enforcement.md` |
 | 3 | Razorpay payment | ⏸️ Paused — staying free for now, see `02` | `03-payment-verification.md` |
-| 4 | File upload validation + ingestion pipeline | ⚠️ Validator only, no route/pipeline | `04-file-upload-ingestion.md` |
+| 4 | File upload validation + ingestion pipeline | ⚠️ Partial — routes/storage/defensive CSV → per-user data table done (B3); PDF/XLSX parse + Pinecone deferred | `04-file-upload-ingestion.md` |
 | 5 | NL→SQL generation + SQL safety sandbox | ✅ Generation (`clean_sql_response`), sanitizer, executor + user-scoping done; dynamic per-file schema lands with B3 | `05-query-sql-safety.md` |
 | 6 | AI insight/visual pipeline (structured output) | ⚠️ Core done, unreachable via any route; contract updated to match real frontend components | `06-ai-insight-pipeline.md` |
 | 7 | External context (user-directed `own_data`/`live_web`/`both` scope + category web scraping) | ❌ Not started — deferred, see `09` §8 | `07-news-context-module.md` |
@@ -134,8 +134,9 @@ These are called out in detail in their respective module specs, listed here for
    match. (`01-authentication.md`)
 3. **No admin role exists on `User`** — not currently blocking (payment is paused), but will matter
    again once Razorpay support/refunds are eventually built. (`03-payment-verification.md`)
-4. **No storage backend chosen** for uploaded files — validation passes but there's nowhere to
-   persist the file afterward. (`04-file-upload-ingestion.md`)
+4. **~~No storage backend chosen~~ — closed in B3: local disk for dev (`app/services/data/storage.py`,
+    `UPLOAD_DIR` config), object store (S3) for prod; raw uploads persisted, CSV parsed into a
+    per-user queryable table. (`04-file-upload-ingestion.md`)
 5. **~~No automatic user-scoping on generated SQL~~ — closed in B2.** Generated queries now run
    against a **per-user data table** (`user_data_table_name`) and `assert_user_scoped()` rejects any
    query referencing a table outside the caller's namespace — a query can never read another user's

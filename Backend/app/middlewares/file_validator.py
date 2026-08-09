@@ -12,13 +12,15 @@ LIMITS = {
     "pro": 10 * 1024 * 1024,
 }
 
-ALLOWED_TYPES = [
-    "text/csv",
-    "application/pdf",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-]
-
-ALLOWED_EXT = [".csv", ".pdf", ".xlsx"]
+# Allowed file types, keyed by extension. The spec's double-check (specs/04 §4)
+# is enforced *per type*: the extension must be known AND the declared
+# content_type must match that extension's MIME exactly (e.g. `.csv` with
+# `application/pdf` is a mismatched pair and is rejected by design).
+EXT_TO_MIME = {
+    ".csv": "text/csv",
+    ".pdf": "application/pdf",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
 
 
 async def validate_file_upload(
@@ -40,16 +42,19 @@ async def validate_file_upload(
         )
 
     ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in ALLOWED_EXT:
+    expected_mime = EXT_TO_MIME.get(ext)
+    if expected_mime is None:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Invalid file type",
+            detail="Invalid file type. Only CSV, PDF and Excel files are allowed.",
         )
 
-    if file.content_type not in ALLOWED_TYPES:
+    # Strip any media-type parameters ("text/csv; charset=utf-8") before comparing.
+    declared_type = (file.content_type or "").split(";")[0].strip().lower()
+    if declared_type != expected_mime:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Only CSV, PDF and Excel files allowed",
+            detail="The file's extension and content type don't match.",
         )
 
     contents = await file.read()
@@ -57,9 +62,18 @@ async def validate_file_upload(
 
     await file.seek(0)
 
+    # specs/04 edge case 4: an empty (0-byte) file passes the size check
+    # trivially and must be rejected explicitly, not silently ingested as an
+    # empty dataset. Checked the moment bytes are read, before any persistence.
+    if file_size == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File is empty (0 bytes). Upload a non-empty CSV, PDF or Excel file.",
+        )
+
     if file_size > limit:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"File too large. Max allowed: {limit // (1024*1024)} MB",
         )
 

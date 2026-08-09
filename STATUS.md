@@ -8,23 +8,51 @@ Legend: ✅ completed · ⚠️ partial · ⛔ blocked · ⏸ deferred/paused
 
 ## Current task
 
-**Phase B3 — File upload + minimal ingestion** `[IMMEDIATE]` (build step 5, `specs/04`)
-— not started this run. `POST /files/upload` (non-guest, 0-byte/415/413 checks), storage-backend
-decision, minimal CSV parse → create the **per-user data table** the B2 SQL layer already queries
-(use `executor.user_data_table_name()`), `FileUpload.status` transitions + `error` column.
+**Phase B4 — End-to-end `POST /chat`** `[IMMEDIATE]` (build step 6; `05`+`06`+`11` §3.1+`10` §2):
+the first working demo loop — `rate_limiter` → build SQL prompt (feed B3's real per-user columns
+via `build_data_schema`) → LLM → `clean_sql_response` → `sanitize_sql` → user-scoped `execute_sql`
+→ stats (pandas) → `run_pipeline` → response, with trust requirements (traceable SQL, hedged
+causal language, `QueryLogs` writes, flag mechanism, `clarification`) built in. `INVALID_QUERY`
+sentinel → graceful message.
 
 ## Completed tasks
 
+- **B3 — File upload + minimal ingestion** — done, test-verified (112 tests):
+  - **`app/routes/files.py`** (new): `POST /files/upload` → **202** `FileResponse`; `GET /files`,
+    `GET /files/{id}` (own-only, else 404). Row created up front (`processing`); ingestion either
+    sets `completed` (with the per-user table ref in `pinecone_namespace`, until Pinecone) or
+    `failed` + trimmed `error` — never stuck on `processing` (`specs/04` edge case 1).
+  - **`file_validator.py`** — now `400` for **0-byte** files; type check tightened to a **per-type
+    EXT↔MIME mapping** so a `.csv`+`application/pdf` mismatched pair is `415` by design (`specs/04`
+    §4). Guest/invalid plan → 403; free 3MB / pro 10MB → 413 unchanged.
+  - **Storage backend (gap #4 resolved)** — `app/services/data/storage.py`: **local disk for dev**
+    (`UPLOAD_DIR` config), object store for prod; the module is the swap seam. Raw uploads persist
+    as `<user_id>/<upload_id><ext>` (never the caller's filename → no path traversal).
+  - **`app/services/data/parser.py`** (new): pandas CSV parse (BOM/utf-8/latin-1 fallback, ragged-row
+    tolerant, empty/`ParserError` → clean `ValueError`) → defensive clean (columns normalized to
+    snake_case, all-NaN rows and full-dupe rows dropped, string→date + ₹/`,`-currency coercion) →
+    **drop-and-recreate the user's typed data table** via B2's `user_data_table_name()` (columns
+    Integer/Float/Boolean/DateTime/Text by pandas dtype) and bulk-insert. A fresh upload **replaces**
+    the user's data table (one-active-file scope, `specs/04` §4). `.xlsx`/`.pdf` → `failed` with
+    reason "not supported yet".
+  - **`FileUpload.error` column** (String(500)) + migration `b3code0000_file_upload_error.py`
+    (`alembic heads` = `b3code0000`; adds `ALTER TABLE file_uploads ADD COLUMN error VARCHAR(500)`);
+    `FileResponse` gains `error`. `main.py` wires the files router.
+  - **B2↔B3 co-design delivered:** `execute_sql()` runs against B2's tables; small smoke script proved
+    B2's `execute_sql` returns correct aggregates (SUM/GROUP BY) on B3's ingested table.
+  - `specs/04` status/§4/Frequirements/§5/§6 checkboxes, `specs/00` module map + gap #4, the master
+    plan's module state + upload contract + risks, `docs/known-gaps.md`, and `Backend/CLAUDE.md`
+    updated in the same change.
 - **B2 — SQL generation + execution + user-scoping** — done, test-verified:
   - **`sql_generator.py`** (`app/services/llm/sql_generator.py`): `clean_sql_response()` now
-    extracts a single bare SQL statement from plain / fenced (` ```sql `) / prose-wrapped model
+    extracts a single bare SQL statement from plain / fenced (```sql```) / prose-wrapped model
     output by keeping the longest prefix that parses as exactly one statement (text-cleanup only).
     `INVALID_QUERY_SENTINEL` + `is_invalid_query()` (normalized exact match) replace the hardcoded
     sentinel. `build_data_schema(table, columns)` + `build_sql_prompt(query, schema=...)` make the
     prompt schema dynamic; `DEFAULT_DATABASE_SCHEMA` (`sales/customers/orders`) is now only a
-    documented fallback until B3 feeds real column metadata.
+    documented fallback until B4 feeds real per-file column metadata.
   - **`app/services/data/executor.py`** (new): `user_data_table_name(user_id)` — deterministic
-    per-user data table (`user_<uuidhex>_data`), the **co-designed B3 storage contract**;
+    per-seuser data table (`user_<uuidhex>_data`), the **co-designed B3 storage contract**;
     `assert_user_scoped(query, user_table)` — AST walk rejects (403) any non-CTE table reference
     outside the caller's namespace (shared app tables, another user's table, foreign schemas);
     `execute_sql(query, db, user_table) -> list[dict]` — composes `is_invalid_query` →
@@ -37,10 +65,10 @@ decision, minimal CSV parse → create the **per-user data table** the B2 SQL la
     `Backend/`): `clean_sql_response` (plain/fenced/prose/edge), `sanitize_sql` regression
     (write/DDL incl. CTE smuggling, forbidden functions), `assert_user_scoped`, and `execute_sql`
     end-to-end on in-memory SQLite (rows, empty, sentinel, 403 foreign table/write, 422 bad
-    column). `conftest.py` handles `sys.path`; no pytest-asyncio needed.
+    column).
   - `specs/05` status, §3 contract, §5 edge cases + §6 checkboxes updated in the same change;
     `specs/00` module map + cross-cutting gap #5, `docs/conventions.md` (scoping invariant),
-    `docs/known-gaps.md`, `Backend/CLAUDE.md` invariant, and the master plan's module state updated.
+    `docs/known-gaps.md`, `Backend/CLAUDE.md` invariant, and the master plan's module state.
 - **B1 — Quota rewrite + contact flow** — done, smoke-verified:
   - **`User` model** (`app/db/models/user.py`): added `questions_in_window`,
     `window_started_at`, `questions_lifetime`; removed `queries_today`, `last_reset`. Migration
@@ -60,13 +88,11 @@ decision, minimal CSV parse → create the **per-user data table** the B2 SQL la
   - **`POST /contact`** — `{name,email,message}` → email via existing `email_sender.py` async SMTP
     to new required `CONTACT_FORM_RECIPIENT_EMAIL` config; no verification (low-stakes lead capture).
 
-## Next task
+## What's after
 
-**Phase B4 — End-to-end `POST /chat`** `[IMMEDIATE]` (build step 6; `05`+`06`+`11` §3.1+`10` §2):
-the first working demo loop — `rate_limiter` → build SQL prompt → LLM → `clean_sql_response` →
-`sanitize_sql` → user-scoped `execute_sql` → stats (pandas) → `run_pipeline` → response, with trust
-requirements (traceable SQL, hedged causal language, `QueryLogs` writes, flag mechanism,
-`clarification`) built in. `INVALID_QUERY` sentinel → graceful message.
+B4 is the last **pre-checkpoint** phase. When it's done: define the "worth continuing" bar
+(e.g. % of first-time users asking a 2nd question in-session) and put the core loop in front of
+real users (**🚩 CHECKPOINT**) before starting B5+ (`specs/00` §7).
 
 ## Blocked / deferred
 
@@ -85,34 +111,49 @@ requirements (traceable SQL, hedged causal language, `QueryLogs` writes, flag me
   resolving the "inject `WHERE user_id` vs per-user table" question in favor of per-user tables
   (`specs/05` §5.5). Also satisfies `specs/08` FR5 later.
 - **Dynamic schema:** `build_sql_prompt(schema=...)` + `build_data_schema(table, columns)` exist;
-  B3 supplies real per-file column metadata. Until then the `sales/customers/orders`
-  `DEFAULT_DATABASE_SCHEMA` is a documented placeholder only.
+  B3 lands real, typed per-file columns in each user's data table — B4's `/chat` must feed them
+  (removing the `sales/customers/orders` placeholder fallback).
+- **Upload storage backend (B3):** local disk for dev (`app/services/data/storage.py`,
+  `UPLOAD_DIR`); object store (S3) for prod — module is the swap seam (resolved gap #4).
+- **Per-type EXT↔MIME validation (B3):** the "double-check" is enforced per file type (`.csv` →
+  `text/csv`, etc.), so a mismatched pair like `.csv`+`application/pdf` is a deliberate `415`
+  (`specs/04` §4).
+- **One active data file per user (B3):** a fresh upload **replaces** the user's per-user data
+  table; `pinecone_namespace` temporarily holds the per-user table name as the storage ref until
+  the real Pinecone namespace is wired.
+- `.xlsx`/`.pdf` uploads pass validation but land `status="failed"` with a stored reason (parsing
+  beyond CSV deferred); raw file is still persisted.
 - `GROQ_MODEL` interim = `llama-3.3-70b-versatile`; retires **2026-08-16** → pick a durable model in B5.
 - Quota constants (`4` / `6h` / `100`) are a **module decision** in `app/utils/usage.py` (config only
   defines auth rate-limit *counts*); single source of truth for the window rule stays in one place.
 - Guest lifetime cap is best-effort (`device_fingerprint`) — accepted tradeoff, `specs/02` §5.
 - In-memory per-instance auth limiter is MVP-acceptable; swap to Redis (shared store) with B7.
 - Environment gap found: `requests` needed by `google-auth` is not in `requirements.txt` (installed
-  only in a `/tmp` temp venv for verification — not modified). Tracked; not part of B1.
+  only in a `/tmp` temp venv for verification — not modified). Tracked; not part of B1. `pandas`
+  **is** now in `requirements.txt` (B3 parser).
 
 ## Tests / verification (this run)
 
-A real pytest suite now lives at `Backend/tests/` (76 tests, run from `Backend/` via
-`python -m pytest`; temp venv `/tmp/opencode/blvenv`, Python 3.12, `sqlglot` 30.15, `aiosqlite`):
+`pytest` run from `Backend/` — **112 tests, all green** (temp venv `/tmp/opencode/blvenv`,
+Python 3.12; `conftest.py` supplies dummy env vars so no `.env` is needed; no pytest-asyncio —
+each async scenario runs via `asyncio.run`):
 
-- `clean_sql_response` — plain / fenced / prose-after / prose-before / multi-line / sentinel /
-  garbage → 22 assertions green.
-- `sanitize_sql` regression — valid SELECTs pass; INSERT/UPDATE/DELETE/DROP/CREATE/ALTER/TRUNCATE
-  rejected (400 parse or 403 AST), write/DDL **smuggled in CTEs** rejected, forbidden functions
-  (`pg_sleep`, `pg_read_file`, `dblink`, `lo_export`, `pg_terminate_backend`, incl. inside
-  subqueries) rejected, two-statements/leading-paren rejected.
-- `assert_user_scoped` — own table (incl. `public.`-qualified, case-insensitive) and CTEs allowed;
-  `users`/`payments`/`query_logs`/another user's table/foreign schema/`"USERS"` → 403.
-- `execute_sql` E2E on in-memory SQLite using the exact `user_data_table_name()` table: rows → dicts,
-  empty → `[]`, sentinel → `InvalidQueryError`, foreign table/write → 403, hallucinated column → 422.
-- `import app.main` / all B2 modules — OK (dummy env vars).
-- Frontend still scaffold-only; mixing not exercised.
+- **B2 modules (unchanged):** `clean_sql_response`, `sanitize_sql` regression, `assert_user_scoped`,
+  `execute_sql` E2E — all still pass.
+- **`test_file_validator.py`** (new): guest 403, invalid plan 403, `.exe` as `.csv` 415, `.csv` +
+  `application/pdf` 415, free 4MB 413, pro 15MB 413, 0-byte 400, valid passes.
+- **`test_parser.py`** (new): parse rows / BOM / latin-1 / ragged tolerance / empty-csv error;
+  cleaning (snake-case columns, dup-row drop, all-NaN row drop, ₹-currency + date coercion,
+  header-only); ingest E2E (typed queryable table on exact `user_data_table_name()`, second upload
+  replaces, header-only & `.xlsx` → error).
+- **`test_files_api.py`** (new): TestClient e2e on file-backed SQLite + temp `UPLOAD_DIR` with
+  `get_current_user`/`get_db` overrides — 403/400/415/413 rejection matrix; valid CSV → 202 body
+  (`completed`, raw file saved on disk, `pinecone_namespace` = per-user table name); processed CSV
+  queryable via the per-user table; `GET /files` + `GET /files/{id}` + 404 for another user's file;
+  `.xlsx`/`.pdf` → 202 with `failed` + stored reason.
+- **B2↔B3 combo smoke** (manual script): B2's `execute_sql` returned correct `SUM/GROUP BY`
+  aggregates against a B3-ingested table.
 
 ## Last updated
 
-2026-08-09 (B2 complete — see `git diff` for the exact change set)
+2026-08-09 (B3 complete — see `git diff` for the exact change set)

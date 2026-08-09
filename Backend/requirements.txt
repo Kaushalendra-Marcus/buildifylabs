@@ -17,3 +17,5 @@ httpx
 email-validator
 python-multipart
 sqlglot
+# B3: defensive CSV cleaning + parsing before landing data in a per-user table (specs/04)
+pandas

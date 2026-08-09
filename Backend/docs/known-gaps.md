@@ -35,10 +35,17 @@ starting; don't fix from this summary alone.
 
 ## File upload (`specs/04-file-upload-ingestion.md`)
 
-- No storage backend chosen — validation can pass with nowhere to persist the file afterward.
-- Size check loads the whole file into memory before checking size — fine at today's ≤10MB cap,
-  won't scale if caps are raised without moving to streaming checks.
-- Empty (0-byte) uploads currently pass validation and need explicit rejection.
+- **[Closed, B3] Storage backend decided** — local disk for dev (`app/services/data/storage.py`,
+  `UPLOAD_DIR`), object store (S3) for prod; the module is the swap seam.
+- **[Closed, B3]** Empty (0-byte) uploads are rejected explicitly with a `400` in the validator.
+- **[Graceful, B3]** `.xlsx` / `.pdf` uploads pass validation (per FR3) but fail ingestion with a
+  stored reason (`status="failed"`, `error` set) — parsing beyond CSV is deferred. The raw file is
+  still persisted.
+- **[Accepted]** Size check loads the whole file into memory before checking size — fine at today's
+  ≤10MB cap, won't scale if caps are raised without moving to streaming checks.
+- **[B3 contract note]** A fresh upload **replaces** the user's per-user data table (one active data
+  file per user, per `specs/04` §4). `FileUpload.pinecone_namespace` temporarily holds the per-user
+  table name as the storage ref until Pinecone ships.
 
 ## NL→SQL (`specs/05-query-sql-safety.md`)
 
@@ -46,9 +53,9 @@ starting; don't fix from this summary alone.
   `app/services/data/executor.py::user_data_table_name`) plus post-generation validation
   (`assert_user_scoped` rejects any table outside the caller's namespace).
 - **[Closed, B2]** `clean_sql_response()` implemented (plain/fenced/prose extraction) and tested.
-- `build_data_schema()` / `build_sql_prompt(schema=...)` exist, but B3's file ingestion must feed
-  them the **real per-file column metadata** — until then the prompt still falls back to the
-  `sales`/`customers`/`orders` placeholder schema.
+- `build_data_schema()` / `build_sql_prompt(schema=...)` exist and B3 now lands real, typed
+  per-file columns in the per-user table — wiring `build_data_schema()` into the `/chat` prompt
+  (B4) removes the `sales`/`customers`/`orders` placeholder fallback.
 - B2's `INVALID_QUERY` sentinel short-circuits in `execute_sql` (`InvalidQueryError`); the
   user-facing "couldn't turn that into a query" message renders with B4's `POST /chat`.
 
