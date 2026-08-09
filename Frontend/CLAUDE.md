@@ -8,10 +8,11 @@ read all of `docs/` or `specs/` up front** — use §2's table.
 
 Frontend for **BuildifyLabs** (see `../Backend/CLAUDE.md` for the product description). **F0
 foundations are in** — structure (`src/{api,types,lib/schemas,components,features,hooks}`), design
-tokens, the API seam, and the frozen type contract (`src/lib/schemas/visuals.ts`) exist; `src/App.tsx`
-is still a placeholder awaiting the F1 auth screens. Auth, plan/quota, upload, and chat
-(`POST /chat`) have a live backend to build against today (§3); payment needs mocked data behind a
-clean API seam until its route ships.
+tokens, the API seam, and the frozen type contract (`src/lib/schemas/visuals.ts`) exist. **F1 auth
+screens are in** — signup / signin / Google (GIS) / guest (`device_id`) / verify-email /
+forgot- / reset-password, wired to the live backend with route guards (`src/App.tsx` routes them to
+`/app`, guarded). Auth, plan/quota, upload, and chat (`POST /chat`) have a live backend to build
+against today (§3); payment needs mocked data behind a clean API seam until its route ships.
 
 ## 2. What to read, by task
 

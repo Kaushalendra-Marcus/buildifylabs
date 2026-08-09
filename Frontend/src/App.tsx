@@ -1,30 +1,50 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
-import './App.css'
-
 /**
- * App root (F0) — the router (react-router, F0 decision) is wired with a
- * single placeholder route that proves the design tokens + router work. The
- * auth screens (F1) and the Chat Workspace (F2) replace this placeholder; they
- * drop in as new routes without restructuring this file.
+ * App root (F1) — the router (react-router, F0 decision) now serves the auth
+ * screens and the guarded authenticated workspace.
+ *
+ * Routes:
+ * - `/` → the workspace (guards redirect to /signin when signed out)
+ * - `/signin`, `/signup`, `/forgot-password`, `/reset-password`,
+ *   `/verify-email` — auth screens (RequireGuest bounces signed-in users away)
+ * - `/app` — the authenticated workspace (F2 replaces the placeholder shell)
+ *
+ * `useTokenRefresh` re-establishes a session from the stored 7-day refresh
+ * token on app load (in-memory access token, F0 decision).
  */
-function FoundationsPlaceholder() {
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { AuthLayout } from './features/auth/AuthLayout';
+import { ForgotPasswordScreen } from './features/auth/ForgotPasswordScreen';
+import { ResetPasswordScreen } from './features/auth/ResetPasswordScreen';
+import { RequireAuth, RequireGuest } from './features/auth/route-guards';
+import { SigninScreen } from './features/auth/SigninScreen';
+import { SignupScreen } from './features/auth/SignupScreen';
+import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen';
+import { Workspace } from './features/dashboard/Workspace';
+import { useTokenRefresh } from './hooks/useTokenRefresh';
+
+function AppRoutes() {
+  useTokenRefresh();
+
   return (
-    <main className="app-shell">
-      <p className="app-shell__brand">BuildifyLabs</p>
-      <p className="app-shell__note">
-        Foundations are in — auth screens land in F1.
-      </p>
-    </main>
-  )
+    <Routes>
+      <Route path="/" element={<Navigate to="/app" replace />} />
+      <Route path="/app" element={<RequireAuth><Workspace /></RequireAuth>} />
+      <Route element={<RequireGuest><AuthLayout /></RequireGuest>}>
+        <Route path="/signin" element={<SigninScreen />} />
+        <Route path="/signup" element={<SignupScreen />} />
+        <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
+        <Route path="/reset-password" element={<ResetPasswordScreen />} />
+        <Route path="/verify-email" element={<VerifyEmailScreen />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/app" replace />} />
+    </Routes>
+  );
 }
 
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<FoundationsPlaceholder />} />
-        <Route path="*" element={<FoundationsPlaceholder />} />
-      </Routes>
+      <AppRoutes />
     </BrowserRouter>
-  )
+  );
 }

@@ -1,0 +1,27 @@
+/* PlanBadge (F1) — renders the user's plan from AuthResponse.user.plan
+ * (guest|free|pro), token-styled. */
+.plan-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 999px;
+  text-transform: capitalize;
+}
+
+.plan-badge--guest {
+  color: var(--text-secondary);
+  border: 1px solid var(--text-muted);
+}
+
+.plan-badge--free {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.plan-badge--pro {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}

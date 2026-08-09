@@ -42,6 +42,13 @@ back on. Decide deliberately between `localStorage` and a cookie-backed approach
 change too) — don't default to `localStorage` without weighing the tradeoff for a product handling
 business data.
 
+> **F1 (implemented):** all six flows are built as screens — `/signin`, `/signup`, `/verify-email?token=`,
+> `/forgot-password`, `/reset-password?token=`, plus Google (GIS) and guest (`device_id`) entry on
+> `/signin`; `AuthResponse` commits via the auth store and the workspace shows the plan badge
+> (`guest|free|pro`). `device_id` is **required** (backend rejects omission with a clean 422) and
+> persisted per-browser so a guest's quota is reused. Backend errors render **verbatim** (never
+> re-worded) — see `src/lib/errors.ts`.
+
 ## Upload — `specs/04-file-upload-ingestion.md` (live: `POST /files/upload`, `GET /files*`, B3)
 
 ```ts

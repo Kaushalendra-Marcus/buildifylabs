@@ -8,14 +8,43 @@ Legend: ✅ completed · ⚠️ partial · ⛔ blocked · ⏸ deferred/paused
 
 ## Current task
 
-**Phase F1 — Auth screens** `[IMMEDIATE]` (master plan Part F; pre-checkpoint, live backend):
-Signup, Signin, Google (GIS), Guest (`device_id`), Verify-email (`GET /auth/verify-email?token`),
-Forgot-password, Reset-password (min 8 chars). `AuthResponse` handling (user + access + refresh)
-via the F0 `useAuth` hook/store; plan badge (`guest|free|pro`); display generic auth errors
-**verbatim** (anti-enumeration — never re-word client-side); route guards → authenticated workspace;
-styled with F0 tokens.
+**Phase F2 — Chat Workspace shell** `[IMMEDIATE]` (master plan Part F; `specs/14` §3):
+Three regions, **one layout**, no separate drawer/workspace surface: **Header (56px)** — logo, quota
+chip, plan badge, account menu, "new chat"; **Chat history rail** (0 / 280px, **collapsed by default
+<768px**, **overlay** — doesn't push content); **Message stream** (the only place visuals render);
+**Composer** (fixed to bottom of the stream column). No resizable panel, no fullscreen affordance.
+Replaces the F1 `Workspace` placeholder. Depends on: F0. Acceptance: matches `specs/14` §3 layout;
+rail overlays on narrow viewports.
 
 ## Completed tasks
+
+- **F1 — Auth screens** — done, test-verified (`npm run build`, `npm run lint`, `npm test` all
+  green — **19 tests**, up from 6; dev server on 5173):
+  - **Six flows, live API** (`app/routes/auth.py`): Signup, Signin, Google (GIS, button init'd
+    lazily against `VITE_GOOGLE_CLIENT_ID`; absent without it), Guest (`device_id` persisted per
+    browser so a returning guest reuses their quota), Verify-email (`GET /auth/verify-email?token`),
+    Forgot-password, Reset-password (min 8 chars enforced client-side + backend schema layer).
+  - **`AuthResponse` handling** through the F0 `useAuth` hook/store; access/refresh persisted via
+    `token-storage.ts`; **plan badge** (`guest|free|pro`) component; route guards (`RequireAuth` /
+    `RequireGuest` + a token-styled loading screen while the session rehydrates) → authenticated
+    workspace.
+  - **Generic auth errors shown verbatim** (anti-enumeration, `specs/01` §4): new
+    `src/lib/errors.ts` (`getErrorMessage`) passes a string `detail` through untouched; only
+    network/non-API failures get an app-authored fallback. Every screen + GIS callback routes its
+    error through it.
+  - **Workspace placeholder** (`features/dashboard/Workspace.tsx`) — guarded `/app` destination
+    showing user + plan badge + sign out; the F2 shell replaces it without touching routes.
+  - **Routing** (`App.tsx`): `/` and `*` → `/app`; auth screens under a shared `RequireGuest`
+    `AuthLayout`; `/app` wrapped in `RequireAuth`; `useTokenRefresh` re-establishes sessions.
+  - **Tests:** `App.test.tsx` (unauthenticated → sign-in; authenticated → workspace + badge),
+    `auth-screens.test.tsx` (10 tests: verbatim error display, session commit, stable persisted
+    `device_id`, signup/reset min-8 + confirm guards, forgot/reset/verify happy paths + verbatim
+    errors), `PlanBadge.test.tsx` (labels + unknown-plan fallback). `setup.ts` adds explicit RTL
+    cleanup (no `globals: true`). `tsconfig.app.json` adds `gsi` types; `useAuth` helpers now reset
+    the store status to `unauthenticated` on failure so screens/guards never stick on `loading`.
+  - **Docs updated in the same change:** `Frontend/CLAUDE.md` §1 (F1 in), `Frontend/docs/type-contracts.md`
+    (F1 note + `device_id` required); `Frontend/docs/structure.md` untouched (pre-existing stale
+    "nothing decided" intro is out of F1 scope).
 
 - **F0 — Frontend foundations + type-contract freeze** — done, test-verified (`npm run build`,
   `npm run lint`, `npm test` all green; dev server on 5173):
@@ -155,12 +184,13 @@ styled with F0 tokens.
 
 ## What's after
 
-F0 completed the frontend foundations + type-contract freeze; B4 completed the backend core loop.
-Next: the frontend pre-checkpoint phases **F1–F6** (auth screens, chat workspace shell, message
-stream, 7 visual components, composer, remaining states) — F1–F6 build against the **live**
-`POST /chat`/`/chat/flag`/`/files*` API through the F0 `src/api/*` seam. Before any POST-CHECKPOINT
-phase (B5+ / F7+): **define the "worth continuing" bar** (e.g. % of first-time users asking a 2nd
-question in-session) and put the core loop in front of real users (**🚩 CHECKPOINT**, `specs/00` §7).
+F0/F1 completed the frontend foundations + type-contract freeze + the six auth flows; B4 completed
+the backend core loop. Next: the remaining frontend pre-checkpoint phases **F2–F6** (chat workspace
+shell, message stream, 7 visual components, composer, remaining states) — F2–F6 build against the
+**live** `POST /chat`/`/chat/flag`/`/files*` API through the F0 `src/api/*` seam. Before any
+POST-CHECKPOINT phase (B5+ / F7+): **define the "worth continuing" bar** (e.g. % of first-time users
+asking a 2nd question in-session) and put the core loop in front of real users (**🚩 CHECKPOINT**,
+`specs/00` §7).
 
 ## Blocked / deferred
 
@@ -243,12 +273,16 @@ is needed; no pytest-asyncio — each async scenario runs via `asyncio.run`):
   429 on window exhaustion and on lifetime cap.
 - **Migration check:** `alembic heads` = `b4code0000` (chain `9eec775a77e0 → b1code0000 → b3code0000 → b4code0000`).
 
-**Frontend (F0)** — from `Frontend/`: `npm run build` (tsc -b + vite build) ✅, `npm run lint` ✅,
-`npm run test` ✅ (**6 tests**), `npm run dev` boots on **http://localhost:5173** ✅.
-Vitest harness (`vitest.config.ts`, jsdom, `src/test/setup.ts` with jest-dom): `visuals.test.ts`
-(exactly the 7 types; guard rejects old 9-type values), `token-storage.test.ts` (access in memory /
-refresh persisted / clear), `App.test.tsx` (placeholder smoke).
+**Frontend (F1)** — from `Frontend/`: `npm run build` (tsc -b + vite build) ✅, `npm run lint` ✅,
+`npm run test` ✅ (**19 tests**, up from 6), `npm run dev` boots on **http://localhost:5173** ✅.
+Vitest harness (`vitest.config.ts`, jsdom, `src/test/setup.ts` with jest-dom + explicit RTL cleanup):
+`visuals.test.ts` (7 types), `token-storage.test.ts` (access in memory / refresh persisted / clear),
+`App.test.tsx` (routing guards: unauthenticated → sign-in; authenticated → workspace + badge),
+`auth-screens.test.tsx` (10 tests — signin verbatim error + session commit + stable guest
+`device_id`; signup min-8 + confirm guards; forgot/reset/verify happy paths + verbatim errors),
+`PlanBadge.test.tsx` (labels + unknown-plan fallback).
 
 ## Last updated
 
-2026-08-09 (F0 complete — frontend foundations + type-contract freeze; see `git diff` for the exact change set)
+2026-08-09 (F1 complete — six auth flows against the live backend with route guards, plan badge,
+verbatim generic errors; see `git diff` for the exact change set)
