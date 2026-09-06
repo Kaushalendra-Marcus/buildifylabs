@@ -17,6 +17,7 @@ Trust requirements (specs/10 §2) are built in, not retrofitted:
 MVP `source_scope` = `own_data` only; `live_web`/`both` are deferred to B7.
 """
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from uuid import UUID
@@ -42,6 +43,7 @@ from app.services.data.stats import compute_statistics
 from app.services.llm.groq_service import generate_response
 from app.services.web_search import search_web
 from app.services.llm.langchain_pipeline import (
+    ClarificationRequest,
     PipelineOutput,
     fallback_output,
     run_pipeline,
@@ -60,6 +62,14 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 # Upper bound on the raw row slice echoed back in the response (data_preview).
 # The model's answer already summarizes the full set, so this stays lean.
 DATA_PREVIEW_MAX_ROWS = 50
+
+
+def _benchmark_evidence_is_numeric(context: list[str]) -> bool:
+    text = " ".join(context).lower()
+    return bool(
+        re.search(r"(?:score|accuracy|pass rate|benchmark).{0,35}\d", text)
+        or re.search(r"\d.{0,20}(?:score|accuracy|pass rate|benchmark|%)", text)
+    )
 
 
 async def _user_has_data(db: AsyncSession, user_id: UUID) -> bool:
@@ -173,6 +183,33 @@ async def chat(
             web_sources = [
                 {**source, "retrieved_at": retrieved_at} for source in web_sources
             ]
+        if (
+            request.source_scope == "live_web"
+            and any(term in request.query.lower() for term in ("benchmark", "benchmarks"))
+            and not _benchmark_evidence_is_numeric(news_context or [])
+        ):
+            output = PipelineOutput(
+                answer="",
+                visuals=[],
+                insights=[],
+                summary="",
+                root_causes=[],
+                recommendations=[],
+                news_context=news_context or [],
+                anomalies=[],
+                confidence=0.0,
+                clarification=ClarificationRequest(
+                    question=(
+                        "Which benchmark suite and version should I use for the comparison, "
+                        "and which metric matters most?"
+                    ),
+                    options=["Overall score", "Reasoning score", "Coding score", "Speed and cost"],
+                ),
+                web_sources=web_sources,
+            )
+            return await _log_and_return(
+                db, user.id, request.query, output, time.monotonic() - started
+            )
         output = await run_pipeline(
             user_query=request.query,
             db_data=rows,

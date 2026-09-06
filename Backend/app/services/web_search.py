@@ -82,6 +82,8 @@ async def search_web(query: str, company_name: Optional[str] = None) -> WebSearc
     query_lower = original_query.lower()
     if any(term in query_lower for term in ("sales", "revenue", "income", "profit")):
         search_query = f"{search_query} annual report financial results revenue"
+    elif any(term in query_lower for term in ("benchmark", "benchmarks", "leaderboard", "score")):
+        search_query = f"{search_query} benchmark scores leaderboard official results"
 
     search_queries = [search_query]
     comparison = re.search(

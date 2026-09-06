@@ -1,9 +1,11 @@
 /**
- * App root (F1) — the router (react-router, F0 decision) now serves the auth
- * screens and the guarded authenticated workspace.
+ * App root (F1) — the router (react-router, F0 decision) now serves the
+ * public marketing homepage, the auth screens, and the guarded authenticated
+ * workspace.
  *
  * Routes:
- * - `/` → the workspace (guards redirect to /signin when signed out)
+ * - `/` → the public marketing LandingPage (no guard — same page whether or
+ *   not you're signed in; its nav swaps in a "Go to app" action once you are)
  * - `/signin`, `/signup`, `/forgot-password`, `/reset-password`,
  *   `/verify-email` — auth screens (RequireGuest bounces signed-in users away)
  * - `/app` — the Chat Workspace shell (F2)
@@ -20,6 +22,7 @@ import { SigninScreen } from './features/auth/SigninScreen';
 import { SignupScreen } from './features/auth/SignupScreen';
 import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen';
 import { ChatWorkspace } from './features/chat/ChatWorkspace';
+import { LandingPage } from './features/marketing/LandingPage';
 import { useTokenRefresh } from './hooks/useTokenRefresh';
 
 function AppRoutes() {
@@ -27,7 +30,7 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route path="/" element={<Navigate to="/app" replace />} />
+      <Route path="/" element={<LandingPage />} />
       <Route path="/app" element={<RequireAuth><ChatWorkspace /></RequireAuth>} />
       <Route element={<RequireGuest><AuthLayout /></RequireGuest>}>
         <Route path="/signin" element={<SigninScreen />} />
@@ -36,7 +39,7 @@ function AppRoutes() {
         <Route path="/reset-password" element={<ResetPasswordScreen />} />
         <Route path="/verify-email" element={<VerifyEmailScreen />} />
       </Route>
-      <Route path="*" element={<Navigate to="/app" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

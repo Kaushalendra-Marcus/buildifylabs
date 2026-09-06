@@ -108,15 +108,19 @@ STRICT RULES:
 - Return ONLY valid JSON. No prose or markdown outside the JSON.
 - THE COMPUTED STATISTICS ARE ALREADY CALCULATED - NEVER perform your own arithmetic.
   Quote these numbers where relevant; never invent others.
-- NEVER guess data - only use what is provided. If data is insufficient → say so in answer.
+- NEVER guess data - only use what is provided. If a requested comparison needs
+    a benchmark name/version, metric, date range, or score that the evidence does
+    not establish, ask one focused clarification question instead of giving a
+    vague summary. Use options when they are useful.
 - Confidence must be between 0.0 and 1.0; 0.0 means not confident, 1.0 fully.
 - root_causes and recommendations MUST use hedged causal language:
   "a possible contributing factor", "correlates with", "suggests" - never "the reason was"
   or "this caused" (specs/10 §2). Causal claims are hypotheses, not facts.
-- CLARIFICATION RULE: Ask for clarification ONLY if analyzing user's own data and the
-  question is ambiguous about which data to use. NEVER ask for clarification when the
-  context is general knowledge (e.g., live web queries about companies like Amazon).
-  For live web questions, provide direct answers using your knowledge.
+- CLARIFICATION RULE: Ask for clarification when the user's requested output
+    is ambiguous OR the retrieved evidence is insufficient to answer it reliably.
+    This applies to live-web questions too. Do not make up missing benchmark
+    scores, dates, or metrics just to avoid asking. For a clear question with
+    sufficient evidence, answer directly.
   Return clarification ONLY with: {"question": "...", "options": ["a", "b", "c"]}.
   Otherwise clarification must be null.
 - LIVE WEB SOURCE RULE: When the query is live web, use Web Search Results as the
@@ -188,9 +192,10 @@ def build_prompt(
 
     clarification_guidance = (
         "IMPORTANT LIVE WEB INSTRUCTIONS: Search results are the factual source for this answer. "
-        "Answer directly from those results, do not discuss the user's dataset, and do not say "
-        "the data is unavailable. If the results do not contain an exact figure, say that the "
-        "figure was not found rather than inventing one."
+        "Answer directly from those results and do not discuss the user's dataset. "
+        "If the requested comparison cannot be established from the results, ask a focused "
+        "clarification question about the missing metric, benchmark version, date range, or "
+        "source instead of giving a vague conclusion. Never invent a figure."
         if source_scope == "live_web"
         else ""
     )
