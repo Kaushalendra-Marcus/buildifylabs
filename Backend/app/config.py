@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # retire 2026-08-16; needs a durable choice before then (see plan B5).
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
+    WEB_SEARCH_API_KEY: Optional[str] = Field(None, env="WEB_SEARCH_API_KEY")
+    WEB_SEARCH_MAX_RESULTS: int = 5
+
     HF_API_KEY: Optional[str] = Field(None, env="HF_API_KEY")
     HF_MODEL: str = "mistralai/Mixtral-8x7B-Instruct-v0.1"
 

@@ -56,6 +56,13 @@ class ClarificationRequest(BaseModel):
     options: List[str]
 
 
+class WebSource(BaseModel):
+    title: str
+    url: str
+    provider: str
+    retrieved_at: str
+
+
 class PipelineOutput(BaseModel):
     answer: str
     visuals: List[VisualOutput]
@@ -64,6 +71,7 @@ class PipelineOutput(BaseModel):
     root_causes: List[str]
     recommendations: List[str]
     news_context: List[str]
+    web_sources: List[WebSource] = Field(default_factory=list)
     anomalies: List[str]
     confidence: float = Field(ge=0.0, le=1.0)  # bounded - closed an old gap
     # Alternate response mode (specs/06 FR7): when populated, the other answer
@@ -83,7 +91,7 @@ You will receive:
 - a plain-English User Query
 - Business Data (the raw rows returned by an executed query against the user's own data)
 - Computed Statistics (numbers ALREADY calculated by deterministic code)
-- News Context (optional, only when the user asked for live web context)
+- Web Search Results (fresh results retrieved from the internet for live-web queries)
 
 Your job: answer the query with deep reasoning, and return a strict JSON object.
 
@@ -111,6 +119,18 @@ STRICT RULES:
   For live web questions, provide direct answers using your knowledge.
   Return clarification ONLY with: {"question": "...", "options": ["a", "b", "c"]}.
   Otherwise clarification must be null.
+- LIVE WEB SOURCE RULE: When the query is live web, use Web Search Results as the
+    source of factual claims. Do not mention, compare against, or apologize about
+    missing user data. Do not say "the provided dataset" or "based on publicly
+    available information" unless that wording is directly supported by a result.
+    Answer the user's question directly and include the relevant current figures.
+- STOCK QUERY RULE: For stock-price questions, report the one-month movement for
+    each requested company when the search results provide it. Clearly label the
+    period and source context; do not substitute company revenue or a 12-month
+    return for a requested one-month price movement.
+- CHART RULE: If the user asks for a chart, graph, or chart form, return a graph
+    visual using the supplied verified series. Never omit a supplied company or
+    fabricate a series.
 - If no visual fits, return an empty visuals list "".
 
 Return this exact JSON:
@@ -150,6 +170,9 @@ def build_prompt(
     rows, truncation_note = _truncate_rows(db_data)
     data_section = "\n".join(json.dumps(rows, indent=2, default=str)) + truncation_note
 
+    if source_scope == "live_web":
+        data_section = "Not applicable - this is a live web query; do not discuss user data."
+
     computed_section = (
         json.dumps(computed_numbers, indent=2, default=str) or "None"
     )
@@ -164,8 +187,10 @@ def build_prompt(
     company_section = company_name or "Not provided"
 
     clarification_guidance = (
-        "IMPORTANT: This is a live web query for general knowledge. Provide direct answers "
-        "using your knowledge. Do NOT ask for clarification."
+        "IMPORTANT LIVE WEB INSTRUCTIONS: Search results are the factual source for this answer. "
+        "Answer directly from those results, do not discuss the user's dataset, and do not say "
+        "the data is unavailable. If the results do not contain an exact figure, say that the "
+        "figure was not found rather than inventing one."
         if source_scope == "live_web"
         else ""
     )
@@ -183,7 +208,7 @@ Business Data (rows returned by the executed SQL):
 Computed Statistics (already calculated by code - narrate these, never re-compute):
 {computed_section}
 
-News Context:
+Web Search Results:
 {news_section}
 
 {clarification_guidance}

@@ -23,6 +23,13 @@ export interface ClarificationRequest {
   options: string[]; // quick-pick choices; empty if none fit
 }
 
+export interface WebSource {
+  title: string;
+  url: string;
+  provider: string;
+  retrieved_at: string;
+}
+
 /** POST /chat returns this directly. */
 export interface PipelineOutput {
   answer: string;
@@ -32,6 +39,7 @@ export interface PipelineOutput {
   root_causes: string[]; // hedged causal language by design (specs/10 §2)
   recommendations: string[];
   news_context: string[]; // empty until specs/07
+  web_sources?: WebSource[];
   anomalies: string[];
   confidence: number; // bounded 0..1 server-side (Field(ge=0.0, le=1.0))
   clarification: ClarificationRequest | null;

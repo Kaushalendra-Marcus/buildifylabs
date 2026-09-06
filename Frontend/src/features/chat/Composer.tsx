@@ -62,7 +62,8 @@ export function Composer() {
     // Guard: identical for the button/submit and the Enter key, and only for
     // non-empty text. A 429 flows through as a quota notice in the stream —
     // the input never gets locked by quota (§5.4/§5.6).
-    const pending: PendingKind = coldStartSeen ? 'thinking' : 'cold-start';
+    const pending: PendingKind =
+      scope === 'live_web' ? 'searching' : coldStartSeen ? 'thinking' : 'cold-start';
     coldStartSeen = true;
     useChatStore.getState().setPending(pending);
     useChatStore
@@ -70,6 +71,18 @@ export function Composer() {
       .addUserMessage(text, useChatStore.getState().activeFileName);
 
     try {
+      if (scope === 'live_web') {
+        window.setTimeout(() => {
+          if (useChatStore.getState().pending === 'searching') {
+            useChatStore.getState().setPending('judging');
+          }
+        }, 700);
+        window.setTimeout(() => {
+          if (useChatStore.getState().pending === 'judging') {
+            useChatStore.getState().setPending('thinking');
+          }
+        }, 1400);
+      }
       const output = await sendQuery({ query: text, source_scope: scope });
       useQuotaStore.getState().recordQuestion();
       useChatStore.getState().addAssistantMessage(output);

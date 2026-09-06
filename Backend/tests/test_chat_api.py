@@ -274,10 +274,15 @@ class TestGracefulFallbacks:
         assert body["confidence"] == 0.0
         assert body["query_log_id"]
 
-    def test_live_web_scope_is_gracefully_unsupported(self, client, seed):
+    def test_live_web_scope_uses_retrieved_web_context(self, client, seed, monkeypatch):
+        mock_llms(monkeypatch)
+        monkeypatch.setattr(
+            "app.routes.chat.search_web",
+            lambda query, company_name=None: asyncio.sleep(0, result=["Live result for q"]),
+        )
         resp = client.post("/chat", json={"query": "q", "source_scope": "live_web"})
         assert resp.status_code == 200
-        assert "Live web" in resp.json()["answer"]
+        assert resp.json()["answer"]
 
     def test_no_data_returns_graceful_message(self, client, seed):
         set_active(TEST_ID_NO_DATA)

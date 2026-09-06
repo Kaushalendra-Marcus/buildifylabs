@@ -24,7 +24,13 @@
 import { create } from 'zustand';
 import type { PipelineOutput } from '../../types/chat';
 
-export type PendingKind = 'cold-start' | 'thinking';
+export type PendingKind = 'cold-start' | 'searching' | 'judging' | 'thinking';
+
+export interface ChatConversation {
+  id: string;
+  title: string;
+  updatedAt: number;
+}
 
 export interface UserChatMessage {
   id: string;
@@ -78,6 +84,7 @@ export function classifyAssistantOutput(
 
 interface ChatState {
   messages: ChatMessage[];
+  conversations: ChatConversation[];
   /** In-flight send indicator (F5/F6): `cold-start` on a session's first
    *  request (§5.7), `thinking` otherwise (F6 renders it). */
   pending: PendingKind | null;
@@ -106,12 +113,21 @@ function makeId(): string {
 
 export const useChatStore = create<ChatState>((set) => ({
   messages: [],
+  conversations: [],
   pending: null,
   activeFileName: null,
   hasData: null,
 
 addUserMessage: (content, fileName = null) =>
     set((state) => ({
+      conversations: [
+        {
+          id: makeId(),
+          title: content.trim().slice(0, 48),
+          updatedAt: Date.now(),
+        },
+        ...state.conversations,
+      ],
       messages: [
         ...state.messages,
         { id: makeId(), role: 'user', content, fileName },

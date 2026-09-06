@@ -18,6 +18,7 @@ MVP `source_scope` = `own_data` only; `live_web`/`both` are deferred to B7.
 """
 import logging
 import time
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -39,6 +40,7 @@ from app.services.data.executor import (
 )
 from app.services.data.stats import compute_statistics
 from app.services.llm.groq_service import generate_response
+from app.services.web_search import search_web
 from app.services.llm.langchain_pipeline import (
     PipelineOutput,
     fallback_output,
@@ -150,15 +152,32 @@ async def chat(
                 db, user.id, request.query, output, time.monotonic() - started
             )
     else:
-        # For live_web only, no SQL needed
+        # Live web has no SQL; its context comes from the search adapter below.
         cleaned_sql = None
 
     try:
         computed = compute_statistics(rows) if rows else {}
+        news_context = (
+            await search_web(request.query, request.company_name)
+            if request.source_scope in ("live_web", "both")
+            else None
+        )
+        web_sources = []
+        market_data = []
+        if news_context is not None:
+            search_result = news_context
+            news_context = search_result.context if hasattr(search_result, "context") else search_result
+            web_sources = search_result.sources if hasattr(search_result, "sources") else []
+            market_data = search_result.market_data if hasattr(search_result, "market_data") else []
+            retrieved_at = datetime.now(timezone.utc).isoformat()
+            web_sources = [
+                {**source, "retrieved_at": retrieved_at} for source in web_sources
+            ]
         output = await run_pipeline(
             user_query=request.query,
             db_data=rows,
             computed_numbers=computed,
+            news_context=news_context,
             source_scope=request.source_scope,
             company_name=request.company_name,
         )
@@ -173,6 +192,24 @@ async def chat(
         if cleaned_sql:
             output.sql_query = cleaned_sql
         output.data_preview = rows[:DATA_PREVIEW_MAX_ROWS] if rows else []
+        output.web_sources = web_sources
+        if market_data and any(
+            term in request.query.lower() for term in ("chart", "graph", "plot")
+        ):
+            output.visuals = [
+                {
+                    "visual_type": "graph",
+                    "title": "One-month stock performance",
+                    "props": {
+                        "chart_type": "line",
+                        "labels": market_data[0]["labels"],
+                        "datasets": [
+                            {"name": item["entity"], "values": item["values"]}
+                            for item in market_data
+                        ],
+                    },
+                }
+            ]
 
     return await _log_and_return(
         db, user.id, request.query, output, time.monotonic() - started

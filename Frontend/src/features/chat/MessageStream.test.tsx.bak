@@ -352,9 +352,9 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
     render(<MessageStream />)
 
     expect(
-      screen.getByText(
-        /You haven't uploaded any data yet.*get started/,
-      ).closest('.message--no-data'),
+      screen.getByText("You haven't uploaded any data yet").closest(
+        '.message--no-data',
+      ),
     ).toBeInTheDocument()
   })
 })

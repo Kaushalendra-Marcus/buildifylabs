@@ -14,12 +14,14 @@ import { AssistantMessage } from './messages/AssistantMessage';
 import { SystemNotice } from './messages/SystemNotice';
 import { ColdStartNotice } from './messages/ColdStartNotice';
 import { ThinkingIndicator } from './messages/ThinkingIndicator';
+import { useScopeStore } from './scope-store';
 import { EmptyThread } from './messages/EmptyThread';
 import './message-stream.css';
 
 export function MessageStream() {
   const messages = useChatStore((state) => state.messages);
   const pending = useChatStore((state) => state.pending);
+  const scope = useScopeStore((state) => state.scope);
 
   // F6 §6: no messages yet → the empty-thread invite (guest / no-files).
   if (messages.length === 0) {
@@ -43,7 +45,9 @@ export function MessageStream() {
           return <SystemNotice key={message.id} message={message} />;
         })}
         {pending === 'cold-start' && <ColdStartNotice />}
-        {pending === 'thinking' && <ThinkingIndicator />}
+        {(pending === 'searching' || pending === 'judging' || pending === 'thinking') && (
+          <ThinkingIndicator liveWeb={scope === 'live_web'} stage={pending} />
+        )}
       </div>
     </div>
   );

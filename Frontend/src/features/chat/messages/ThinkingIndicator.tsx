@@ -4,13 +4,29 @@
  * distinct from the F5 cold-start state (§5.7): a tiny right-aligned row of
  * dots, not a full-width card.
  */
-export function ThinkingIndicator() {
+export function ThinkingIndicator({
+  liveWeb = false,
+  stage = 'thinking',
+}: {
+  liveWeb?: boolean;
+  stage?: 'searching' | 'judging' | 'thinking';
+}) {
+  const label = !liveWeb
+    ? 'Thinking'
+    : stage === 'searching'
+      ? 'Searching the internet'
+      : stage === 'judging'
+        ? 'Checking whether the evidence is sufficient'
+        : 'Using the verified results to prepare your answer';
   return (
     <div
       className="thinking-indicator"
       role="status"
-      aria-label="Assistant is thinking"
+      aria-label={liveWeb ? label : 'Assistant is thinking'}
     >
+      <span className="thinking-indicator__label">
+        {label}
+      </span>
       <span className="thinking-indicator__dot" />
       <span className="thinking-indicator__dot" />
       <span className="thinking-indicator__dot" />
