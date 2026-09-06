@@ -278,7 +278,7 @@ class TestGracefulFallbacks:
         mock_llms(monkeypatch)
         monkeypatch.setattr(
             "app.routes.chat.search_web",
-            lambda query, company_name=None: asyncio.sleep(0, result=["Live result for q"]),
+            lambda query, company_name=None, prior_clarification=None: asyncio.sleep(0, result=["Live result for q"]),
         )
         resp = client.post("/chat", json={"query": "q", "source_scope": "live_web"})
         assert resp.status_code == 200
@@ -312,6 +312,122 @@ class TestGracefulFallbacks:
         assert body["clarification"]["question"] == "Which quarter did you mean?"
         assert body["clarification"]["options"] == ["Q1", "Q2", "Q3"]
         assert body["answer"] == ""
+
+    def test_clarification_with_null_options_flows_through_route(self, client, seed, monkeypatch):
+        # The model sometimes emits options: null (seen live with Groq). That
+        # must coerce to [] and still render as a clarification — never a
+        # generic fallback.
+        clar = {"question": "Which AI business should I compare?", "options": None}
+        payload = {
+            **PIPELINE_JSON,
+            "answer": "",
+            "insights": [],
+            "summary": "",
+            "root_causes": [],
+            "recommendations": [],
+            "confidence": 0.0,
+            "clarification": clar,
+        }
+        mock_llms(monkeypatch, pipeline_json=payload)
+        resp = client.post("/chat", json={"query": "which ai business is best?"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["clarification"]["question"] == "Which AI business should I compare?"
+        assert body["clarification"]["options"] == []
+        assert body["answer"] == ""
+
+    def test_answer_without_visuals_gets_guaranteed_table(self, client, seed, monkeypatch):
+        # The narrator returns a naked answer over real rows: the guarantee
+        # must table/chart it from the seeded sales rows, values traceable.
+        payload = {**PIPELINE_JSON, "visuals": []}
+        mock_llms(monkeypatch, pipeline_json=payload)
+        resp = client.post("/chat", json={"query": "how is revenue?"})
+        assert resp.status_code == 200
+        body = resp.json()
+        kinds = [visual["visual_type"] for visual in body["visuals"]]
+        assert "table" in kinds and "graph" in kinds
+        table = next(v for v in body["visuals"] if v["visual_type"] == "table")
+        flat = json.dumps(table["props"]["values"])
+        assert "100" in flat and "250" in flat
+        graph = next(v for v in body["visuals"] if v["visual_type"] == "graph")
+        assert graph["props"]["chart_type"] == "bar"
+        assert graph["props"]["labels"] == ["east", "west"]
+
+    def test_followup_chart_uses_prior_answer_data(self, client, seed, monkeypatch):
+        # Turn 1 logs an answer with a data preview; turn 2 ("show in chart
+        # form", live web so no fresh rows) must resolve from the prior rows
+        # instead of clarifying.
+        mock_llms(monkeypatch, pipeline_json={**PIPELINE_JSON, "visuals": []})
+        first = client.post("/chat", json={"query": "how is revenue?"})
+        assert first.status_code == 200
+        assert first.json()["data_preview"]
+
+        monkeypatch.setattr(
+            "app.routes.chat.search_web",
+            lambda query, company_name=None, prior_clarification=None: asyncio.sleep(0, result=["Live result for q"]),
+        )
+        second = client.post(
+            "/chat", json={"query": "show in chart form", "source_scope": "live_web"}
+        )
+        assert second.status_code == 200
+        body = second.json()
+        assert body["clarification"] is None
+        kinds = [visual["visual_type"] for visual in body["visuals"]]
+        assert "graph" in kinds
+        graph = next(v for v in body["visuals"] if v["visual_type"] == "graph")
+        assert graph["props"]["labels"] == ["east", "west"]
+
+    def test_live_web_answer_carries_thinking_sources_and_citations(
+        self, client, seed, monkeypatch
+    ):
+        from types import SimpleNamespace
+
+        # A qualitative web answer: citations kept iff they point at listed
+        # snippets, a sources table synthesized, and a thinking trace present.
+        mock_llms(
+            monkeypatch,
+            pipeline_json={
+                **PIPELINE_JSON,
+                "answer": "Acme raised $50M [1] while others surged [7].",
+                "visuals": [],
+            },
+        )
+        monkeypatch.setattr(
+            "app.routes.chat.search_web",
+            lambda query, company_name=None, prior_clarification=None: asyncio.sleep(
+                0,
+                result=SimpleNamespace(
+                    context=["Acme raised $50M in 2024", "Globex launched Y"],
+                    sources=[
+                        {
+                            "title": "Acme funding",
+                            "url": "https://a.example",
+                            "provider": "DuckDuckGo",
+                            "retrieved_at": "x",
+                        },
+                        {
+                            "title": "Globex launch",
+                            "url": "https://b.example",
+                            "provider": "DuckDuckGo",
+                            "retrieved_at": "x",
+                        },
+                    ],
+                    market_data=[],
+                ),
+            ),
+        )
+        resp = client.post(
+            "/chat", json={"query": "startup funding news", "source_scope": "live_web"}
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "[1]" in body["answer"]
+        assert "[7]" not in body["answer"]
+        tables = [v for v in body["visuals"] if v["visual_type"] == "table"]
+        assert tables and tables[0]["title"] == "Sources cited"
+        assert body["thinking"]
+        assert any("Judged" in step for step in body["thinking"])
+        assert len(body["web_sources"]) == 2
 
 
 class TestFlagEndpoint:

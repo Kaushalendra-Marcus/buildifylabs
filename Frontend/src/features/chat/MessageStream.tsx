@@ -13,7 +13,7 @@ import { UserMessage } from './messages/UserMessage';
 import { AssistantMessage } from './messages/AssistantMessage';
 import { SystemNotice } from './messages/SystemNotice';
 import { ColdStartNotice } from './messages/ColdStartNotice';
-import { ThinkingIndicator } from './messages/ThinkingIndicator';
+import { ProcessRunning } from './messages/ProcessRunning';
 import { useScopeStore } from './scope-store';
 import { EmptyThread } from './messages/EmptyThread';
 import './message-stream.css';
@@ -46,7 +46,7 @@ export function MessageStream() {
         })}
         {pending === 'cold-start' && <ColdStartNotice />}
         {(pending === 'searching' || pending === 'judging' || pending === 'thinking') && (
-          <ThinkingIndicator liveWeb={scope === 'live_web'} stage={pending} />
+          <ProcessRunning liveWeb={scope === 'live_web'} stage={pending} />
         )}
       </div>
     </div>

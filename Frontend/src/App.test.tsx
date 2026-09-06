@@ -59,9 +59,9 @@ describe('App routing (F1 auth screens + landing)', () => {
 
     render(<App />)
     // F2 shell: the Chat Workspace replaces the F1 Workspace placeholder.
-    expect(
-      await screen.findByRole('button', { name: 'New chat' }),
-    ).toBeInTheDocument()
+    // "New chat" lives in both the header and the history rail.
+    const newChatButtons = await screen.findAllByRole('button', { name: 'New chat' });
+    expect(newChatButtons.length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('complementary', { name: 'Chat history' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Message stream' })).toBeInTheDocument()
     expect(screen.getByText('Ada')).toBeInTheDocument()

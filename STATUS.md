@@ -16,6 +16,30 @@ question in-session) and the core loop has real-user evidence.
 
 ## Completed tasks
 
+- **Pipeline decision-loop hardening (B4 follow-up)** — done, test-verified (backend **160 tests**,
+  159 green + 1 pre-existing env failure in `test_window_exhausted_returns_429`, which fails
+  identically on the clean tree; frontend build/lint/`npm test` all green — **89 tests**):
+  `run_pipeline` is now judge → narrate → guarantee (FR8/FR9, specs/06): an LLM sufficiency
+  verdict from real tool outputs, prior-turn context from QueryLogs (prior clarification +
+  data digest) so follow-ups like "chart that" resolve instead of looping, an anti-repeat
+  backstop (same question twice → one best-effort answer), and a deterministic visual
+  guarantee (date→line, categories→bar, grounding table, headline metric, generic market
+  graph — values only from real rows/stats/series). The route's hardcoded "One-month stock"
+  chart hack is deleted. No contract change — frontend untouched.
+
+- **Pipeline live-hardening round 2** — done, test-verified (backend **178 tests**, 177 green + the same
+  1 pre-existing env failure; frontend build/lint/`npm test` all green — **93 tests**): (1) LLM query
+  framing — live scopes rewrite the message (merging appended clarification answers) into 1–3 clean
+  queries with a community-discussion variant when opinions are sought, fanned out with dedupe, and
+  any entity resolves to a market symbol generically (was a 5-name hardcoded list); raw user text
+  never hits search as-is. (2) Empty-completion retries for judge and narration (the exact live
+  failure in the logs). (3) Requested output shapes ("as a bar chart") honored query→synthesis.
+  (4) Numbered-snippet `[n]` citations with phantom-marker stripping. (5) Machine-written `thinking`
+  trace on every run (additive field). (6) Sources-table guarantee for web-only answers.
+  (7) Clarifications accept free-text replies as well as pills (frontend); empty options are
+  backfilled from the judge's evidence-grounded suggestions so both always render together.
+  Specs/06 FR10–FR11.
+
 - **F6 — Remaining states** — done, test-verified (`npm run build`, `npm run lint`, `npm test`
   all green — **65 tests**, up from 56; dev server boots on 5173):
   - **`EmptyThread.tsx`** (new, `messages/`, specs/14 §6) — the empty thread renders when the

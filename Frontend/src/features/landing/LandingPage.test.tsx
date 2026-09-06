@@ -50,4 +50,25 @@ describe('LandingPage', () => {
       screen.getByRole('textbox', { name: 'Ask a business question' }),
     ).toHaveValue('Forecast next quarter')
   })
+
+  it('shows an honest audience strip instead of fake customer logos', () => {
+    const { container } = renderLanding()
+    expect(
+      screen.getByText('Built for operators who live in spreadsheets'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('D2C founders')).toBeInTheDocument()
+    for (const fake of ['Acme Corp', 'Hooli', 'Umbrella', 'Stark']) {
+      expect(container.textContent).not.toContain(fake)
+    }
+  })
+
+  it('reveals scroll sections and shows the fox CTA art', () => {
+    const { container } = renderLanding()
+    // No IntersectionObserver in jsdom — everything reveals immediately.
+    for (const el of container.querySelectorAll('.bl-reveal')) {
+      expect(el).toHaveClass('is-visible')
+    }
+    const art = container.querySelector<HTMLImageElement>('.bl-cta__art img')
+    expect(art?.getAttribute('src')).toBe('/login.png')
+  })
 })

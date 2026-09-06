@@ -60,6 +60,11 @@
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
+  text-decoration: none;
+}
+
+a.chat-header__brand:hover .chat-header__brand-name {
+  color: var(--accent);
 }
 
 .chat-header__brand-icon {
@@ -137,47 +142,317 @@
   position: absolute;
   right: 0;
   top: calc(100% + 8px);
-  min-width: 160px;
+  min-width: 232px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   background: var(--surface-raised);
-  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
   box-shadow: var(--elevation-raised);
   padding: 6px;
   z-index: 50;
 }
 
 .account-menu__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+.account-menu__identity-name {
   font-size: var(--font-size-caption);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-primary);
-  padding: 6px 8px 8px;
-  border-bottom: 1px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
-  margin-bottom: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.account-menu__identity-email {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-menu__divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 6px 4px;
+}
+
 .account-menu__menu button {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  width: 100%;
   font: inherit;
   font-size: var(--font-size-caption);
   color: var(--text-secondary);
   background: transparent;
   border: none;
-  border-radius: 6px;
-  padding: 8px 10px;
+  border-radius: 8px;
+  padding: 9px 12px;
   cursor: pointer;
   text-align: left;
+  white-space: nowrap;
+}
+
+.account-menu__menu button svg {
+  flex: none;
+  color: var(--text-muted);
 }
 
 .account-menu__menu button:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.account-menu__menu button:hover svg {
+  color: var(--accent);
+}
+
+.account-menu__menu button.account-menu__item--danger {
   color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.account-menu__menu button.account-menu__item--danger svg {
+  color: var(--danger);
+}
+
+.account-menu__menu button.account-menu__item--danger:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.account-menu__menu button.account-menu__item--danger:hover svg {
+  color: var(--danger);
+}
+
+/* ---------- Account dialogs (plan / data sources / contact) ---------- */
+
+.account-dialog-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.account-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  border: none;
+  padding: 0;
+  cursor: default;
+}
+
+.account-dialog {
+  position: relative;
+  width: min(400px, calc(100vw - 32px));
+  max-height: min(560px, calc(100dvh - 64px));
+  overflow-y: auto;
+  background: var(--surface-raised);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  box-shadow: var(--elevation-raised);
+  padding: 18px;
+}
+
+.account-dialog__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.account-dialog__title {
+  margin: 0;
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.account-dialog__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.account-dialog__close:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.account-dialog__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.account-dialog__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--font-size-caption);
+}
+
+.account-dialog__label {
+  flex: none;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.account-dialog__value {
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.account-dialog__note {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.account-dialog__error {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--danger);
+}
+
+.account-dialog__sent {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  color: var(--success);
+}
+
+.account-dialog__primary {
+  align-self: flex-start;
+  font: inherit;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: #1c1917;
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  padding: 9px 16px;
+  cursor: pointer;
+}
+
+.account-dialog__primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.account-dialog__primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.account-dialog__file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.account-dialog__file {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--surface-page);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.account-dialog__file-name {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-dialog__chip {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 2px 9px;
+  color: var(--text-muted);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 45%, transparent);
+}
+
+.account-dialog__chip--completed {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 45%, transparent);
+}
+
+.account-dialog__chip--failed {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.account-dialog__chip--processing {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.account-dialog__form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.account-dialog__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.account-dialog__form input,
+.account-dialog__form textarea {
+  font: inherit;
+  font-size: var(--font-size-body);
+  font-weight: 400;
+  color: var(--text-primary);
+  background: var(--surface-page);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 40%, transparent);
+  border-radius: 8px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.account-dialog__form input:focus,
+.account-dialog__form textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+  border-color: transparent;
 }
 
 /* ---------- Body: rail + main column ---------- */
@@ -223,7 +498,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin: 12px 0 0;
+  margin: 8px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -231,7 +506,7 @@
 .history-rail__conversation {
   width: 100%;
   padding: 9px 10px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 6px;
   color: var(--text-secondary);
   background: transparent;
@@ -457,6 +732,53 @@
 
 .history-rail__conversation {
   border-radius: 8px;
+}
+
+.history-rail__top {
+  flex: none;
+  padding: 16px 16px 4px;
+}
+
+.history-rail__new-chat {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  font: inherit;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+
+.history-rail__new-chat:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+}
+
+.history-rail__group {
+  margin: 0 0 14px;
+}
+
+.history-rail__group:last-child {
+  margin-bottom: 0;
+}
+
+.history-rail__group .history-rail__heading {
+  padding: 10px 10px 2px;
+}
+
+.history-rail__conversation--active {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  font-weight: 600;
 }
 
 /* ---------- Slim dark scrollbars ---------- */

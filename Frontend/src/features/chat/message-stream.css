@@ -398,6 +398,8 @@
 .message--clarification {
   align-items: stretch;
   gap: 10px;
+  border-left: 3px solid var(--accent);
+  padding-left: 14px;
 }
 
 .message__clarification-eyebrow {
@@ -434,6 +436,77 @@
 
 .message__clarification-option:hover {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* Free-text reply: same follow-up path as tapping a pill. */
+
+.message__clarification-custom {
+  margin-top: 4px;
+  max-width: 480px;
+}
+
+.message__clarification-custom-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.message__clarification-custom-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-card);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 6px 6px 6px 14px;
+}
+
+.message__clarification-custom-row:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.message__clarification-custom-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--font-size-caption);
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  padding: 6px 0;
+}
+
+.message__clarification-custom-input::placeholder {
+  color: var(--text-muted);
+}
+
+.message__clarification-custom-input:focus {
+  outline: none;
+}
+
+.message__clarification-custom-send {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  cursor: pointer;
+}
+
+.message__clarification-custom-send:hover:not(:disabled) {
+  color: #14100a;
+  background: var(--accent);
+}
+
+.message__clarification-custom-send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* ---------- 4.4 Fallback (neutral notice) ---------- */
@@ -777,4 +850,281 @@
     animation: none;
     opacity: 0.6;
   }
+}
+
+/* ---------- Answer citations — amber superscripts, never purple ---------- */
+
+.answer-cite {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  margin: 0 2px;
+  border-radius: 5px;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: super;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  text-decoration: none;
+  scroll-margin-top: 80px;
+}
+
+.answer-cite:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* ---------- Evidence stack: sources / process / insights toggles ---------- */
+
+.evidence-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.evidence-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  align-self: flex-start;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 3px 6px 3px 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.evidence-toggle:hover {
+  color: var(--text-secondary);
+}
+
+.evidence-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.evidence-badge--own {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.evidence-badge--web {
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--text-muted) 45%, transparent);
+}
+
+/* ---------- Source cards (numbered, citation targets) ---------- */
+
+.sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.source-card {
+  display: flex;
+  gap: 12px;
+  background: var(--surface-card);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  padding: 12px 14px;
+  scroll-margin-top: 80px;
+}
+
+.source-card__number {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.source-card__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.source-card__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.source-card__title svg {
+  flex: none;
+  color: var(--accent);
+}
+
+.source-card__title a {
+  color: var(--text-primary);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-card__title a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.source-card__subtitle {
+  margin: 0;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.source-card__detail {
+  margin: 4px 0 0;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Process card (trace + running) ---------- */
+
+.process-card {
+  background: var(--surface-card);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.process-card__eyebrow {
+  margin: 0;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.process-card__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--font-size-caption);
+}
+
+.process-card__status {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--success);
+}
+
+.process-card__status--active {
+  color: var(--accent);
+}
+
+.process-card__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: 0.5;
+}
+
+.process-card__spinner {
+  animation: process-spin 1s linear infinite;
+}
+
+@keyframes process-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.process-card__label {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.process-card__detail {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 55%;
+}
+
+.process-card__running {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.process-card--running {
+  align-self: stretch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .process-card__spinner {
+    animation: none;
+  }
+}
+
+/* ---------- Insights lede inside the evidence stack ---------- */
+
+.insights-strip__lede {
+  margin: 0 0 2px;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* ---------- Trust footer separators ---------- */
+
+.trust-footer__sep {
+  color: color-mix(in srgb, var(--text-muted) 60%, transparent);
+  user-select: none;
 }

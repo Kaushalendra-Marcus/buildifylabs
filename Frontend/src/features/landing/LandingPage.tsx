@@ -11,7 +11,7 @@
  * Theme: always dark (like the references). Accent is the loader's
  * amber/ember pair (#ffbf48 / #be4a1d) — never purple. The four supplied
  * Uiverse elements are all used, re-skinned to that pair:
- *  - `.bl-orb` — the gooey loader, hero + CTA decoration
+ *  - `GooLoader` — the gooey loader (andrew-manzyk), report + CTA decoration
  *  - `.bl-grid-bg` — the faint grid, hero backdrop
  *  - `.bl-ask` — the glowing conic-border input, hero ask box
  *  - `.bl-wave` — the loading bars, demo strip (amber, not blue)
@@ -22,19 +22,29 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
   ArrowUpRight,
+  Briefcase,
+  Calculator,
   Check,
+  ClipboardList,
   Code2,
   Database,
   FileUp,
   Flag,
   Lock,
+  Rocket,
   Search,
   ShieldCheck,
+  ShoppingBag,
   Sparkles,
+  Store,
   UploadCloud,
+  User,
+  UtensilsCrossed,
   X,
   Zap,
 } from 'lucide-react';
+import { GooLoader } from '../../components/GooLoader';
+import { useRevealRoot } from './useRevealRoot';
 import './landing.css';
 
 const SAMPLE_QUESTIONS = [
@@ -43,47 +53,11 @@ const SAMPLE_QUESTIONS = [
   'Forecast next quarter',
 ];
 
-/** Gooey amber orb — the supplied `.loader` element, scoped + id-suffixed. */
-function Orb({ label }: { label: string }) {
-  const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
-  const maskId = `bl-clipping-${uid}`;
-  return (
-    <div className="bl-orb" role="img" aria-label={label}>
-      <div
-        className="bl-orb__box"
-        aria-hidden="true"
-        style={{
-          maskImage: `url(#${maskId})`,
-          WebkitMaskImage: `url(#${maskId})`,
-        }}
-      />
-      <svg className="bl-orb__goo" viewBox="0 0 100 100" aria-hidden="true">
-        <defs>
-          <filter id={`${maskId}-goo`}>
-            <feGaussianBlur stdDeviation="7" />
-            <feColorMatrix values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 15 -6" />
-          </filter>
-          <mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
-            <g filter={`url(#${maskId}-goo)`} fill="#fff">
-              <polygon points="50,5 95,90 5,90" />
-              <polygon points="20,20 80,25 55,85" />
-              <polygon points="10,60 60,10 90,70" />
-              <polygon points="30,30 70,30 50,75" />
-              <polygon points="15,45 55,55 40,95" />
-              <polygon points="60,15 90,50 65,90" />
-              <polygon points="25,65 75,60 50,95" />
-            </g>
-          </mask>
-        </defs>
-      </svg>
-    </div>
-  );
-}
-
 export function LandingPage() {
   const navigate = useNavigate();
   const askId = useId();
   const [question, setQuestion] = useState('');
+  const revealRef = useRevealRoot<HTMLElement>();
 
   const submitAsk = (event: FormEvent) => {
     event.preventDefault();
@@ -126,10 +100,14 @@ export function LandingPage() {
         </nav>
       </header>
 
-      <main id="main">
+      <main id="main" ref={revealRef}>
         {/* ---------- HERO ---------- */}
         <section className="bl-hero" aria-labelledby="bl-hero-title">
           <div className="bl-grid-bg" aria-hidden="true" />
+          <div className="bl-hero__orbs" aria-hidden="true">
+            <i className="bl-hero__orb bl-hero__orb--amber" />
+            <i className="bl-hero__orb bl-hero__orb--ember" />
+          </div>
           <div className="bl-hero__inner">
             <p className="bl-eyebrow">Upload CSV &rarr; Ask in English &rarr; Trusted answer</p>
             <h1 id="bl-hero-title" className="bl-hero__title">
@@ -187,7 +165,7 @@ export function LandingPage() {
             </ul>
 
             {/* Product mock — maritime dashboard-poster slot */}
-            <div className="bl-mock" role="img" aria-label="Preview of a BuildifyLabs answer: a revenue question with a chart, a table, and a trust footer.">
+            <div className="bl-mock bl-reveal" role="img" aria-label="Preview of a BuildifyLabs answer: a revenue question with a chart, a table, and a trust footer.">
               <div className="bl-mock__bar" aria-hidden="true">
                 <span />
                 <span />
@@ -241,21 +219,34 @@ export function LandingPage() {
           </div>
         </section>
 
-        {/* ---------- LOGO WALL — maritime bordered grid ---------- */}
-        <section className="bl-logos" aria-label="Trusted by data teams">
-          <p className="bl-logos__caption">Teams asking BuildifyLabs work at these companies</p>
-          <ul className="bl-logos__grid">
-            {['Northwind', 'Acme Corp', 'Fabrikam', 'Initech', 'Globex', 'Hooli', 'Umbrella', 'Stark', 'Wayne', 'Tyrell'].map((name) => (
-              <li key={name} className="bl-logos__cell">
-                {name}
+        {/* ---------- AUDIENCE — honest replacement for a fake logo wall:
+            who the product is for, never who supposedly uses it ---------- */}
+        <section className="bl-audience bl-reveal" aria-label="Who BuildifyLabs is for">
+          <p className="bl-audience__caption">Built for operators who live in spreadsheets</p>
+          <ul className="bl-audience__grid">
+            {[
+              { icon: Rocket, label: 'D2C founders' },
+              { icon: Store, label: 'Retail owners' },
+              { icon: Briefcase, label: 'Agency leads' },
+              { icon: Calculator, label: 'Finance teams' },
+              { icon: ClipboardList, label: 'Ops managers' },
+              { icon: User, label: 'Freelancers' },
+              { icon: UtensilsCrossed, label: 'Restaurant groups' },
+              { icon: ShoppingBag, label: 'Online sellers' },
+            ].map(({ icon: Icon, label }) => (
+              <li key={label} className="bl-audience__cell">
+                <Icon size={20} aria-hidden="true" />
+                <span>{label}</span>
               </li>
             ))}
           </ul>
+          <p className="bl-audience__note">No data team required. If it fits in a CSV, you can ask it anything.</p>
         </section>
 
         {/* ---------- SPLIT — maritime "one agent per customer" ---------- */}
         <section id="product" className="bl-split" aria-labelledby="bl-split-title">
-          <div className="bl-split__text">
+          <div className="bl-split__text bl-reveal">
+            <p className="bl-eyebrow">Built for owners</p>
             <h2 id="bl-split-title">
               One upload per workspace.
               <span className="bl-hero__accent"> Answers from your data.</span>
@@ -270,7 +261,7 @@ export function LandingPage() {
               See how questions are answered <ArrowRight size={14} aria-hidden="true" />
             </a>
           </div>
-          <div className="bl-pipeline" aria-label="How an answer is built">
+          <div className="bl-pipeline bl-reveal" aria-label="How an answer is built">
             {[
               { icon: FileUp, title: 'Upload', body: 'CSV lands in your own table.' },
               { icon: Database, title: 'Scoped SQL', body: 'Reads only your rows.' },
@@ -287,7 +278,8 @@ export function LandingPage() {
         </section>
 
         {/* ---------- 4-CELL GRID — maritime SDKs row ---------- */}
-        <section className="bl-cells" aria-label="What you get">
+        <section className="bl-cells bl-reveal" aria-label="What you get">
+          <p className="bl-eyebrow bl-eyebrow--center">Everything included</p>
           <div className="bl-cells__grid">
             {[
               { icon: UploadCloud, title: 'Upload anything', body: 'CSV today, with a clear processing → completed → failed status. 3MB free / 10MB pro.' },
@@ -305,7 +297,8 @@ export function LandingPage() {
         </section>
 
         {/* ---------- TRUST BAND — maritime centered headline + lantern badges ---------- */}
-        <section id="trust" className="bl-trust" aria-labelledby="bl-trust-title">
+        <section id="trust" className="bl-trust bl-reveal" aria-labelledby="bl-trust-title">
+          <p className="bl-eyebrow bl-eyebrow--center">Why trust it</p>
           <h2 id="bl-trust-title">
             Not a black box. <span className="bl-hero__accent">A real query per answer.</span>
           </h2>
@@ -350,7 +343,7 @@ export function LandingPage() {
 
         {/* ---------- REPORT — graphify X-vs-check + report table ---------- */}
         <section id="how" className="bl-report" aria-labelledby="bl-report-title">
-          <div className="bl-report__left">
+          <div className="bl-report__left bl-reveal">
             <p className="bl-eyebrow">Why questions, not dashboards</p>
             <h2 id="bl-report-title">Every answer traces to a real path.</h2>
             <p className="bl-report__sub">
@@ -391,8 +384,8 @@ export function LandingPage() {
               </dl>
             </div>
           </div>
-          <div className="bl-report__right">
-            <Orb label="Decorative amber orb showing the product glow" />
+          <div className="bl-report__right bl-reveal">
+            <GooLoader label="Decorative amber orb showing the product glow" />
             {/* Loading wave — the supplied bars, amber-skinned */}
             <div className="bl-wave" role="img" aria-label="Answer streaming indicator">
               {Array.from({ length: 5 }).map((_, i) => (
@@ -413,7 +406,8 @@ export function LandingPage() {
         </section>
 
         {/* ---------- DEMO — chat-screenshot strip ---------- */}
-        <section className="bl-demo" aria-labelledby="bl-demo-title">
+        <section className="bl-demo bl-reveal" aria-labelledby="bl-demo-title">
+          <p className="bl-eyebrow bl-eyebrow--center">How it works</p>
           <h2 id="bl-demo-title">From zero to a traced answer in about a minute.</h2>
           <ol className="bl-steps">
             <li>
@@ -440,18 +434,22 @@ export function LandingPage() {
           </ul>
         </section>
 
-        {/* ---------- CTA ---------- */}
-        <section className="bl-cta" aria-labelledby="bl-cta-title">
-          <Orb label="Decorative small amber orb" />
-          <h2 id="bl-cta-title">Upload your first CSV. Ask your first question.</h2>
-          <p>Start from a blank chat and get a traced answer in about a minute. Stay free until it earns a habit.</p>
-          <div className="bl-hero__ctas bl-hero__ctas--center">
-            <Link to="/signup" className="bl-btn bl-btn--primary">
-              Start free <ArrowRight size={16} aria-hidden="true" />
-            </Link>
-            <Link to="/app" className="bl-btn bl-btn--ghost">
-              Open the app
-            </Link>
+        {/* ---------- CTA — fox split ---------- */}
+        <section className="bl-cta bl-cta--split bl-reveal" aria-labelledby="bl-cta-title">
+          <div className="bl-cta__art" role="img" aria-label="BuildifyLabs fox working on a laptop beside books about graphs, sales, and statistics">
+            <img src="/login.png" alt="" loading="lazy" />
+          </div>
+          <div className="bl-cta__copy">
+            <h2 id="bl-cta-title">Upload your first CSV. Ask your first question.</h2>
+            <p>Start from a blank chat and get a traced answer in about a minute. Stay free until it earns a habit.</p>
+            <div className="bl-hero__ctas">
+              <Link to="/signup" className="bl-btn bl-btn--primary">
+                Start free <ArrowRight size={16} aria-hidden="true" />
+              </Link>
+              <Link to="/app" className="bl-btn bl-btn--ghost">
+                Open the app
+              </Link>
+            </div>
           </div>
         </section>
       </main>

@@ -92,6 +92,9 @@ export function classifyAssistantOutput(
 interface ChatState {
   messages: ChatMessage[];
   conversations: ChatConversation[];
+  /** Currently selected thread in the history rail. Visual selection only
+   *  until per-thread transcripts land — selecting never wipes the stream. */
+  activeConversationId: string | null;
   /** In-flight send indicator (F5/F6): `cold-start` on a session's first
    *  request (§5.7), `thinking` otherwise (F6 renders it). */
   pending: PendingKind | null;
@@ -110,6 +113,8 @@ interface ChatState {
   setActiveFileName(fileName: string | null): void;
   setHasData(hasData: boolean | null): void;
   clearChat(): void;
+  newChat(): void;
+  selectConversation(id: string): void;
 }
 
 let nextId = 0;
@@ -121,25 +126,49 @@ function makeId(): string {
 export const useChatStore = create<ChatState>((set) => ({
   messages: [],
   conversations: [],
+  activeConversationId: null,
   pending: null,
   activeFileName: null,
   hasData: null,
 
 addUserMessage: (content, fileName = null) =>
-    set((state) => ({
-      conversations: [
-        {
-          id: makeId(),
-          title: content.trim().slice(0, 48),
-          updatedAt: Date.now(),
-        },
-        ...state.conversations,
-      ],
-      messages: [
-        ...state.messages,
-        { id: makeId(), role: 'user', content, fileName, createdAt: Date.now() },
-      ],
-    })),
+    set((state) => {
+      const now = Date.now();
+      // One conversation per thread: a fresh thread (empty stream, or after
+      // New chat cleared the active id) opens a conversation; follow-up turns
+      // in the same thread only bump its recency — never one row per message.
+      const active =
+        state.activeConversationId === null
+          ? null
+          : state.conversations.find((c) => c.id === state.activeConversationId) ?? null;
+      if (state.messages.length === 0 || active === null) {
+        const id = makeId();
+        return {
+          conversations: [
+            {
+              id,
+              title: content.trim().slice(0, 48) || 'New conversation',
+              updatedAt: now,
+            },
+            ...state.conversations,
+          ],
+          activeConversationId: id,
+          messages: [
+            ...state.messages,
+            { id: makeId(), role: 'user', content, fileName, createdAt: now },
+          ],
+        };
+      }
+      return {
+        conversations: state.conversations.map((c) =>
+          c.id === active.id ? { ...c, updatedAt: now } : c,
+        ),
+        messages: [
+          ...state.messages,
+          { id: makeId(), role: 'user', content, fileName, createdAt: now },
+        ],
+      };
+    }),
 
   addAssistantMessage: (output) =>
     set((state) => ({
@@ -163,5 +192,9 @@ addUserMessage: (content, fileName = null) =>
 
   setHasData: (hasData) => set({ hasData }),
 
-  clearChat: () => set({ messages: [], pending: null }),
+  clearChat: () => set({ messages: [], pending: null, activeConversationId: null }),
+
+  newChat: () => set({ messages: [], pending: null, activeConversationId: null }),
+
+  selectConversation: (id) => set({ activeConversationId: id }),
 }));

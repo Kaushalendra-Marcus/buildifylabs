@@ -44,6 +44,29 @@ the frontend can render without further parsing or guessing.
   `PipelineOutput.clarification` is populated (`{ question: str, options: list[str] }`) and the
   other answer fields are empty — the frontend renders this as a quick-pick prompt, and the user's
   choice becomes the next turn's input, not a fresh unrelated question.
+- **FR8 (new): Decision-driven loop.** Before narrating, an LLM sufficiency judge decides
+  `answer` vs `clarify` from the actual tool outputs on hand (row/column inventory, computed-stat
+  keys, web snippet and market-series counts) plus prior-turn context, and plans visuals by data
+  shape. Clarification is a last resort: never a second question on an already-asked point (the
+  route feeds the prior clarification in; a repeat is re-narrated once with clarification disabled
+  and answered best-effort with stated assumptions), and options are grounded in real evidence.
+  Empty options are backfilled from the judge's suggestions so pills and the free-text box render
+  together; genuinely open-ended questions keep `[]` (type-only).
+- **FR9 (new): Visual guarantee.** A validated normal answer never goes out naked while plottable
+  tool outputs exist: deterministic code synthesizes a chart (date→line, few categories→bar),
+  a grounding table, and a headline metric from real rows/stats/series only — never invented
+  values. Follow-ups referencing the previous answer ("chart that") resolve from its logged rows.
+  Qualitative web-only answers carry at least one snippet-grounded insight card instead.
+- **FR10 (new): Framed web retrieval.** Live scopes reframe the chat message into 1–3 clean
+  search queries via LLM (merging appended clarification answers into intent; one variant may
+  target community discussion via a site: restriction when opinions/experiences are sought),
+  fan out across them with dedupe, and resolve any named entity to a market symbol generically
+  (alias fast path, then symbol search). Raw user text is never sent to search as-is.
+- **FR11 (new): Citations, thinking, requested shapes.** Web snippets are numbered and factual
+  claims carry `[n]` markers (phantom markers are stripped in code); every run records a
+  machine-written thinking trace (`thinking: list[str]`, additive/optional for clients); an
+  explicitly requested output shape (bar/line/pie/area/table/metric) is honored end-to-end from
+  query text through synthesis. Empty model completions retry once before degrading.
 
 ## 3. API Contracts (internal — no HTTP surface yet)
 
@@ -52,7 +75,10 @@ the frontend can render without further parsing or guessing.
 then, the existing Groq→HF-only behavior stands as an interim implementation.
 
 **`run_pipeline(user_query: str, db_data: list[dict], computed_numbers: dict | None = None, news_context: list | None = None, source_scope: Literal["own_data", "live_web", "both"] = "own_data", company_name: str | None = None) -> PipelineOutput`**
-✅ Live (B4). The old `include_news: bool` param became `source_scope`, the mutable-default
+✅ Live (B4), extended since: optional `prior_clarification`, `prior_data` (previous answer's row
+digest from QueryLogs), `market_data`, and `web_sources` params feed the FR8 decision loop and the
+FR9 guarantee; `thinking: list[str]` joined the output (optional, additive). The old
+`include_news: bool` param became `source_scope`, the mutable-default
 `news_context: list = []` was fixed to `None`, `visual_type`/`confidence`/`clarification` match FR3
 below, and `db_data` is truncated before prompting. `db_data` and `news_context` are both fetched
 by the caller according to `source_scope` (per specs `05` and `07`) — this function does not decide
@@ -68,7 +94,14 @@ class VisualOutput(BaseModel):
 
 class ClarificationRequest(BaseModel):
     question: str
-    options: List[str]
+    options: List[str]  # default []; a model-emitted null coerces to [] (validator)
+
+class Decision(BaseModel):  # FR8 sufficiency judge verdict (internal, never served)
+    decision: Literal["answer", "clarify"]
+    missing: str = ""
+    chart_from_prior: bool = False
+    visual_plan: List[VisualPlanItem] = []
+    suggested_options: List[str] = []
 
 class PipelineOutput(BaseModel):
     answer: str
@@ -132,6 +165,12 @@ reference to it.
    None = None` with an `if news_context is None: news_context = []` guard the next time this
    function is touched — including when it's updated for gap #8 and for the `include_news` →
    `source_scope` migration (spec `07`).
+10. **Model emits `"clarification": {"question": ..., "options": null}`** (seen live with Groq) —
+    `ClarificationRequest.options` coerces `None` → `[]` via a `mode="before"` field validator
+    (plus the prompt now says `options` must be an array, never null), so the clarification still
+    renders as a question with no preset pills instead of failing validation into a generic
+    fallback. Covered by `test_clarification_with_null_options_*` in `test_pipeline_contract.py`
+    and `test_chat_api.py`.
 
 ## 6. Acceptance Criteria
 
@@ -148,5 +187,15 @@ reference to it.
       news (`07`) → `run_pipeline` → `PipelineOutput` returned to the frontend.
       *(`POST /chat`, B4; news fetching stays `own_data`-only until B7.)*
 - [x] A dataset with 10,000+ rows does not silently blow the model's context window.
+- [x] Decision-driven loop (FR8/FR9 hardening): judge verdict → narration → deterministic visual
+      guarantee, prior-turn context from QueryLogs, anti-repeat clarification backstop. Covered by
+      `TestDecisionLoop` (`test_pipeline_contract.py`) and the guarantee/follow-up e2e tests
+      (`test_chat_api.py`).
+- [x] Live hardening round 2 (FR10/FR11): LLM query framing + multi-query fan-out with dedupe and
+      generic symbol resolution (`query_rewriter.py`, `web_search.py`); empty-completion retries for
+      judge and narration; requested-shape handling end-to-end; numbered-snippet citations with
+      phantom-marker stripping; machine-written `thinking` trace; sources-table guarantee for
+      web-only answers. Covered by `test_query_rewriter.py`, `TestRobustnessLoop`, and the live-web
+      citations e2e. Clarifications accept free-text replies as well as pills (frontend).
       *(`_truncate_rows` caps prompt rows at 50 with a summarizing note, plus the executor's SQL
       LIMIT.)*

@@ -6,9 +6,11 @@
  * forced to the dark intelligence theme by the `.chat-workspace` scope.
  */
 import { Menu, PanelLeft, Plus } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { PlanBadge } from '../../components/PlanBadge';
 import { useAuth } from '../../hooks/useAuth';
 import { AccountMenu } from './AccountMenu';
+import { useChatStore } from './chat-store';
 
 interface ChatHeaderProps {
   railOpen: boolean;
@@ -17,6 +19,7 @@ interface ChatHeaderProps {
 
 export function ChatHeader({ railOpen, onToggleRail }: ChatHeaderProps) {
   const { user } = useAuth();
+  const newChat = useChatStore((state) => state.newChat);
 
   return (
     <header className="chat-header">
@@ -30,7 +33,7 @@ export function ChatHeader({ railOpen, onToggleRail }: ChatHeaderProps) {
         {railOpen ? <PanelLeft size={18} /> : <Menu size={18} />}
       </button>
 
-      <span className="chat-header__brand">
+      <Link className="chat-header__brand" to="/" aria-label="Buildify Labs home">
         <span className="brand-tile" aria-hidden="true">
           <img src="/logo.png" alt="" />
         </span>
@@ -38,13 +41,13 @@ export function ChatHeader({ railOpen, onToggleRail }: ChatHeaderProps) {
           <span className="chat-header__brand-name">Buildify Labs</span>
           <span className="chat-header__brand-sub">Intelligence</span>
         </span>
-      </span>
+      </Link>
 
       <span className="chat-header__spacer" />
 
       {user && <PlanBadge plan={user.plan} />}
       <span className="chat-header__divider" aria-hidden="true" />
-      <button type="button" className="chat-header__new-chat">
+      <button type="button" className="chat-header__new-chat" onClick={newChat}>
         <Plus size={16} aria-hidden="true" />
         New chat
       </button>

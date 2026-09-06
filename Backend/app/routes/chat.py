@@ -1,24 +1,28 @@
 """The first end-to-end `POST /chat` route (Phase B4, master plan step 6).
 
-Flow: `rate_limiter` (quota) → real per-user schema → SQL prompt → LLM →
-`clean_sql_response` → `sanitize_sql` (inside `execute_sql`) → user-scoped
-`execute_sql` → deterministic pandas stats (specs/11 §3.1) → `run_pipeline` →
-`PipelineOutput`.
+Flow: `rate_limiter` (quota) -> prior-turn context (last QueryLogs row) ->
+real per-user schema -> SQL prompt -> LLM -> `clean_sql_response` ->
+`sanitize_sql` (inside `execute_sql`) -> user-scoped `execute_sql` ->
+deterministic pandas stats (specs/11 §3.1) -> decision-driven `run_pipeline`
+(judge -> narrate -> visual guarantee) -> `PipelineOutput`.
 
 Trust requirements (specs/10 §2) are built in, not retrofitted:
 - every answer carries the **exact SQL + raw row slice** (traceability) and the
-  QueryLogs id that produced it, so the UI's "show the query"/flag are real;
+QueryLogs id that produced it, so the UI's "show the query"/flag are real;
 - hedged causal language is enforced in the pipeline's SYSTEM_PROMPT;
 - **every query+response pair is written to QueryLogs** (including graceful
-  fallbacks), with a flag endpoint (`POST /chat/flag`) feeding it;
+fallbacks), with a flag endpoint (`POST /chat/flag`) feeding it;
 - the `clarification` alternate-response mode is live via the pipeline's
-  ask-don't-guess prompt path.
+ask-don't-guess prompt path, with an anti-repeat backstop so a follow-up
+never gets the same question twice.
 
 MVP `source_scope` = `own_data` only; `live_web`/`both` are deferred to B7.
 """
+import json
 import logging
 import time
 from datetime import datetime, timezone
+from typing import Any, Dict, Optional, Tuple
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -60,6 +64,58 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 # Upper bound on the raw row slice echoed back in the response (data_preview).
 # The model's answer already summarizes the full set, so this stays lean.
 DATA_PREVIEW_MAX_ROWS = 50
+
+# Prior-turn digest budget: enough rows for follow-ups ("chart that") without
+# bloating the prompt.
+PRIOR_DATA_MAX_ROWS = 8
+
+
+async def _load_prior_context(
+    db: AsyncSession, user_id: UUID
+) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    """Recover the previous turn from the user's latest QueryLogs row.
+
+    Returns (prior_clarification_question, prior_data_digest). Both are None
+    when there is no usable history. Fully defensive: a corrupt or foreign
+    log row degrades to no context, never an error.
+    """
+    try:
+        result = await db.execute(
+            select(QueryLogs)
+            .where(QueryLogs.user_id == user_id)
+            .order_by(QueryLogs.created_at.desc())
+            .limit(1)
+        )
+        log = result.scalar_one_or_none()
+        if log is None or not log.response:
+            return None, None
+        try:
+            response = json.loads(log.response)
+        except (ValueError, TypeError):
+            return None, None
+        if not isinstance(response, dict):
+            return None, None
+
+        prior_clarification = None
+        clarification = response.get("clarification")
+        if isinstance(clarification, dict) and clarification.get("question"):
+            prior_clarification = str(clarification["question"])
+
+        prior_data = None
+        preview = response.get("data_preview")
+        if isinstance(preview, list) and preview:
+            sample = [row for row in preview[:PRIOR_DATA_MAX_ROWS] if isinstance(row, dict)]
+            if sample:
+                prior_data = {
+                    "columns": list(sample[0].keys()),
+                    "row_count": len(preview),
+                    "rows": sample,
+                    "from_query": log.query,
+                }
+        return prior_clarification, prior_data
+    except Exception as exc:
+        logger.warning(f"Prior context unavailable, continuing without it: {exc}")
+        return None, None
 
 
 async def _user_has_data(db: AsyncSession, user_id: UUID) -> bool:
@@ -157,8 +213,13 @@ async def chat(
 
     try:
         computed = compute_statistics(rows) if rows else {}
+        prior_clarification, prior_data = await _load_prior_context(db, user.id)
         news_context = (
-            await search_web(request.query, request.company_name)
+            await search_web(
+                request.query,
+                request.company_name,
+                prior_clarification=prior_clarification,
+            )
             if request.source_scope in ("live_web", "both")
             else None
         )
@@ -180,6 +241,10 @@ async def chat(
             news_context=news_context,
             source_scope=request.source_scope,
             company_name=request.company_name,
+            prior_clarification=prior_clarification,
+            prior_data=prior_data,
+            market_data=market_data,
+            web_sources=web_sources,
         )
     except Exception as exc:
         # Never let the pipeline crash the request: fall back per specs/06 FR4.
@@ -193,23 +258,6 @@ async def chat(
             output.sql_query = cleaned_sql
         output.data_preview = rows[:DATA_PREVIEW_MAX_ROWS] if rows else []
         output.web_sources = web_sources
-        if market_data and any(
-            term in request.query.lower() for term in ("chart", "graph", "plot")
-        ):
-            output.visuals = [
-                {
-                    "visual_type": "graph",
-                    "title": "One-month stock performance",
-                    "props": {
-                        "chart_type": "line",
-                        "labels": market_data[0]["labels"],
-                        "datasets": [
-                            {"name": item["entity"], "values": item["values"]}
-                            for item in market_data
-                        ],
-                    },
-                }
-            ]
 
     return await _log_and_return(
         db, user.id, request.query, output, time.monotonic() - started

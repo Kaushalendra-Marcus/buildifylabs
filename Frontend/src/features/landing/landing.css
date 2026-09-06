@@ -686,53 +686,68 @@
   color: var(--bl-muted);
 }
 
-/* ---------- Logo wall (maritime bordered grid) ---------- */
+/* ---------- Audience (who it's for — never fake customer logos) ---------- */
 
-.bl-logos {
+.bl-audience {
   max-width: 1120px;
   margin: 0 auto;
   padding: 40px 20px 80px;
 }
 
-.bl-logos__caption {
-  margin: 0 0 24px;
+.bl-audience__caption {
+  margin: 0 0 8px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--bl-secondary);
+}
+
+.bl-audience__note {
+  margin: 20px 0 0;
   text-align: center;
   font-size: 13px;
   color: var(--bl-muted);
 }
 
-.bl-logos__grid {
+.bl-audience__grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  margin: 0;
+  grid-template-columns: repeat(4, 1fr);
+  margin: 28px 0 0;
   padding: 0;
   list-style: none;
   border-top: 1px solid var(--bl-border);
   border-left: 1px solid var(--bl-border);
 }
 
-.bl-logos__cell {
+.bl-audience__cell {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 96px;
-  padding: 16px;
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: #6f6b64;
+  gap: 10px;
+  min-height: 120px;
+  padding: 20px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--bl-secondary);
   border-right: 1px solid var(--bl-border);
   border-bottom: 1px solid var(--bl-border);
-  filter: grayscale(1);
+  transition:
+    transform 0.22s ease,
+    border-color 0.22s ease,
+    background-color 0.22s ease,
+    color 0.22s ease;
 }
 
-.bl-logos__cell:nth-child(3n) {
-  letter-spacing: 0.22em;
-  font-size: 14px;
+.bl-audience__cell svg {
+  color: var(--bl-amber);
 }
 
-.bl-logos__cell:nth-child(3n + 1) {
-  font-weight: 400;
+.bl-audience__cell:hover {
+  transform: translateY(-4px);
+  border-color: rgba(255, 191, 72, 0.35);
+  background: var(--bl-panel-2);
+  color: var(--bl-text);
 }
 
 /* ---------- Split (maritime left-text / right-visual) ---------- */
@@ -1042,111 +1057,6 @@
   overflow: hidden;
 }
 
-/* Gooey orb — supplied `.loader`, hue animation removed so the amber
- * pair can never drift toward purple. */
-.bl-orb {
-  --color-one: #ffbf48;
-  --color-two: #be4a1d;
-  --color-three: rgba(255, 191, 71, 0.5);
-  --color-four: rgba(191, 74, 29, 0.5);
-  --color-five: rgba(255, 191, 71, 0.25);
-  --time-animation: 2s;
-  --size: 1;
-  position: relative;
-  width: 100px;
-  height: 100px;
-  border-radius: 50%;
-  transform: scale(var(--size));
-  box-shadow:
-    0 0 25px 0 var(--color-three),
-    0 20px 50px 0 var(--color-four);
-}
-
-.bl-orb::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100px;
-  height: 100px;
-  border-radius: 50%;
-  border-top: solid 1px var(--color-one);
-  border-bottom: solid 1px var(--color-two);
-  background: linear-gradient(180deg, var(--color-five), var(--color-four));
-  box-shadow:
-    inset 0 10px 10px 0 var(--color-three),
-    inset 0 -10px 10px 0 var(--color-four);
-}
-
-.bl-orb__box {
-  width: 100px;
-  height: 100px;
-  background: linear-gradient(180deg, var(--color-one) 30%, var(--color-two) 70%);
-  /* mask-image is set inline to the instance's unique mask id */
-}
-
-.bl-orb__goo {
-  position: absolute;
-  width: 0;
-  height: 0;
-}
-
-.bl-orb svg #bl-clipping,
-.bl-orb svg mask polygon {
-  transform-box: fill-box;
-}
-
-.bl-orb svg mask polygon {
-  filter: blur(7px);
-}
-
-.bl-orb svg mask polygon:nth-child(1) {
-  transform-origin: 75% 25%;
-  transform: rotate(90deg);
-}
-
-.bl-orb svg mask polygon:nth-child(2) {
-  transform-origin: 50% 50%;
-  animation: bl-rotation var(--time-animation) linear infinite reverse;
-}
-
-.bl-orb svg mask polygon:nth-child(3) {
-  transform-origin: 50% 60%;
-  animation: bl-rotation var(--time-animation) linear infinite;
-  animation-delay: calc(var(--time-animation) / -3);
-}
-
-.bl-orb svg mask polygon:nth-child(4) {
-  transform-origin: 40% 40%;
-  animation: bl-rotation var(--time-animation) linear infinite reverse;
-}
-
-.bl-orb svg mask polygon:nth-child(5) {
-  transform-origin: 40% 40%;
-  animation: bl-rotation var(--time-animation) linear infinite reverse;
-  animation-delay: calc(var(--time-animation) / -2);
-}
-
-.bl-orb svg mask polygon:nth-child(6) {
-  transform-origin: 60% 40%;
-  animation: bl-rotation var(--time-animation) linear infinite;
-}
-
-.bl-orb svg mask polygon:nth-child(7) {
-  transform-origin: 60% 40%;
-  animation: bl-rotation var(--time-animation) linear infinite;
-  animation-delay: calc(var(--time-animation) / -1.5);
-}
-
-@keyframes bl-rotation {
-  0% {
-    transform: rotate(0deg);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
-}
-
 /* Loading wave — supplied bars, amber instead of blue */
 .bl-wave {
   width: 300px;
@@ -1322,8 +1232,7 @@
   color: var(--bl-secondary);
 }
 
-.bl-cta .bl-orb {
-  --size: 0.8;
+.bl-cta .goo-loader {
   margin-bottom: 12px;
 }
 
@@ -1443,7 +1352,7 @@
 /* ---------- Responsive ---------- */
 
 @media (max-width: 900px) {
-  .bl-logos__grid {
+  .bl-audience__grid {
     grid-template-columns: repeat(2, 1fr);
   }
   .bl-split,
@@ -1509,9 +1418,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bl-orb svg mask polygon {
-    animation: none;
-  }
   .bl-wave__bar {
     animation: none;
     height: 24px;
@@ -1521,5 +1427,256 @@
   .bl-ask__dark::before,
   .bl-ask__glow::before {
     transition: none;
+  }
+  .bl-hero__inner > .bl-eyebrow,
+  .bl-hero__title,
+  .bl-hero__sub,
+  .bl-hero__ctas,
+  .bl-ask,
+  .bl-hero__meta {
+    animation: none;
+  }
+  .bl-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* ---------- Polish pass: motion, glow, and depth ----------
+ * Additive only — structure and copy stay as they were. */
+
+.bl-eyebrow--center {
+  text-align: center;
+}
+
+/* Smooth anchor travel under the sticky pill nav. */
+.bl-landing {
+  scroll-behavior: smooth;
+}
+
+#product,
+#how,
+#trust {
+  scroll-margin-top: 88px;
+}
+
+/* Hero ambient orbs behind the grid. */
+.bl-hero__orbs {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: clip;
+  pointer-events: none;
+}
+
+.bl-hero__orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+}
+
+.bl-hero__orb--amber {
+  width: 480px;
+  height: 480px;
+  top: -160px;
+  left: 50%;
+  transform: translateX(-110%);
+  background: rgba(255, 191, 72, 0.13);
+}
+
+.bl-hero__orb--ember {
+  width: 420px;
+  height: 420px;
+  top: 40px;
+  left: 50%;
+  transform: translateX(10%);
+  background: rgba(190, 74, 29, 0.16);
+}
+
+/* Hero entrance — staggered rise on load. */
+@keyframes bl-rise {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.bl-hero__inner > .bl-eyebrow,
+.bl-hero__title,
+.bl-hero__sub,
+.bl-hero__ctas,
+.bl-ask,
+.bl-hero__meta {
+  animation: bl-rise 0.7s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+
+.bl-hero__title {
+  animation-delay: 0.08s;
+}
+
+.bl-hero__sub {
+  animation-delay: 0.16s;
+}
+
+.bl-hero__ctas {
+  animation-delay: 0.24s;
+}
+
+.bl-ask {
+  animation-delay: 0.32s;
+}
+
+.bl-hero__meta {
+  animation-delay: 0.4s;
+}
+
+/* Gradient headline accent. */
+.bl-hero__accent {
+  background: linear-gradient(100deg, var(--bl-amber) 20%, var(--bl-ember) 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Scroll reveal — the hook flips `is-visible`. The @supports gate keeps
+ * content visible in engines that can't run the transition, and
+ * no-IntersectionObserver environments (jsdom) get the class immediately. */
+.bl-reveal {
+  opacity: 1;
+}
+
+@supports (animation-timeline: view()) or (selector(:has(*))) {
+  .bl-reveal {
+    opacity: 0;
+    transform: translateY(26px);
+    transition:
+      opacity 0.7s cubic-bezier(0.22, 0.8, 0.3, 1),
+      transform 0.7s cubic-bezier(0.22, 0.8, 0.3, 1);
+  }
+
+  .bl-reveal.is-visible {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Buttons with lift. */
+.bl-btn,
+.bl-nav__signup,
+.bl-chips__chip {
+  transition:
+    transform 0.18s ease,
+    filter 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.bl-btn--primary {
+  box-shadow: 0 8px 28px rgba(255, 191, 72, 0.22);
+}
+
+.bl-btn--primary:hover {
+  filter: brightness(1.08);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 34px rgba(255, 191, 72, 0.32);
+}
+
+.bl-btn--ghost:hover {
+  border-color: rgba(255, 191, 72, 0.55);
+  color: var(--bl-amber);
+  transform: translateY(-2px);
+}
+
+.bl-nav__signup:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(255, 191, 72, 0.28);
+}
+
+/* Cards with lift. */
+.bl-pipeline__step,
+.bl-cells__cell,
+.bl-trust__card,
+.bl-steps li {
+  transition:
+    transform 0.22s ease,
+    border-color 0.22s ease,
+    background-color 0.22s ease;
+}
+
+.bl-pipeline__step:hover,
+.bl-cells__cell:hover,
+.bl-trust__card:hover,
+.bl-steps li:hover {
+  transform: translateY(-4px);
+  border-color: rgba(255, 191, 72, 0.35);
+  background: var(--bl-panel-2);
+}
+
+/* Product mock glow + hover. */
+.bl-mock {
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 191, 72, 0.06), 0 0 90px rgba(255, 191, 72, 0.07);
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+.bl-mock:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 191, 72, 0.12), 0 0 110px rgba(255, 191, 72, 0.1);
+}
+
+/* ---------- CTA split with the fox illustration ---------- */
+
+.bl-cta--split {
+  display: grid;
+  grid-template-columns: 0.9fr 1.1fr;
+  gap: 56px;
+  align-items: center;
+  text-align: left;
+  background: radial-gradient(ellipse 70% 90% at 12% 50%, rgba(255, 191, 72, 0.08), transparent 65%);
+  border: 1px solid var(--bl-border);
+  border-radius: 20px;
+  padding: 56px;
+  margin-bottom: 32px;
+}
+
+.bl-cta__art {
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 191, 72, 0.22);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 70px rgba(255, 191, 72, 0.1);
+}
+
+.bl-cta__art img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  object-position: 22% 50%;
+}
+
+.bl-cta__copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.bl-cta__copy p {
+  max-width: 52ch;
+}
+
+@media (max-width: 900px) {
+  .bl-cta--split {
+    grid-template-columns: 1fr;
+    gap: 32px;
+    padding: 32px 24px;
   }
 }

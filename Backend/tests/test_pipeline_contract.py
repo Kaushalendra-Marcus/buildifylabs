@@ -13,9 +13,13 @@ from pydantic import ValidationError
 
 import app.services.llm.langchain_pipeline as pipeline_mod
 from app.services.llm.langchain_pipeline import (
+    Decision,
     PipelineOutput,
     VisualOutput,
     build_prompt,
+    detect_preferred_visual,
+    judge_sufficiency,
+    sanitize_citations,
     _truncate_rows,
     run_pipeline,
 )
@@ -165,6 +169,46 @@ class TestRunPipeline:
         assert output.clarification.options
         assert output.answer == ""
 
+    def test_clarification_with_null_options_stays_clarification(self, monkeypatch):
+        import json
+
+        # Live bug: Groq returned {"question": ..., "options": null}, which
+        # failed PipelineOutput validation and degraded to a generic fallback
+        # instead of showing the clarification question. None coerces to [].
+        async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512):
+            return {
+                "content": json.dumps(
+                    _pipeline_json(
+                        answer="",
+                        insights=[],
+                        summary="",
+                        root_causes=[],
+                        recommendations=[],
+                        confidence=0.0,
+                        clarification={
+                            "question": "Which AI business should I compare?",
+                            "options": None,
+                        },
+                    )
+                ),
+                "source": "groq",
+                "usage": None,
+            }
+
+        monkeypatch.setattr(pipeline_mod, "generate_response", fake_generate)
+
+        async def scenario():
+            return await run_pipeline(
+                user_query="which ai business is best?",
+                db_data=[{"revenue": 100}],
+            )
+
+        output = asyncio.run(scenario())
+        assert output.clarification is not None
+        assert output.clarification.question == "Which AI business should I compare?"
+        assert output.clarification.options == []
+        assert output.answer == ""
+
     def test_malformed_json_falls_back_with_zero_confidence(self, monkeypatch):
         async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512):
             return {"content": "not json at all", "source": "groq", "usage": None}
@@ -232,3 +276,480 @@ class TestBuildPrompt:
     def test_own_data_scope_shows_no_news(self):
         prompt = build_prompt("q", [{"revenue": 1}], source_scope="own_data")
         assert "no live web context" in prompt.lower() or "asked for their own data" in prompt.lower()
+
+
+def _sequenced_fake(*contents):
+    """Fake generate_response serving one reply per call, in order. An
+    Exception entry raises instead (to simulate a failing judge call)."""
+    import json
+
+    calls = {"n": 0}
+
+    async def fake(prompt, system_prompt, temperature=0.2, max_tokens=512):
+        content = contents[min(calls["n"], len(contents) - 1)]
+        calls["n"] += 1
+        if isinstance(content, Exception):
+            raise content
+        if isinstance(content, str):
+            return {"content": content, "source": "groq", "usage": None}
+        return {"content": json.dumps(content), "source": "groq", "usage": None}
+
+    return fake
+
+
+def _decision_json(**overrides):
+    default = {
+        "decision": "answer",
+        "missing": "",
+        "chart_from_prior": False,
+        "visual_plan": [],
+        "suggested_options": [],
+    }
+    default.update(overrides)
+    return default
+
+
+ROWS = [
+    {"created_at": "2024-01-01", "revenue": 100, "region": "east"},
+    {"created_at": "2024-01-02", "revenue": 250, "region": "west"},
+    {"created_at": "2024-01-03", "revenue": 175, "region": "east"},
+]
+
+COMPUTED = {
+    "row_count": 3,
+    "averages": {"revenue": 175.0},
+    "totals": {"revenue": 525.0},
+}
+
+
+class TestDecisionLoop:
+    """The decision-driven loop: judge verdict -> narration -> guarantee,
+    with the anti-repeat backstop. All generic, no per-question hardcoding."""
+
+    def test_judge_clarify_routes_to_clarification(self, monkeypatch):
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(
+                    decision="clarify",
+                    missing="metric choice",
+                    suggested_options=["revenue", "orders"],
+                ),
+                _pipeline_json(
+                    answer="",
+                    insights=[],
+                    summary="",
+                    root_causes=[],
+                    recommendations=[],
+                    confidence=0.0,
+                    clarification={
+                        "question": "Which metric should I use?",
+                        "options": ["revenue", "orders"],
+                    },
+                ),
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(user_query="how are we doing?", db_data=ROWS)
+        )
+        assert output.clarification is not None
+        assert output.clarification.question == "Which metric should I use?"
+        assert output.clarification.options == ["revenue", "orders"]
+
+    def test_judge_failure_fails_open_to_answer(self, monkeypatch):
+        async def boom(prompt, system_prompt, temperature=0.0, max_tokens=400):
+            raise RuntimeError("judge transport down")
+
+        monkeypatch.setattr(pipeline_mod, "generate_response", boom)
+
+        decision = asyncio.run(
+            judge_sufficiency(
+                user_query="q",
+                source_scope="own_data",
+                evidence={"row_count": 1},
+            )
+        )
+        assert isinstance(decision, Decision)
+        assert decision.decision == "answer"
+
+    def test_empty_visuals_get_synthesized_from_real_rows(self, monkeypatch):
+        # Narration returns a naked answer; the guarantee must chart/table it
+        # from the actual rows - values traceable, nothing invented.
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(
+                    visual_plan=[{"kind": "graph", "spec": "revenue over time"}]
+                ),
+                _pipeline_json(visuals=[], confidence=0.7),
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(
+                user_query="how is revenue trending?",
+                db_data=ROWS,
+                computed_numbers=COMPUTED,
+            )
+        )
+        assert output.clarification is None
+        kinds = [visual.visual_type for visual in output.visuals]
+        assert "graph" in kinds and "table" in kinds
+        graph = next(v for v in output.visuals if v.visual_type == "graph")
+        assert graph.props["chart_type"] == "line"
+        assert graph.props["labels"] == ["2024-01-01", "2024-01-02", "2024-01-03"]
+        assert graph.props["datasets"][0]["values"] == [100, 250, 175]
+        table = next(v for v in output.visuals if v.visual_type == "table")
+        assert table.props["columns"] == ["created_at", "revenue", "region"]
+
+    def test_category_rows_synthesize_bar_chart(self, monkeypatch):
+        rows = [
+            {"region": "east", "revenue": 100},
+            {"region": "west", "revenue": 250},
+        ]
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(), _pipeline_json(visuals=[], confidence=0.6)
+            ),
+        )
+
+        output = asyncio.run(run_pipeline(user_query="sales by region", db_data=rows))
+        graph = next(v for v in output.visuals if v.visual_type == "graph")
+        assert graph.props["chart_type"] == "bar"
+        assert graph.props["labels"] == ["east", "west"]
+        assert graph.props["datasets"][0]["values"] == [100, 250]
+
+    def test_repeat_clarification_forces_best_effort_answer(self, monkeypatch):
+        prior = "What specific data would you like to see visualized in a chart?"
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(),
+                _pipeline_json(
+                    answer="",
+                    confidence=0.0,
+                    clarification={"question": prior, "options": []},
+                ),
+                _pipeline_json(
+                    answer="Best-effort answer with assumptions stated.",
+                    visuals=[],
+                    confidence=0.5,
+                ),
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(
+                user_query="bar chart",
+                db_data=[],
+                prior_clarification=prior,
+            )
+        )
+        # The loop is broken: an answer, never the same question twice.
+        assert output.clarification is None
+        assert "Best-effort" in output.answer
+
+    def test_chart_followup_resolves_from_prior_rows(self, monkeypatch):
+        prior_data = {
+            "columns": ["created_at", "revenue", "region"],
+            "row_count": 3,
+            "rows": ROWS,
+            "from_query": "how is revenue?",
+        }
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(decision="answer", chart_from_prior=True),
+                _pipeline_json(answer="Here is the chart.", visuals=[], confidence=0.7),
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(
+                user_query="show in chart form",
+                db_data=[],
+                prior_data=prior_data,
+            )
+        )
+        assert output.clarification is None
+        kinds = [visual.visual_type for visual in output.visuals]
+        assert "graph" in kinds
+
+    def test_market_series_synthesize_generic_graph(self, monkeypatch):
+        market = [
+            {
+                "entity": "Acme",
+                "labels": ["Jan 01", "Jan 02", "Jan 03"],
+                "values": [10.0, 11.0, 12.0],
+            },
+            {
+                "entity": "Globex",
+                "labels": ["Jan 01", "Jan 02", "Jan 03"],
+                "values": [20.0, 19.0, 21.0],
+            },
+        ]
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(), _pipeline_json(visuals=[], confidence=0.7)
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(
+                user_query="compare performance",
+                db_data=[],
+                source_scope="live_web",
+                market_data=market,
+            )
+        )
+        assert len(output.visuals) == 1
+        graph = output.visuals[0]
+        assert graph.visual_type == "graph"
+        assert graph.props["chart_type"] == "line"
+        assert [dataset["name"] for dataset in graph.props["datasets"]] == [
+            "Acme",
+            "Globex",
+        ]
+        # Generic title from the entities - never a hardcoded stock story.
+        assert "Acme" in graph.title and "Globex" in graph.title
+
+
+class TestRobustnessLoop:
+    """Live-hardening: empty-completion retries, requested shapes, citations,
+    the thinking trace, and the sources-table guarantee."""
+
+    def test_judge_empty_then_valid_recovers(self, monkeypatch):
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                "",
+                _decision_json(
+                    decision="clarify",
+                    missing="metric choice",
+                    suggested_options=["revenue"],
+                ),
+                _pipeline_json(
+                    answer="",
+                    insights=[],
+                    summary="",
+                    root_causes=[],
+                    recommendations=[],
+                    confidence=0.0,
+                    clarification={
+                        "question": "Which metric?",
+                        "options": ["revenue"],
+                    },
+                ),
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(user_query="how are we doing?", db_data=ROWS)
+        )
+        assert output.clarification is not None
+        assert output.clarification.question == "Which metric?"
+
+    def test_narration_empty_retries_instead_of_fallback(self, monkeypatch):
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(),
+                "",
+                _pipeline_json(
+                    answer="Recovered on retry.",
+                    visuals=[],
+                    insights=[],
+                    summary="",
+                    root_causes=[],
+                    recommendations=[],
+                    confidence=0.6,
+                ),
+            ),
+        )
+
+        output = asyncio.run(run_pipeline(user_query="q", db_data=[]))
+        assert output.answer == "Recovered on retry."
+        assert output.clarification is None
+
+    def test_requested_bar_shape_overrides_line_default(self, monkeypatch):
+        # Date series default to line; "as a bar chart" must win.
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(), _pipeline_json(visuals=[], confidence=0.7)
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(user_query="show revenue as a bar chart", db_data=ROWS)
+        )
+        graph = next(v for v in output.visuals if v.visual_type == "graph")
+        assert graph.props["chart_type"] == "bar"
+        assert graph.props["labels"] == ["2024-01-01", "2024-01-02", "2024-01-03"]
+
+    def test_requested_table_shape_leads(self, monkeypatch):
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(), _pipeline_json(visuals=[], confidence=0.7)
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(user_query="give it to me in a table", db_data=ROWS)
+        )
+        assert output.visuals[0].visual_type == "table"
+
+    def test_detect_preferred_visual_shapes(self):
+        assert detect_preferred_visual("show as a bar chart") == "bar"
+        assert detect_preferred_visual("plot a line chart") == "line"
+        assert detect_preferred_visual("pie chart please") == "pie"
+        assert detect_preferred_visual("in a table") == "table"
+        assert detect_preferred_visual("how is revenue?") is None
+
+    def test_citations_keep_valid_drop_phantom(self):
+        answer = "Raised $50M in 2024 [1] and hired a lot [9]."
+        assert sanitize_citations(answer, 2) == "Raised $50M in 2024 [1] and hired a lot ."
+        assert sanitize_citations("No markers here.", 2) == "No markers here."
+        assert sanitize_citations("Claim [1].", 0) == "Claim ."
+
+    def test_narration_citations_sanitized_live(self, monkeypatch):
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(),
+                _pipeline_json(
+                    answer="Acme raised $50M [1] and Globex raised $70M [9].",
+                    visuals=[],
+                    confidence=0.7,
+                ),
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(
+                user_query="startup funding news",
+                db_data=[],
+                source_scope="live_web",
+                news_context=["Acme funding snippet", "Globex snippet"],
+            )
+        )
+        assert "[1]" in output.answer
+        assert "[9]" not in output.answer
+
+    def test_thinking_trace_present_on_answers(self, monkeypatch):
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(), _pipeline_json(visuals=[], confidence=0.7)
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(user_query="how is revenue?", db_data=ROWS)
+        )
+        assert output.thinking
+        assert any("Judged" in step for step in output.thinking)
+        assert any("Visuals out" in step for step in output.thinking)
+
+    def test_sources_table_for_web_only_answer(self, monkeypatch):
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(), _pipeline_json(visuals=[], confidence=0.7)
+            ),
+        )
+        sources = [
+            {"title": "Acme raises", "url": "https://a.example", "provider": "X"},
+            {"title": "Globex launches", "url": "https://b.example", "provider": "Y"},
+        ]
+
+        output = asyncio.run(
+            run_pipeline(
+                user_query="startup news",
+                db_data=[],
+                source_scope="live_web",
+                news_context=["snippet one", "snippet two"],
+                web_sources=sources,
+            )
+        )
+        tables = [v for v in output.visuals if v.visual_type == "table"]
+        assert tables
+        assert tables[0].title == "Sources cited"
+        assert tables[0].props["columns"] == ["Source", "Provider"]
+
+    def test_empty_options_backfilled_from_judge(self, monkeypatch):
+        # Both affordances, always: the narrator left options empty, so the
+        # judge's evidence-grounded suggestions fill the pills.
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(
+                    decision="clarify",
+                    missing="metric choice",
+                    suggested_options=["total users", "active users"],
+                ),
+                _pipeline_json(
+                    answer="",
+                    insights=[],
+                    summary="",
+                    root_causes=[],
+                    recommendations=[],
+                    confidence=0.0,
+                    clarification={
+                        "question": "Which user metric?",
+                        "options": [],
+                    },
+                ),
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(user_query="compare agents by users", db_data=[])
+        )
+        assert output.clarification is not None
+        assert output.clarification.options == ["total users", "active users"]
+
+    def test_empty_options_stays_type_only_when_judge_has_none(self, monkeypatch):
+        # Genuinely open-ended: no suggestion anywhere keeps [] so the UI
+        # renders the free-text box alone.
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(decision="clarify", missing="free-form detail"),
+                _pipeline_json(
+                    answer="",
+                    insights=[],
+                    summary="",
+                    root_causes=[],
+                    recommendations=[],
+                    confidence=0.0,
+                    clarification={
+                        "question": "Describe what you need?",
+                        "options": [],
+                    },
+                ),
+            ),
+        )
+
+        output = asyncio.run(run_pipeline(user_query="help me", db_data=[]))
+        assert output.clarification is not None
+        assert output.clarification.options == []

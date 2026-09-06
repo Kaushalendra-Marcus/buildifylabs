@@ -24,6 +24,12 @@ function isBoundedConfidence(value: number): boolean {
   return Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
+function confidenceBand(value: number): string {
+  if (value >= 0.7) return 'High';
+  if (value >= 0.4) return 'Medium';
+  return 'Low';
+}
+
 /** Compact raw-row slice — the "receipt" behind the answer (specs/10 §2). */
 function DataPreview({ rows }: { rows: Array<Record<string, unknown>> }) {
   if (rows.length === 0) {
@@ -88,6 +94,9 @@ export function TrustFooter({
 
   return (
     <div className="trust-footer">
+      <span className="trust-footer__sep" aria-hidden="true">
+        ·
+      </span>
       <button
         type="button"
         className="trust-footer__action"
@@ -99,27 +108,35 @@ export function TrustFooter({
       </button>
 
       {showConfidence && (
-        <div className="trust-footer__confidence">
-          <span className="trust-footer__confidence-label">Confidence</span>
-          <div
-            className="trust-footer__confidence-track"
-            role="meter"
-            aria-label="Confidence"
-            aria-valuemin={0}
-            aria-valuemax={1}
-            aria-valuenow={confidence}
-          >
-            <div
-              className="trust-footer__confidence-fill"
-              style={{ width: `${confidence * 100}%` }}
-            />
-          </div>
-          <span className="trust-footer__confidence-value">
-            {Math.round(confidence * 100)}%
+        <>
+          <span className="trust-footer__sep" aria-hidden="true">
+            ·
           </span>
-        </div>
+          <div className="trust-footer__confidence">
+            <span className="trust-footer__confidence-label">Confidence</span>
+            <div
+              className="trust-footer__confidence-track"
+              role="meter"
+              aria-label="Confidence"
+              aria-valuemin={0}
+              aria-valuemax={1}
+              aria-valuenow={confidence}
+            >
+              <div
+                className="trust-footer__confidence-fill"
+                style={{ width: `${confidence * 100}%` }}
+              />
+            </div>
+            <span className="trust-footer__confidence-value">
+              {confidenceBand(confidence)} · {Math.round(confidence * 100)}%
+            </span>
+          </div>
+        </>
       )}
 
+      <span className="trust-footer__sep" aria-hidden="true">
+        ·
+      </span>
       <button
         type="button"
         className="trust-footer__action"

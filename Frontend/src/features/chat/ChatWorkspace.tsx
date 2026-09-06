@@ -49,7 +49,12 @@ export function ChatWorkspace() {
             onClick={() => setRailOpen(false)}
           />
         )}
-        <HistoryRail open={railOpen} />
+        <HistoryRail
+          open={railOpen}
+          onNewChat={() => {
+            if (isNarrow) setRailOpen(false);
+          }}
+        />
         <div className="chat-workspace__main">
           <MessageStream />
           <Composer />

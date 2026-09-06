@@ -8,9 +8,19 @@
  */
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatWorkspace } from './ChatWorkspace'
 import { useAuthStore } from '../auth/auth-store'
+
+/** The header brand is a router Link home — every render needs the context. */
+function renderWorkspace() {
+  return render(
+    <MemoryRouter>
+      <ChatWorkspace />
+    </MemoryRouter>,
+  )
+}
 
 const NARROW_QUERY = '(max-width: 767.98px)'
 
@@ -49,7 +59,7 @@ describe('ChatWorkspace shell (F2)', () => {
 
   it('renders the header, rail, stream and composer regions in one layout', () => {
     stubMatchMedia(false) // desktop >=768px → rail open by default
-    render(<ChatWorkspace />)
+    renderWorkspace()
 
     expect(screen.getByRole('banner')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Hide chat history' })).toBeInTheDocument()
@@ -60,9 +70,19 @@ describe('ChatWorkspace shell (F2)', () => {
     expect(screen.getByRole('region', { name: 'Composer' })).toBeInTheDocument()
   })
 
+  it('links the header brand to the home page', () => {
+    stubMatchMedia(false)
+    renderWorkspace()
+
+    expect(screen.getByRole('link', { name: 'Buildify Labs home' })).toHaveAttribute(
+      'href',
+      '/',
+    )
+  })
+
   it('brands the header with the logo tile and Intelligence subtitle', () => {
     stubMatchMedia(false)
-    const { container } = render(<ChatWorkspace />)
+    const { container } = renderWorkspace()
 
     expect(screen.getByText('Buildify Labs')).toBeInTheDocument()
     expect(screen.getByText('Intelligence')).toBeInTheDocument()
@@ -72,7 +92,7 @@ describe('ChatWorkspace shell (F2)', () => {
 
   it('keeps the quota chip in the composer footer, next to the scope selector', () => {
     stubMatchMedia(false)
-    render(<ChatWorkspace />)
+    renderWorkspace()
 
     const composer = screen.getByRole('region', { name: 'Composer' })
     expect(composer.querySelector('.composer__top')).toBeInTheDocument()
@@ -81,7 +101,7 @@ describe('ChatWorkspace shell (F2)', () => {
 
   it('collapses the rail by default on narrow viewports (overlay, not pushed)', () => {
     stubMatchMedia(true) // <768px
-    render(<ChatWorkspace />)
+    renderWorkspace()
 
     expect(screen.getByRole('complementary', { name: 'Chat history' })).toHaveClass(
       'history-rail--closed',
@@ -92,7 +112,7 @@ describe('ChatWorkspace shell (F2)', () => {
   it('opens the rail as an overlay via the header toggle on narrow viewports', async () => {
     stubMatchMedia(true)
     const user = userEvent.setup()
-    render(<ChatWorkspace />)
+    renderWorkspace()
 
     await user.click(screen.getByRole('button', { name: 'Show chat history' }))
 

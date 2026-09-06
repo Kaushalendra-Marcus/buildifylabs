@@ -99,7 +99,7 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
     expect(graphCard).toHaveClass('visual-cards-grid__card--wide')
 
     // 3. Insights strip — collapsed by default, hedged "Possible factors".
-    const stripToggle = screen.getByRole('button', { name: 'Possible factors' })
+    const stripToggle = screen.getByRole('button', { name: /Insights · 3 items/ })
     expect(stripToggle).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByText('A possible contributing factor is fewer new orders.')).not.toBeInTheDocument()
 
@@ -132,10 +132,10 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
 
     render(<MessageStream />)
 
-    await user.click(screen.getByRole('button', { name: 'Possible factors' }))
+    await user.click(screen.getByRole('button', { name: /Insights · 3 items/ }))
 
     expect(
-      screen.getByRole('button', { name: 'Possible factors' }),
+      screen.getByRole('button', { name: /Insights · 3 items/ }),
     ).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('A possible contributing factor is fewer repeat orders.')).toBeInTheDocument()
     expect(screen.getByText('A seasonal pattern stands out.')).toBeInTheDocument()
@@ -399,5 +399,77 @@ describe('MessageStream — intelligence styling', () => {
 
     expect(screen.getByText('Buildify Intelligence')).toBeInTheDocument()
     expect(screen.getByText('Clarification needed')).toBeInTheDocument()
+  })
+
+  it('renders a clarification with no preset options as question only, no pills', () => {
+    // The backend coerces a model-emitted options:null to [] — the question
+    // must still render, with no option buttons and no trust footer.
+    useChatStore.getState().addAssistantMessage(
+      makeOutput({
+        answer: '',
+        visuals: [],
+        clarification: {
+          question: 'Which AI business should I compare?',
+          options: [],
+        },
+        sql_query: null,
+        data_preview: null,
+      }),
+    )
+
+    render(<MessageStream />)
+
+    expect(
+      screen.getByText('Which AI business should I compare?'),
+    ).toHaveClass('message__clarification-question')
+    expect(
+      screen.queryByRole('button', { name: 'Show the query' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('sends a typed custom reply as a follow-up like a pill tap', async () => {
+    const user = userEvent.setup()
+    vi.mocked(sendQuery).mockResolvedValue(
+      makeOutput({ answer: 'Custom answer response' })
+    )
+
+    useChatStore.getState().addUserMessage('trending startups?')
+    useChatStore.getState().addAssistantMessage(
+      makeOutput({
+        answer: '',
+        visuals: [],
+        clarification: {
+          question: 'Which sector?',
+          options: ['Fintech'],
+        },
+        sql_query: null,
+        data_preview: null,
+      }),
+    )
+
+    render(<MessageStream />)
+
+    // Both affordances render together: the preset pill and the free-text box.
+    expect(
+      screen.getByRole('button', { name: 'Fintech' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByPlaceholderText('Type your answer…'),
+    ).toBeInTheDocument()
+
+    await user.type(
+      screen.getByPlaceholderText('Type your answer…'),
+      'My own sector pick',
+    )
+    await user.click(screen.getByRole('button', { name: 'Send custom answer' }))
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    const messages = useChatStore.getState().messages
+    const userMsg = messages[messages.length - 2]
+    expect(userMsg.role).toBe('user')
+    if (userMsg.role === 'user') {
+      expect(userMsg.content).toContain('My own sector pick')
+    }
   })
 })

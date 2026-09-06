@@ -10,14 +10,15 @@
  */
 import type { ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
+import { GooLoader } from '../../components/GooLoader';
 import { useAuthStore } from './auth-store';
 import './route-guards.css';
 
 function RouteLoading() {
   return (
     <div className="route-loading" role="status" aria-label="Loading">
-      <span className="route-loading__spinner" aria-hidden="true" />
-      Loading…
+      <GooLoader size={0.55} />
+      <span className="route-loading__text">Loading…</span>
     </div>
   );
 }

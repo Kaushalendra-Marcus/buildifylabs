@@ -1,11 +1,16 @@
 /**
- * AccountMenu (F2 shell) — the header account affordance (specs/14 §3). An
- * outline of the contents lives in specs/14 §9.3 (open question); the shell
- * provides a compact dropdown with the signed-in identity and sign-out.
+ * AccountMenu (F2 shell) — the header account affordance (specs/14 §3): an
+ * initials avatar + name trigger opening a dropdown with the signed-in
+ * identity (name + email, or Guest + plan) and four items — Plan & billing,
+ * Data sources, Contact us (each opens a small dialog on a live seam), and
+ * Sign out in danger red. Amber accent only, never purple.
+ *
+ * Closes on outside click, on Escape, or after picking an item.
  */
-import { ChevronDown, LogOut } from 'lucide-react';
-import { useState } from 'react';
+import { ChevronDown, CreditCard, Database, LogOut, Mail } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../hooks/useAuth';
+import { AccountDialog, type AccountDialogKind } from './AccountDialog';
 
 /** Initials for the header avatar circle ("Ada Lovelace" → "AL"). */
 function initialsFor(label: string): string {
@@ -22,11 +27,37 @@ function initialsFor(label: string): string {
 export function AccountMenu() {
   const { user, signOut } = useAuth();
   const [open, setOpen] = useState(false);
+  const [dialog, setDialog] = useState<AccountDialogKind | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
-  const label = user?.name ?? user?.email ?? 'Guest';
+  const isGuest = user?.plan === 'guest' || user === null;
+  const displayName = user?.name?.trim() || user?.email?.trim() || 'Guest';
+  const displayEmail = user?.email?.trim() ?? null;
+
+  // Close on outside click / Escape — the menu is a lightweight popover.
+  useEffect(() => {
+    if (!open) return;
+    function handlePointer(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('pointerdown', handlePointer);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointer);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [open ]);
+
+  function openDialog(kind: AccountDialogKind) {
+    setOpen(false);
+    setDialog(kind);
+  }
 
   return (
-    <div className="account-menu">
+    <div className="account-menu" ref={rootRef}>
       <button
         type="button"
         className="account-menu__trigger"
@@ -36,35 +67,59 @@ export function AccountMenu() {
         onClick={() => setOpen((value) => !value)}
       >
         <span className="account-menu__avatar" aria-hidden="true">
-          {initialsFor(label)}
+          {initialsFor(displayName)}
         </span>
-        <span className="account-menu__name">{label}</span>
+        <span className="account-menu__name">{displayName}</span>
         <ChevronDown size={14} aria-hidden="true" />
       </button>
 
       {open && (
-        <div
-          className="account-menu__menu"
-          role="menu"
-          onClick={(event) => {
-            if ((event.target as HTMLElement).closest('[data-sign-out]')) return;
-            setOpen(false);
-          }}
-        >
-          <span className="account-menu__identity">{label}</span>
+        <div className="account-menu__menu" role="menu">
+          <div className="account-menu__identity">
+            <span className="account-menu__identity-name">{displayName}</span>
+            {displayEmail !== null && !isGuest ? (
+              <span className="account-menu__identity-email">{displayEmail}</span>
+            ) : (
+              <span className="account-menu__identity-email">
+                {user?.plan ?? 'guest'} plan
+              </span>
+            )}
+          </div>
+
+          <div className="account-menu__divider" aria-hidden="true" />
+
+          <button type="button" role="menuitem" onClick={() => openDialog('plan')}>
+            <CreditCard size={15} aria-hidden="true" />
+            Plan &amp; billing
+          </button>
+          <button type="button" role="menuitem" onClick={() => openDialog('sources')}>
+            <Database size={15} aria-hidden="true" />
+            Data sources
+          </button>
+          <button type="button" role="menuitem" onClick={() => openDialog('contact')}>
+            <Mail size={15} aria-hidden="true" />
+            Contact us
+          </button>
+
+          <div className="account-menu__divider" aria-hidden="true" />
+
           <button
             type="button"
             role="menuitem"
-            data-sign-out
+            className="account-menu__item--danger"
             onClick={() => {
               signOut();
               setOpen(false);
             }}
           >
-            <LogOut size={14} aria-hidden="true" />
+            <LogOut size={15} aria-hidden="true" />
             Sign out
           </button>
         </div>
+      )}
+
+      {dialog !== null && (
+        <AccountDialog kind={dialog} onClose={() => setDialog(null)} />
       )}
     </div>
   );
