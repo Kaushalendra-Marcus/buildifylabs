@@ -22,6 +22,9 @@ def get_engine():
         echo=settings.SQL_ECHO,
         pool_size=10,
         max_overflow=20,
+        connect_args={
+            "ssl": True,
+        },
     )
 
 
