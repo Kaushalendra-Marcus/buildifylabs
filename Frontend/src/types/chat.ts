@@ -46,6 +46,8 @@ export interface PipelineOutput {
   sql_query: string | null; // exact SQL behind this answer (traceability)
   data_preview: Array<Record<string, unknown>> | null; // raw row slice
   query_log_id: string | null; // UUID — drives "show the query" + flagging
+  thinking?: string[]; // machine-written pipeline steps (additive, may be absent)
+  followups?: string[]; // tap-to-ask next questions (additive, may be absent)
 }
 
 export interface ChatRequest {

@@ -1107,6 +1107,36 @@
   align-self: stretch;
 }
 
+.process-card__body {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.process-card__steps {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.process-card__body .bl-boxloader {
+  margin: -8px 4px -32px 0;
+}
+
+@media (max-width: 560px) {
+  .process-card__body {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .process-card__body .bl-boxloader {
+    align-self: center;
+    margin: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .process-card__spinner {
     animation: none;

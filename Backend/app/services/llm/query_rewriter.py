@@ -83,6 +83,7 @@ async def rewrite_search_queries(
             system_prompt=REWRITE_SYSTEM_PROMPT,
             temperature=0.0,
             max_tokens=300,
+            json_mode=True,
         )
         content = (result.get("content") or "").strip()
         if not content:

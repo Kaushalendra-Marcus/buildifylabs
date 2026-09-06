@@ -14,6 +14,7 @@ import { Newspaper } from 'lucide-react';
 import type { PipelineOutput } from '../../../types/chat';
 import { AssistantIdentity } from './AssistantIdentity';
 import { AnswerProse } from './AnswerProse';
+import { FollowUpChips } from './FollowUpChips';
 import { VisualCardsGrid } from './VisualCardsGrid';
 import { DataSources } from './DataSources';
 import { ProcessTrace } from './ProcessTrace';
@@ -53,6 +54,8 @@ export function AssistantAnswer({
         confidence={output.confidence}
         answeredAt={answeredAt}
       />
+
+      <FollowUpChips followups={output.followups ?? []} />
 
       {output.news_context.length > 0 && (
         <div className="news-context-row">

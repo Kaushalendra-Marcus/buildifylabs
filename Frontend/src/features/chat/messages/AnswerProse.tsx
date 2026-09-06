@@ -8,6 +8,7 @@
  * markers render as a plain paragraph.
  */
 import { Fragment } from 'react';
+import { renderInlineMarkdown } from './inline-markdown';
 
 const CITATION_PATTERN = '\\[(\\d+)\\]';
 
@@ -36,13 +37,22 @@ export function AnswerProse({
     parts.push({ key: `t-${key++}`, index: null, text: answer.slice(last) });
   }
   if (parts.length === 0) {
-    return <p className="message__answer-prose">{answer}</p>;
+    return (
+      <p className="message__answer-prose">
+        {renderInlineMarkdown(answer, 'prose')}
+      </p>
+    );
   }
 
   return (
     <p className="message__answer-prose">
       {parts.map((part) => {
-        if (part.index === null) return <Fragment key={part.key}>{part.text}</Fragment>;
+        if (part.index === null)
+          return (
+            <Fragment key={part.key}>
+              {renderInlineMarkdown(part.text, part.key)}
+            </Fragment>
+          );
         const valid = part.index >= 1 && part.index <= sourceCount;
         if (!valid) return <Fragment key={part.key}>{part.text}</Fragment>;
         return (

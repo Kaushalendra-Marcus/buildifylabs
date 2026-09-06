@@ -142,6 +142,9 @@ class PipelineOutput(BaseModel):
     # (judge verdict, tools run, visuals planned/synthesized). Rendered by
     # clients that want to show their work; ignored by those that don't.
     thinking: List[str] = Field(default_factory=list)
+    # Suggested follow-up questions the user can tap to continue. Genuine
+    # next questions about this answer, never repeats of it.
+    followups: List[str] = Field(default_factory=list)
 
 
 SYSTEM_PROMPT = """You are a business intelligence analyst for a non-technical business owner.
@@ -226,6 +229,11 @@ STRICT RULES:
     and ground every option in actually available evidence (columns, metrics, or
     the decided suggestions). A second clarification on the same point is forbidden:
     answer best-effort and state your assumptions instead.
+- FOLLOW-UPS: for a normal answer, end with 2-3 short follow-up questions the user
+    would plausibly ask next about THIS answer (a drill-down, a comparison, a
+    different cut). Each must be answerable from the evidence at hand or a trivial
+    follow-up query - never a repeat of the current question, never a question the
+    answer already resolves. Omit ([]) for clarifications and fallbacks.
 
 Return this exact JSON:
 {
@@ -240,7 +248,8 @@ Return this exact JSON:
   "news_context": [],
   "anomalies": [],
   "confidence": 0.8,
-  "clarification": null
+  "clarification": null,
+  "followups": ["...", "..."]
 }
 """
 
@@ -330,6 +339,7 @@ async def judge_sufficiency(
                 system_prompt=DECISION_SYSTEM_PROMPT,
                 temperature=0.0 if attempt == 0 else 0.3,
                 max_tokens=400,
+                json_mode=True,
             )
             content = (result.get("content") or "").strip()
             if content:
@@ -607,6 +617,7 @@ def normalize_pipeline_payload(payload: dict) -> dict:
         "data_preview": None,
         "query_log_id": None,
         "thinking": [],
+        "followups": [],
     }
     normalized = {**defaults, **payload}
     for field in (
@@ -621,6 +632,12 @@ def normalize_pipeline_payload(payload: dict) -> dict:
     ):
         if normalized[field] is None:
             normalized[field] = []
+    followups = normalized.get("followups")
+    normalized["followups"] = (
+        [str(item).strip() for item in followups if str(item).strip()][:3]
+        if isinstance(followups, list)
+        else []
+    )
     return normalized
 
 
@@ -1098,6 +1115,7 @@ async def _narrate(
         system_prompt=SYSTEM_PROMPT,
         temperature=0.2,
         max_tokens=2000,
+        json_mode=True,
     )
 
     raw_output = (result.get("content") or "").strip()
@@ -1110,6 +1128,7 @@ async def _narrate(
             system_prompt=SYSTEM_PROMPT,
             temperature=0.3,
             max_tokens=2000,
+            json_mode=True,
         )
         raw_output = (result.get("content") or "").strip()
     logger.info(f"LLM source used: {result.get('source', 'unknown')}")

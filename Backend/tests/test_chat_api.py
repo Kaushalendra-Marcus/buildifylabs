@@ -201,14 +201,14 @@ def client(db_engine):
 
 
 def _sql_fake(content):
-    async def fake(prompt, system_prompt, temperature=0.3, max_tokens=512):
+    async def fake(prompt, system_prompt, temperature=0.3, max_tokens=512, **kwargs):
         return {"content": content, "source": "groq", "usage": None}
 
     return fake
 
 
 def _pipeline_fake(payload):
-    async def fake(prompt, system_prompt, temperature=0.3, max_tokens=512):
+    async def fake(prompt, system_prompt, temperature=0.3, max_tokens=512, **kwargs):
         return {"content": json.dumps(payload), "source": "groq", "usage": None}
 
     return fake

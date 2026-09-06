@@ -6,9 +6,11 @@
  * a success check; the current step gets a spinner plus an amber
  * "running.." tail; later steps stay muted. Steps are honest about the
  * request kind — SQL-flavoured for your-data, retrieval-flavoured for live
- * web — with no invented millisecond timings.
+ * web — with no invented millisecond timings. The assembling-blocks figure
+ * (BoxLoader, Uiverse) docks at the side as ambient motion.
  */
 import { Check, Loader2 } from 'lucide-react';
+import { BoxLoader } from '../../../components/BoxLoader';
 
 const OWN_DATA_STEPS = [
   'Connecting to data source',
@@ -51,34 +53,39 @@ export function ProcessRunning({
   return (
     <div className="process-card process-card--running" role="status" aria-label={statusLabel}>
       <p className="process-card__eyebrow">Processing</p>
-      {steps.map((label, index) => {
-        const done = index < activeIndex;
-        const active = index === activeIndex;
-        return (
-          <div key={label} className="process-card__row">
-            <span
-              className={[
-                'process-card__status',
-                done ? 'process-card__status--done' : '',
-                active ? 'process-card__status--active' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              aria-hidden="true"
-            >
-              {done ? (
-                <Check size={13} />
-              ) : active ? (
-                <Loader2 size={13} className="process-card__spinner" />
-              ) : (
-                <span className="process-card__dot" />
-              )}
-            </span>
-            <span className="process-card__label">{label}</span>
-            {active && <span className="process-card__running">running..</span>}
-          </div>
-        );
-      })}
+      <div className="process-card__body">
+        <div className="process-card__steps">
+          {steps.map((label, index) => {
+            const done = index < activeIndex;
+            const active = index === activeIndex;
+            return (
+              <div key={label} className="process-card__row">
+                <span
+                  className={[
+                    'process-card__status',
+                    done ? 'process-card__status--done' : '',
+                    active ? 'process-card__status--active' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  aria-hidden="true"
+                >
+                  {done ? (
+                    <Check size={13} />
+                  ) : active ? (
+                    <Loader2 size={13} className="process-card__spinner" />
+                  ) : (
+                    <span className="process-card__dot" />
+                  )}
+                </span>
+                <span className="process-card__label">{label}</span>
+                {active && <span className="process-card__running">running..</span>}
+              </div>
+            );
+          })}
+        </div>
+        <BoxLoader size="sm" />
+      </div>
     </div>
   );
 }

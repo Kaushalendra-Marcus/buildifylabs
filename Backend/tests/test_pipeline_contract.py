@@ -107,7 +107,7 @@ class TestRunPipeline:
     def test_run_pipeline_returns_structured_output(self, monkeypatch):
         import json
 
-        async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512):
+        async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512, **kwargs):
             return {
                 "content": json.dumps(_pipeline_json()),
                 "source": "groq",
@@ -135,7 +135,7 @@ class TestRunPipeline:
     def test_clarification_is_a_working_mode(self, monkeypatch):
         import json
 
-        async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512):
+        async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512, **kwargs):
             return {
                 "content": json.dumps(
                     _pipeline_json(
@@ -175,7 +175,7 @@ class TestRunPipeline:
         # Live bug: Groq returned {"question": ..., "options": null}, which
         # failed PipelineOutput validation and degraded to a generic fallback
         # instead of showing the clarification question. None coerces to [].
-        async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512):
+        async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512, **kwargs):
             return {
                 "content": json.dumps(
                     _pipeline_json(
@@ -210,7 +210,7 @@ class TestRunPipeline:
         assert output.answer == ""
 
     def test_malformed_json_falls_back_with_zero_confidence(self, monkeypatch):
-        async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512):
+        async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512, **kwargs):
             return {"content": "not json at all", "source": "groq", "usage": None}
 
         monkeypatch.setattr(pipeline_mod, "generate_response", fake_generate)
@@ -226,7 +226,7 @@ class TestRunPipeline:
         import json
 
         # confidence out of range -> ValidationError -> fallback
-        async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512):
+        async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512, **kwargs):
             return {"content": json.dumps(_pipeline_json(confidence=9.9)), "source": "groq", "usage": None}
 
         monkeypatch.setattr(pipeline_mod, "generate_response", fake_generate)
@@ -241,7 +241,7 @@ class TestRunPipeline:
         # Two sequential calls must not share a news_context default list.
         import json
 
-        async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512):
+        async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512, **kwargs):
             assert "News Context" in prompt
             return {"content": json.dumps(_pipeline_json()), "source": "groq", "usage": None}
 
@@ -285,7 +285,7 @@ def _sequenced_fake(*contents):
 
     calls = {"n": 0}
 
-    async def fake(prompt, system_prompt, temperature=0.2, max_tokens=512):
+    async def fake(prompt, system_prompt, temperature=0.2, max_tokens=512, **kwargs):
         content = contents[min(calls["n"], len(contents) - 1)]
         calls["n"] += 1
         if isinstance(content, Exception):

@@ -42,10 +42,19 @@ async def generate_response(
     model: str = settings.GROQ_MODEL,
     temperature: float = 0.3,
     max_tokens: int = 512,
+    json_mode: bool = False,
 ) -> dict:
+    """Plain-text by default; `json_mode=True` forces Groq's JSON-object mode
+    for structured calls (judge/narration/rewriter). The HF fallback takes no
+    such flag and simply answers, so JSON callers must still validate/parse
+    defensively. Requires the word "JSON" in the messages (all our JSON
+    prompts have it)."""
     retries = 3
     for attempt in range(retries):
         try:
+            kwargs: dict = {}
+            if json_mode:
+                kwargs["response_format"] = {"type": "json_object"}
             response = await client.chat.completions.create(
                 model=model,
                 messages=[
@@ -54,6 +63,7 @@ async def generate_response(
                 ],
                 temperature=temperature,
                 max_tokens=max_tokens,
+                **kwargs,
             )
             content = response.choices[0].message.content
             usage = response.usage if hasattr(response, "usage") else None

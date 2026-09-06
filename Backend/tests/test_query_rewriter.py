@@ -13,7 +13,7 @@ from app.services.web_search import _dedupe_sources, _dedupe_texts, search_web
 
 
 def _rewrite_fake(content=None, exc=None):
-    async def fake(prompt, system_prompt, temperature=0.0, max_tokens=300):
+    async def fake(prompt, system_prompt, temperature=0.0, max_tokens=300, **kwargs):
         if exc is not None:
             raise exc
         return {"content": content, "source": "groq", "usage": None}
