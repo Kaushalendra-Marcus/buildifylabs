@@ -8,9 +8,20 @@
 .composer {
   flex: none;
   position: relative;
-  padding: 10px 16px 14px;
-  background: var(--surface-card);
-  border-top: 1px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
+  padding: 12px 24px 16px;
+  background: var(--surface-page);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ----- Ambient top row: scope selector left, quota chip right ----- */
+
+.composer__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
 }
 
 /* ----- 5.2 gating hint (Live web / Both are B7-deferred, never silent) ----- */
@@ -26,19 +37,19 @@
 .composer__scope {
   display: inline-flex;
   gap: 2px;
-  padding: 2px;
-  margin-bottom: 8px;
-  background: color-mix(in srgb, var(--text-secondary) 8%, transparent);
-  border-radius: 999px;
+  padding: 3px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
 }
 
 .composer__scope-segment {
   font: inherit;
   font-size: var(--font-size-caption);
-  color: var(--text-secondary);
+  color: var(--text-muted);
   background: transparent;
   border: none;
-  border-radius: 999px;
+  border-radius: 7px;
   padding: 5px 12px;
   cursor: pointer;
 }
@@ -48,17 +59,25 @@
 }
 
 .composer__scope-segment[aria-pressed='true'] {
-  color: var(--surface-card);
-  background: var(--accent);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
   font-weight: 600;
 }
 
-/* ----- Input row: auto-grow textarea + upload + send ----- */
+/* ----- Input bar: one bordered bar, buttons docked inside ----- */
 
 .composer__row {
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  background: var(--surface-card);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 8px 8px 8px 16px;
+}
+
+.composer__row:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .composer__input {
@@ -70,10 +89,10 @@
   font-size: var(--font-size-body);
   line-height: 1.5;
   color: var(--text-primary);
-  background: var(--surface-page);
-  border: 1px solid color-mix(in srgb, var(--text-muted) 40%, transparent);
-  border-radius: 12px;
-  padding: 9px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 7px 0;
 }
 
 .composer__input::placeholder {
@@ -81,8 +100,7 @@
 }
 
 .composer__input:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 0;
+  outline: none;
   border-color: transparent;
 }
 
@@ -101,28 +119,30 @@
 .composer__icon-button {
   color: var(--text-secondary);
   background: transparent;
-  border: 1px solid color-mix(in srgb, var(--text-muted) 40%, transparent);
+  border: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 .composer__icon-button:hover,
 .composer__icon-button[aria-expanded='true'] {
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface-card));
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
   border-color: color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 .composer__send {
-  color: var(--surface-card);
-  background: var(--accent);
-  border: none;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .composer__send:hover:not(:disabled) {
-  filter: brightness(1.06);
+  color: #14100a;
+  background: var(--accent);
+  filter: none;
 }
 
 .composer__send:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 

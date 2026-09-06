@@ -10,12 +10,14 @@
 import { useState } from 'react';
 import { Check, Code2, Flag } from 'lucide-react';
 import { flagAnswer } from '../../../api/chat';
+import { formatTime } from '../../../lib/format';
 
 interface TrustFooterProps {
   queryLogId: string | null;
   sqlQuery: string | null;
   dataPreview: Array<Record<string, unknown>> | null;
   confidence: number;
+  answeredAt?: number;
 }
 
 function isBoundedConfidence(value: number): boolean {
@@ -59,6 +61,7 @@ export function TrustFooter({
   sqlQuery,
   dataPreview,
   confidence,
+  answeredAt,
 }: TrustFooterProps) {
   const [queryOpen, setQueryOpen] = useState(false);
   const [flagState, setFlagState] = useState<'idle' | 'flagging' | 'flagged' | 'error'>(
@@ -140,6 +143,15 @@ export function TrustFooter({
         <span className="trust-footer__error" role="alert">
           Couldn't flag this answer. Please try again.
         </span>
+      )}
+
+      {typeof answeredAt === 'number' && (
+        <time
+          className="trust-footer__time"
+          dateTime={new Date(answeredAt).toISOString()}
+        >
+          {formatTime(answeredAt)}
+        </time>
       )}
 
       {queryOpen && hasQueryReceipt && (

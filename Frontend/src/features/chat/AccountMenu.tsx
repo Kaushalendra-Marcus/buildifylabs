@@ -3,9 +3,21 @@
  * outline of the contents lives in specs/14 §9.3 (open question); the shell
  * provides a compact dropdown with the signed-in identity and sign-out.
  */
-import { ChevronDown, LogOut, UserRound } from 'lucide-react';
+import { ChevronDown, LogOut } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '../../hooks/useAuth';
+
+/** Initials for the header avatar circle ("Ada Lovelace" → "AL"). */
+function initialsFor(label: string): string {
+  const initials = label
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
+  return initials || '•';
+}
 
 export function AccountMenu() {
   const { user, signOut } = useAuth();
@@ -23,8 +35,10 @@ export function AccountMenu() {
         aria-label="Account"
         onClick={() => setOpen((value) => !value)}
       >
-        <UserRound size={16} aria-hidden="true" />
-        {label}
+        <span className="account-menu__avatar" aria-hidden="true">
+          {initialsFor(label)}
+        </span>
+        <span className="account-menu__name">{label}</span>
         <ChevronDown size={14} aria-hidden="true" />
       </button>
 

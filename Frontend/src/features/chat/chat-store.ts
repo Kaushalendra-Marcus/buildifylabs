@@ -38,12 +38,19 @@ export interface UserChatMessage {
   content: string;
   /** Uploaded-file chip rendered ABOVE the bubble (4.1) — F5 fills it. */
   fileName?: string | null;
+  /** Epoch ms when the message was sent — the stream renders it as a small
+   *  "12:28 AM" timestamp under the bubble. Optional so older/tests state
+   *  without it still renders (no timestamp). */
+  createdAt?: number;
 }
 
 export interface AssistantChatMessage {
   id: string;
   role: 'assistant';
   output: PipelineOutput;
+  /** Epoch ms when the answer arrived — the trust footer renders it at the
+   *  end of its row. Optional, same as the user timestamp. */
+  createdAt?: number;
 }
 
 export type SystemNoticeKind = 'window-exhausted' | 'lifetime-cap' | 'error';
@@ -130,7 +137,7 @@ addUserMessage: (content, fileName = null) =>
       ],
       messages: [
         ...state.messages,
-        { id: makeId(), role: 'user', content, fileName },
+        { id: makeId(), role: 'user', content, fileName, createdAt: Date.now() },
       ],
     })),
 
@@ -138,7 +145,7 @@ addUserMessage: (content, fileName = null) =>
     set((state) => ({
       messages: [
         ...state.messages,
-        { id: makeId(), role: 'assistant', output },
+        { id: makeId(), role: 'assistant', output, createdAt: Date.now() },
       ],
     })),
 

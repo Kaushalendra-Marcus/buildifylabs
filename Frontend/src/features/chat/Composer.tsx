@@ -25,6 +25,7 @@ import type { SourceScope } from '../../types/chat';
 import { useChatStore, type PendingKind } from './chat-store';
 import { useScopeStore } from './scope-store';
 import { WINDOW_MS, useQuotaStore } from './quota-store';
+import { QuotaChip } from './QuotaChip';
 import { UploadPopover } from './UploadPopover';
 import './composer.css';
 
@@ -132,24 +133,28 @@ export function Composer() {
 
 
       <form className="composer__form" onSubmit={handleSubmit}>
-        {/* 5.2 source-scope selector — always visible, persisted */}
-        <div className="composer__scope" role="group" aria-label="Source scope">
-          {SCOPE_SEGMENTS.map((segment) => (
-            <button
-              key={segment.value}
-              type="button"
-              className="composer__scope-segment"
-              aria-pressed={scope === segment.value}
-              title={
-                segment.value === 'own_data'
-                  ? 'Questions are answered from your uploaded data.'
-                  : 'Not available yet — answers fall back to your own data.'
-              }
-              onClick={() => setScope(segment.value)}
-            >
-              {segment.label}
-            </button>
-          ))}
+        {/* Ambient row: 5.2 source-scope selector (always visible, persisted)
+            left, 5.5 quota chip right — the footer's status line. */}
+        <div className="composer__top">
+          <div className="composer__scope" role="group" aria-label="Source scope">
+            {SCOPE_SEGMENTS.map((segment) => (
+              <button
+                key={segment.value}
+                type="button"
+                className="composer__scope-segment"
+                aria-pressed={scope === segment.value}
+                title={
+                  segment.value === 'own_data'
+                    ? 'Questions are answered from your uploaded data.'
+                    : 'Not available yet — answers fall back to your own data.'
+                }
+                onClick={() => setScope(segment.value)}
+              >
+                {segment.label}
+              </button>
+            ))}
+          </div>
+          <QuotaChip />
         </div>
 
         {/* 5.1 text input + 5.3 upload + 5.4 send */}

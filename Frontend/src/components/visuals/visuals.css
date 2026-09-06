@@ -11,15 +11,18 @@
 
 .visual-metric__label {
   margin: 0;
-  font-size: var(--font-size-caption);
-  color: var(--text-secondary);
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .visual-metric__value {
-  margin: 0;
-  font-size: var(--font-size-metric);
-  font-weight: 700;
-  line-height: 1.2;
+  margin: 2px 0 0;
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1.15;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
@@ -28,9 +31,10 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin: 4px 0 0;
+  margin: 6px 0 0;
   font-size: var(--font-size-caption);
-  font-weight: 600;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .visual-metric__change--up {
@@ -65,11 +69,12 @@
   border-collapse: collapse;
   font-size: var(--font-size-caption);
   color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
 }
 
 .visual-table th,
 .visual-table td {
-  padding: 6px 10px;
+  padding: 9px 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--text-muted) 25%, transparent);
   text-align: left;
   white-space: nowrap;
@@ -81,6 +86,10 @@
   background: var(--surface-card);
   color: var(--text-muted);
   font-weight: 600;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 /* ---------- ComparisonCard (comparison) ---------- */
@@ -208,12 +217,34 @@
   margin: 0;
   padding: 0;
   list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .visual-alert {
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.visual-alert--info {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.visual-alert--warning {
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+  border-left: 3px solid var(--warning);
+}
+
+.visual-alert--critical {
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  border-left: 3px solid var(--danger);
 }
 
 .visual-alert svg {
@@ -266,7 +297,10 @@
   margin: 0;
   padding: 4px 9px;
   border-radius: 999px;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
   font-size: var(--font-size-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   font-weight: 600;
 }
 

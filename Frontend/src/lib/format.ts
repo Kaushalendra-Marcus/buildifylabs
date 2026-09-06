@@ -13,3 +13,15 @@ export function formatRemaining(ms: number): string {
   const minutes = totalMinutes % 60;
   return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
 }
+
+/**
+ * formatTime — epoch ms to the short "12:28 AM" stamp shown under user
+ * bubbles and at the end of the trust-footer row. Pure (no `Date.now()`),
+ * so rendering a stored timestamp stays deterministic.
+ */
+export function formatTime(epochMs: number): string {
+  return new Date(epochMs).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}

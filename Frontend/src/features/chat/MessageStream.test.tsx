@@ -358,3 +358,46 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
     ).toBeInTheDocument()
   })
 })
+
+describe('MessageStream — intelligence styling', () => {
+  it('stamps a timestamp under the user bubble', () => {
+    useChatStore.getState().addUserMessage('Why did revenue drop last week?')
+
+    render(<MessageStream />)
+
+    const time = screen.getByText(/AM|PM/, { selector: 'time' })
+    expect(time).toHaveClass('message__time')
+    expect(time).toHaveAttribute('dateTime')
+  })
+
+  it('labels answers with the Buildify Intelligence identity and a trust time', () => {
+    useChatStore.getState().addAssistantMessage(makeOutput())
+
+    render(<MessageStream />)
+
+    expect(screen.getByText('Buildify Intelligence')).toBeInTheDocument()
+    expect(
+      document.querySelector('.trust-footer__time'),
+    ).toBeInTheDocument()
+  })
+
+  it('labels clarifications with the identity row and an eyebrow', () => {
+    useChatStore.getState().addAssistantMessage(
+      makeOutput({
+        answer: '',
+        visuals: [],
+        clarification: {
+          question: 'Which time range should I compare?',
+          options: ['This month vs last'],
+        },
+        sql_query: null,
+        data_preview: null,
+      }),
+    )
+
+    render(<MessageStream />)
+
+    expect(screen.getByText('Buildify Intelligence')).toBeInTheDocument()
+    expect(screen.getByText('Clarification needed')).toBeInTheDocument()
+  })
+})

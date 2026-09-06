@@ -11,6 +11,7 @@ import { useScopeStore } from '../scope-store';
 import type { PipelineOutput } from '../../../types/chat';
 import { getErrorMessage } from '../../../lib/errors';
 import { isQuotaError } from '../../../lib/http';
+import { AssistantIdentity } from './AssistantIdentity';
 
 export function ClarificationMessage({ output }: { output: PipelineOutput }) {
   const messages = useChatStore((state) => state.messages);
@@ -64,6 +65,8 @@ export function ClarificationMessage({ output }: { output: PipelineOutput }) {
 
   return (
     <div className="message message--clarification">
+      <AssistantIdentity />
+      <p className="message__clarification-eyebrow">Clarification needed</p>
       <p className="message__clarification-question">{clarification.question}</p>
       {clarification.options.length > 0 && (
         <div className="message__clarification-options">

@@ -60,6 +60,25 @@ describe('ChatWorkspace shell (F2)', () => {
     expect(screen.getByRole('region', { name: 'Composer' })).toBeInTheDocument()
   })
 
+  it('brands the header with the logo tile and Intelligence subtitle', () => {
+    stubMatchMedia(false)
+    const { container } = render(<ChatWorkspace />)
+
+    expect(screen.getByText('Buildify Labs')).toBeInTheDocument()
+    expect(screen.getByText('Intelligence')).toBeInTheDocument()
+    const tile = container.querySelector('.chat-header .brand-tile img')
+    expect(tile?.getAttribute('src')).toBe('/logo.png')
+  })
+
+  it('keeps the quota chip in the composer footer, next to the scope selector', () => {
+    stubMatchMedia(false)
+    render(<ChatWorkspace />)
+
+    const composer = screen.getByRole('region', { name: 'Composer' })
+    expect(composer.querySelector('.composer__top')).toBeInTheDocument()
+    expect(composer.querySelector('.quota-chip')).toBeInTheDocument()
+  })
+
   it('collapses the rail by default on narrow viewports (overlay, not pushed)', () => {
     stubMatchMedia(true) // <768px
     render(<ChatWorkspace />)

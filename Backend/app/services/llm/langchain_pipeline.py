@@ -108,10 +108,10 @@ STRICT RULES:
 - Return ONLY valid JSON. No prose or markdown outside the JSON.
 - THE COMPUTED STATISTICS ARE ALREADY CALCULATED - NEVER perform your own arithmetic.
   Quote these numbers where relevant; never invent others.
-- NEVER guess data - only use what is provided. If a requested comparison needs
-    a benchmark name/version, metric, date range, or score that the evidence does
-    not establish, ask one focused clarification question instead of giving a
-    vague summary. Use options when they are useful.
+- NEVER guess data - only use what is provided. If the question is ambiguous or
+    the evidence is insufficient, ask one focused clarification question instead
+    of giving a vague summary. Missing details may include entities, scope, date
+    range, metric, units, output format, or source. Use options when useful.
 - Confidence must be between 0.0 and 1.0; 0.0 means not confident, 1.0 fully.
 - root_causes and recommendations MUST use hedged causal language:
   "a possible contributing factor", "correlates with", "suggests" - never "the reason was"
@@ -128,13 +128,12 @@ STRICT RULES:
     missing user data. Do not say "the provided dataset" or "based on publicly
     available information" unless that wording is directly supported by a result.
     Answer the user's question directly and include the relevant current figures.
-- STOCK QUERY RULE: For stock-price questions, report the one-month movement for
-    each requested company when the search results provide it. Clearly label the
-    period and source context; do not substitute company revenue or a 12-month
-    return for a requested one-month price movement.
 - CHART RULE: If the user asks for a chart, graph, or chart form, return a graph
     visual using the supplied verified series. Never omit a supplied company or
     fabricate a series.
+- COMPLETE-SCOPE RULE: If the user asks for all available results, compare every
+    relevant item and metric actually present in Web Search Results. Do not silently
+    reduce a broad request to one example.
 - If no visual fits, return an empty visuals list "".
 
 Return this exact JSON:
@@ -194,7 +193,7 @@ def build_prompt(
         "IMPORTANT LIVE WEB INSTRUCTIONS: Search results are the factual source for this answer. "
         "Answer directly from those results and do not discuss the user's dataset. "
         "If the requested comparison cannot be established from the results, ask a focused "
-        "clarification question about the missing metric, benchmark version, date range, or "
+        "clarification question about the missing entities, scope, metric, date range, or "
         "source instead of giving a vague conclusion. Never invent a figure."
         if source_scope == "live_web"
         else ""
@@ -260,6 +259,39 @@ def extract_json(text: str) -> dict:
     raise ValueError(f"Could not extract valid JSON from LLM response: {text[:200]}")
 
 
+def normalize_pipeline_payload(payload: dict) -> dict:
+    """Fill omitted collection fields from otherwise usable model JSON."""
+    defaults = {
+        "answer": "",
+        "visuals": [],
+        "insights": [],
+        "summary": "",
+        "root_causes": [],
+        "recommendations": [],
+        "news_context": [],
+        "web_sources": [],
+        "anomalies": [],
+        "confidence": 0.0,
+        "clarification": None,
+        "sql_query": None,
+        "data_preview": None,
+        "query_log_id": None,
+    }
+    normalized = {**defaults, **payload}
+    for field in (
+        "visuals",
+        "insights",
+        "root_causes",
+        "recommendations",
+        "news_context",
+        "web_sources",
+        "anomalies",
+    ):
+        if normalized[field] is None:
+            normalized[field] = []
+    return normalized
+
+
 def fallback_output(reason: str, confidence: float = 0.0) -> PipelineOutput:
     return PipelineOutput(
         answer=reason,
@@ -314,7 +346,7 @@ async def run_pipeline(
         raw_output = result["content"]
         logger.info(f"LLM source used: {result.get('source', 'unknown')}")
 
-        parsed = extract_json(raw_output)
+        parsed = normalize_pipeline_payload(extract_json(raw_output))
 
         output = PipelineOutput(**parsed)
 

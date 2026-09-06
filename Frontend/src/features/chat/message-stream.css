@@ -8,9 +8,9 @@
 .message-stream__list {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 20px 24px;
-  max-width: 900px;
+  gap: 30px;
+  padding: 28px 24px 48px;
+  max-width: 880px;
   margin: 0 auto;
 }
 
@@ -91,11 +91,30 @@
   font-size: var(--font-size-body);
   line-height: 1.5;
   color: var(--text-primary);
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface-card));
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  background: color-mix(in srgb, var(--accent) 13%, var(--surface-card));
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
   border-radius: 14px 14px 4px 14px;
-  padding: 10px 14px;
+  padding: 10px 16px;
   white-space: pre-wrap;
+}
+
+.message__time {
+  margin-top: 6px;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+/* ---------- Assistant identity row ("Buildify Intelligence") ---------- */
+
+.assistant-identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--text-muted);
 }
 
 /* ---------- 4.2 Assistant normal answer (no bubble) ---------- */
@@ -108,7 +127,7 @@
 .message__answer-prose {
   margin: 0;
   font-size: var(--font-size-body);
-  line-height: 1.55;
+  line-height: 1.65;
   color: var(--text-primary);
   white-space: pre-wrap;
 }
@@ -118,15 +137,15 @@
 .visual-cards-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
+  gap: 14px;
 }
 
 .visual-cards-grid__card {
   background: var(--surface-card);
-  border-radius: 10px;
+  border-radius: 12px;
   box-shadow: var(--elevation-card);
-  border: 1px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
-  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  padding: 18px;
   min-height: 120px;
 }
 
@@ -141,16 +160,21 @@
 }
 
 .visual-cards-grid__title {
-  margin: 0;
-  font-size: var(--font-size-caption);
-  color: var(--text-secondary);
+  margin: 0 0 12px;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 /* ---------- Insights strip ---- "Possible factors" (hedged, specs/10 §2) ---------- */
 
 .insights-strip {
-  border-left: 2px solid color-mix(in srgb, var(--text-muted) 40%, transparent);
-  padding-left: 10px;
+  background: var(--surface-card);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  padding: 12px 16px;
 }
 
 .insights-strip__toggle {
@@ -209,9 +233,9 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 16px;
-  padding-top: 10px;
-  border-top: 1px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
+  gap: 8px 18px;
+  padding-top: 4px;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
   font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
@@ -271,6 +295,12 @@
 .trust-footer__confidence-value {
   min-width: 34px;
   color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.trust-footer__time {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
 }
 
 .trust-footer__error {
@@ -363,12 +393,20 @@
   margin-bottom: 2px;
 }
 
-/* ---------- 4.3 Clarification (accent left edge, pill options) ---------- */
+/* ---------- 4.3 Clarification (identity + eyebrow + pill options) ---------- */
 
 .message--clarification {
   align-items: stretch;
-  border-left: 3px solid var(--accent);
-  padding-left: 12px;
+  gap: 10px;
+}
+
+.message__clarification-eyebrow {
+  margin: 0;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
 }
 
 .message__clarification-question {
@@ -386,16 +424,16 @@
 .message__clarification-option {
   font: inherit;
   font-size: var(--font-size-caption);
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface-card));
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
   border-radius: 999px;
-  padding: 6px 12px;
+  padding: 8px 16px;
   cursor: pointer;
 }
 
 .message__clarification-option:hover {
-  background: color-mix(in srgb, var(--accent) 16%, var(--surface-card));
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 /* ---------- 4.4 Fallback (neutral notice) ---------- */

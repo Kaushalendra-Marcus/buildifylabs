@@ -10,13 +10,21 @@
  */
 import { ExternalLink, Newspaper } from 'lucide-react';
 import type { PipelineOutput } from '../../../types/chat';
+import { AssistantIdentity } from './AssistantIdentity';
 import { VisualCardsGrid } from './VisualCardsGrid';
 import { InsightsStrip } from './InsightsStrip';
 import { TrustFooter } from './TrustFooter';
 
-export function AssistantAnswer({ output }: { output: PipelineOutput }) {
+export function AssistantAnswer({
+  output,
+  answeredAt,
+}: {
+  output: PipelineOutput;
+  answeredAt?: number;
+}) {
   return (
     <div className="message message--assistant-answer">
+      <AssistantIdentity />
       <p className="message__answer-prose">{output.answer}</p>
 
       <VisualCardsGrid visuals={output.visuals} />
@@ -32,6 +40,7 @@ export function AssistantAnswer({ output }: { output: PipelineOutput }) {
         sqlQuery={output.sql_query}
         dataPreview={output.data_preview}
         confidence={output.confidence}
+        answeredAt={answeredAt}
       />
 
       {output.news_context.length > 0 && (

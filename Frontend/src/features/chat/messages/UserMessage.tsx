@@ -4,6 +4,7 @@
  * bubble, not inside the answer echo (F5 supplies the fileName).
  */
 import { FileText } from 'lucide-react';
+import { formatTime } from '../../../lib/format';
 import type { UserChatMessage } from '../chat-store';
 
 export function UserMessage({ message }: { message: UserChatMessage }) {
@@ -19,6 +20,14 @@ export function UserMessage({ message }: { message: UserChatMessage }) {
         </span>
       ) : null}
       <div className="message__user-bubble">{message.content}</div>
+      {typeof message.createdAt === 'number' && (
+        <time
+          className="message__time"
+          dateTime={new Date(message.createdAt).toISOString()}
+        >
+          {formatTime(message.createdAt)}
+        </time>
+      )}
     </div>
   );
 }

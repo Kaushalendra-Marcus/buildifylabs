@@ -270,6 +270,228 @@
   flex: none;
 }
 
+/* ---------- Intelligence theme (workspace scope) ----------
+ * Forces the /app workspace into the dark amber "intelligence" look shared
+ * with the landing page: near-black surfaces, amber accent, mono eyebrows.
+ * Scoped to `.chat-workspace` so auth screens and the landing page keep
+ * their own theming. No purple anywhere by design. */
+
+.chat-workspace {
+  --surface-page: #0a0a0b;
+  --surface-card: #131312;
+  --surface-raised: #1c1b18;
+  --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --elevation-raised: 0 8px 28px rgba(0, 0, 0, 0.55);
+
+  --text-primary: #fafaf9;
+  --text-secondary: #d6d3d1;
+  --text-muted: #8f8a83;
+
+  --accent: #ffbf48;
+  --success: #4ade80;
+  --danger: #f87171;
+  --warning: #f59e0b;
+
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  color-scheme: dark;
+}
+
+/* Logo tile — crops the fox face out of the wide public/logo.png banner.
+ * logo.png is 1536x1024; the face sits ~30–76% x, ~4–72% y. */
+.brand-tile {
+  --tile: 30px;
+  flex: none;
+  width: var(--tile);
+  height: var(--tile);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+}
+
+.brand-tile--sm {
+  --tile: 18px;
+  border-radius: 5px;
+}
+
+.brand-tile img {
+  display: block;
+  width: calc(var(--tile) * 2.2);
+  max-width: none;
+  height: auto;
+  margin-left: calc(var(--tile) * -0.66);
+  margin-top: calc(var(--tile) * -0.06);
+}
+
+/* ---------- Header (intelligence) ---------- */
+
+.chat-header {
+  height: 60px;
+  padding: 0 20px;
+  gap: 14px;
+  background: var(--surface-page);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+
+.chat-header__brand-text {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.chat-header__brand-name {
+  font-size: var(--font-size-body);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.chat-header__brand-sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.chat-header__divider {
+  flex: none;
+  width: 1px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.chat-header__new-chat {
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.chat-header__new-chat:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  filter: none;
+}
+
+/* Quota chip — ambient status line in the composer footer: mono, boxed. */
+
+.quota-chip {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 6px 10px;
+  white-space: nowrap;
+}
+
+.quota-chip[data-low='true'] {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+}
+
+.quota-chip__count,
+.quota-chip__resets {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Account menu — outlined pill with an initials avatar. */
+
+.account-menu__trigger {
+  gap: 8px;
+  max-width: 200px;
+  padding: 4px 12px 4px 4px;
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.account-menu__avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.account-menu__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-menu__menu {
+  background: var(--surface-raised);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* ---------- History rail (intelligence) ---------- */
+
+.history-rail {
+  background: var(--surface-page);
+  border-right-color: rgba(255, 255, 255, 0.08);
+}
+
+.history-rail__body {
+  padding: 20px 16px;
+}
+
+.history-rail__heading {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.history-rail__placeholder {
+  margin: 12px 0 0;
+  font-size: var(--font-size-caption);
+  color: var(--text-muted);
+}
+
+.history-rail__conversation {
+  border-radius: 8px;
+}
+
+/* ---------- Slim dark scrollbars ---------- */
+
+.history-rail__body::-webkit-scrollbar,
+.message-stream::-webkit-scrollbar {
+  width: 10px;
+}
+
+.history-rail__body::-webkit-scrollbar-thumb,
+.message-stream::-webkit-scrollbar-thumb {
+  background: #2b2a26;
+  border-radius: 999px;
+  border: 2px solid var(--surface-page);
+}
+
+@media (max-width: 767.98px) {
+  .chat-header {
+    padding: 0 12px;
+    gap: 10px;
+  }
+
+  .chat-header__brand-sub {
+    display: none;
+  }
+
+  .account-menu__name {
+    display: none;
+  }
+
+  .account-menu__trigger {
+    padding: 4px;
+  }
+}
+
 /* ----- History rail: OVERLAY on narrow viewports (<768px) -----
  * Collapsed by default; when opened it slides over the content and NEVER
  * pushes the stream column (specs/14 §3 acceptance). */

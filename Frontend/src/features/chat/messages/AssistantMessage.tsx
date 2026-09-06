@@ -33,5 +33,5 @@ export function AssistantMessage({ message }: { message: AssistantChatMessage })
     }
     return <FallbackMessage />;
   }
-  return <AssistantAnswer output={message.output} />;
+  return <AssistantAnswer output={message.output} answeredAt={message.createdAt} />;
 }

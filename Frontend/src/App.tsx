@@ -1,11 +1,10 @@
 /**
  * App root (F1) — the router (react-router, F0 decision) now serves the
- * public marketing homepage, the auth screens, and the guarded authenticated
+ * the auth screens and the guarded authenticated
  * workspace.
  *
  * Routes:
- * - `/` → the public marketing LandingPage (no guard — same page whether or
- *   not you're signed in; its nav swaps in a "Go to app" action once you are)
+ * - `/` — the public landing page (no guard; links into /signin, /signup, /app)
  * - `/signin`, `/signup`, `/forgot-password`, `/reset-password`,
  *   `/verify-email` — auth screens (RequireGuest bounces signed-in users away)
  * - `/app` — the Chat Workspace shell (F2)
@@ -22,7 +21,7 @@ import { SigninScreen } from './features/auth/SigninScreen';
 import { SignupScreen } from './features/auth/SignupScreen';
 import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen';
 import { ChatWorkspace } from './features/chat/ChatWorkspace';
-import { LandingPage } from './features/marketing/LandingPage';
+import { LandingPage } from './features/landing/LandingPage';
 import { useTokenRefresh } from './hooks/useTokenRefresh';
 
 function AppRoutes() {

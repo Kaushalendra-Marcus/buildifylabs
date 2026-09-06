@@ -20,13 +20,28 @@ vi.mock('./api/auth', () => ({
   resetPassword: vi.fn(),
 }))
 
-describe('App routing (F1 auth screens)', () => {
+describe('App routing (F1 auth screens + landing)', () => {
   beforeEach(() => {
     localStorage.clear()
+    sessionStorage.clear()
+    window.history.pushState({}, '', '/')
     useAuthStore.getState().signOut()
   })
 
-  it('renders the sign-in screen when unauthenticated', async () => {
+  it('renders the public landing page at /', async () => {
+    render(<App />)
+    expect(
+      await screen.findByRole('heading', { name: /ask your business data anything/i }),
+    ).toBeInTheDocument()
+    // Landing links into the real routes — never a redirect to /app.
+    const loginLinks = screen.getAllByRole('link', { name: 'Log in' });
+    expect(loginLinks.length).toBeGreaterThan(0);
+    loginLinks.forEach((link) => expect(link).toHaveAttribute('href', '/signin'));
+    expect(screen.getByRole('textbox', { name: 'Ask a business question' })).toBeInTheDocument()
+  })
+
+  it('renders the sign-in screen at /signin when unauthenticated', async () => {
+    window.history.pushState({}, '', '/signin')
     render(<App />)
     expect(
       await screen.findByRole('heading', { name: 'Sign in' }),
@@ -34,6 +49,7 @@ describe('App routing (F1 auth screens)', () => {
   })
 
   it('guards the workspace: authenticated users land on the /app Chat Workspace shell', async () => {
+    window.history.pushState({}, '', '/app')
     useAuthStore.getState().setSession({
       user: { id: 'user-1', email: 'ada@example.com', name: 'Ada', plan: 'free' },
       access_token: 'access-1',
