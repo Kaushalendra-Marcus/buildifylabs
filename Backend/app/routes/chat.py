@@ -119,49 +119,42 @@ async def chat(
                 db, user.id, request.query, output, time.monotonic() - started
             )
 
-    # Only process user data if scope includes own_data
-    db_data = []
+    # Process user data if scope includes own_data
+    rows = []
     if request.source_scope in ("own_data", "both"):
         table_name = user_data_table_name(user.id)
         columns = await get_table_columns(db, table_name)
         schema = build_data_schema(table_name, columns)
         sql_prompt = build_sql_prompt(request.query, schema)
-    else:
-        # For live_web only, skip SQL generation from user data
-        db_data = []
-        sql_prompt = None
 
-    if sql_prompt:  # Only generate SQL if we have user data
-        table_name = user_data_table_name(user.id)
-        columns = await get_table_columns(db, table_name)
-        schema = build_data_schema(table_name, columns)
-        sql_prompt = build_sql_prompt(request.query, schema)
+        sql_result = await generate_response(
+            prompt=sql_prompt,
+            system_prompt=SQL_SYSTEM_PROMPT,
+            temperature=0.2,
+            max_tokens=512,
+        )
+        cleaned_sql = clean_sql_response(sql_result.get("content") or "")
 
-    sql_result = await generate_response(
-        prompt=sql_prompt,
-        system_prompt=SQL_SYSTEM_PROMPT,
-        temperature=0.2,
-        max_tokens=512,
-    )
-    cleaned_sql = clean_sql_response(sql_result.get("content") or "")
-
-    try:
-        rows = await execute_sql(cleaned_sql, db, table_name)
-    except InvalidQueryError:
-        # specs/05 §5.3 + §6: the sentinel short-circuits to a graceful message,
-        # never returned as if it were data; still logged so failures show up.
-        output = fallback_output(
-            reason=(
-                "I couldn't turn that into a query for your data - try "
-                "rephrasing the question."
+        try:
+            rows = await execute_sql(cleaned_sql, db, table_name)
+        except InvalidQueryError:
+            # specs/05 §5.3 + §6: the sentinel short-circuits to a graceful message,
+            # never returned as if it were data; still logged so failures show up.
+            output = fallback_output(
+                reason=(
+                    "I couldn't turn that into a query for your data - try "
+                    "rephrasing the question."
+                )
             )
-        )
-        return await _log_and_return(
-            db, user.id, request.query, output, time.monotonic() - started
-        )
+            return await _log_and_return(
+                db, user.id, request.query, output, time.monotonic() - started
+            )
+    else:
+        # For live_web only, no SQL needed
+        cleaned_sql = None
 
     try:
-        computed = compute_statistics(rows)
+        computed = compute_statistics(rows) if rows else {}
         output = await run_pipeline(
             user_query=request.query,
             db_data=rows,
@@ -177,8 +170,9 @@ async def chat(
             confidence=0.0,
         )
     else:
-        output.sql_query = cleaned_sql
-        output.data_preview = rows[:DATA_PREVIEW_MAX_ROWS]
+        if cleaned_sql:
+            output.sql_query = cleaned_sql
+        output.data_preview = rows[:DATA_PREVIEW_MAX_ROWS] if rows else []
 
     return await _log_and_return(
         db, user.id, request.query, output, time.monotonic() - started

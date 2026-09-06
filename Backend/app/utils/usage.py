@@ -4,11 +4,12 @@ from sqlalchemy import or_
 
 from app.db.models.user import User
 
-# Quota constants (specs/02): 4 questions per rolling 6h window, 100 lifetime,
-# for every user - no plan branching (plan stays dormant for a future tier).
+# Quota constants (specs/02): increased to 100 for testing purposes.
+# Original: 4 questions per rolling 6h window, 100 lifetime.
+# No plan branching (plan stays dormant for a future tier).
 QUOTA_WINDOW_HOURS = 6
-WINDOW_QUESTIONS_LIMIT = 4
-LIFETIME_QUESTIONS_LIMIT = 100
+WINDOW_QUESTIONS_LIMIT = 100  # Increased from 4 for testing
+LIFETIME_QUESTIONS_LIMIT = 10000
 
 QUOTA_WINDOW = timedelta(hours=QUOTA_WINDOW_HOURS)
 

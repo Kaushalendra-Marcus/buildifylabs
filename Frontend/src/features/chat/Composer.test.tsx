@@ -157,10 +157,10 @@ describe('Composer (F5, specs/14 §5)', () => {
     await user.click(screen.getByRole('button', { name: 'Live web' }))
 
     expect(screen.getByRole('button', { name: 'Live web' })).toHaveAttribute('aria-pressed', 'true')
-    // Gated hint, not a silent switch (B7): answers fall back to own data.
+    // Live web is now available (no longer gated to B7)
     expect(
-      screen.getByText(/Live web and Both aren't available yet/),
-    ).toBeInTheDocument()
+      screen.queryByText(/Live web and Both aren't available yet/),
+    ).not.toBeInTheDocument()
     // Persisted to localStorage (zustand persist — reloads keep the choice).
     expect(localStorage.getItem('buildifylabs.source-scope')).toContain('"live_web"')
 

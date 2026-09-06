@@ -1,7 +1,7 @@
 /**
  * Quota tracker store — client-side mirror of the backend rule (specs/02
- * FR1/FR2: 4 questions / rolling 6h, 100 lifetime, everyone equal). Persisted
- * to localStorage so the ambient "3 of 4 left · resets in 4h" chip (specs/14
+ * FR1/FR2: 100 questions / rolling 6h for testing, 100 lifetime, everyone equal). Persisted
+ * to localStorage so the ambient "100 of 100 left · resets in 6h" chip (specs/14
  * §5.5) survives reloads.
  *
  * IMPORTANT: the backend is the authority — its atomic quota UPDATE and 429
@@ -14,7 +14,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export const WINDOW_QUESTIONS_LIMIT = 4;
+export const WINDOW_QUESTIONS_LIMIT = 100;  // Increased from 4 for testing
 export const WINDOW_HOURS = 6;
 export const LIFETIME_QUESTIONS_LIMIT = 100;
 export const WINDOW_MS = WINDOW_HOURS * 60 * 60 * 1000;

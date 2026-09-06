@@ -105,10 +105,11 @@ STRICT RULES:
 - root_causes and recommendations MUST use hedged causal language:
   "a possible contributing factor", "correlates with", "suggests" - never "the reason was"
   or "this caused" (specs/10 §2). Causal claims are hypotheses, not facts.
-- CLIENTS ask-don't-guess (specs/10 §2): if the question is ambiguous or the data
-  doesn't provide enough to answer well, do NOT guess. Instead return the JSON with
-  all answer fields empty ("\"", [], \"\") , confidence 0.0, and populate:
-  "clarification": {"question": "...", "options": ["a", "b", "c"]}.
+- CLARIFICATION RULE: Ask for clarification ONLY if analyzing user's own data and the
+  question is ambiguous about which data to use. NEVER ask for clarification when the
+  context is general knowledge (e.g., live web queries about companies like Amazon).
+  For live web questions, provide direct answers using your knowledge.
+  Return clarification ONLY with: {"question": "...", "options": ["a", "b", "c"]}.
   Otherwise clarification must be null.
 - If no visual fits, return an empty visuals list "".
 
@@ -158,9 +159,16 @@ def build_prompt(
     elif source_scope == "own_data":
         news_section = "User asked for their own data only - no live web context."
     else:
-        news_section = "No news context available for this request yet."
+        news_section = "User is asking for general knowledge (live web) - use your knowledge to provide direct answers, do not ask for clarifications."
 
     company_section = company_name or "Not provided"
+
+    clarification_guidance = (
+        "IMPORTANT: This is a live web query for general knowledge. Provide direct answers "
+        "using your knowledge. Do NOT ask for clarification."
+        if source_scope == "live_web"
+        else ""
+    )
 
     return f"""
 User Query:
@@ -177,6 +185,8 @@ Computed Statistics (already calculated by code - narrate these, never re-comput
 
 News Context:
 {news_section}
+
+{clarification_guidance}
 
 Based on the above, respond strictly in the JSON schema in the system prompt.
 """
