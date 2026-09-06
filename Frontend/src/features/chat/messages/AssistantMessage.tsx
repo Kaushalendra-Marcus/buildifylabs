@@ -11,6 +11,7 @@
 import type { AssistantChatMessage } from '../chat-store';
 import { classifyAssistantOutput } from '../chat-store';
 import { useChatStore } from '../chat-store';
+import { useScopeStore } from '../scope-store';
 import { AssistantAnswer } from './AssistantAnswer';
 import { ClarificationMessage } from './ClarificationMessage';
 import { FallbackMessage } from './FallbackMessage';
@@ -18,6 +19,7 @@ import { NoDataMessage } from './NoDataMessage';
 
 export function AssistantMessage({ message }: { message: AssistantChatMessage }) {
   const hasData = useChatStore((state) => state.hasData);
+  const scope = useScopeStore((state) => state.scope);
   const kind = classifyAssistantOutput(message.output);
   if (kind === 'clarification') {
     return <ClarificationMessage output={message.output} />;
@@ -25,7 +27,8 @@ export function AssistantMessage({ message }: { message: AssistantChatMessage })
   if (kind === 'fallback') {
     // A degraded response while the user provably has no data is the no-data
     // messaging (07 edge case 2), not a generic "couldn't answer" notice.
-    if (hasData === false) {
+    // However, live web queries don't require data, so don't show no-data message.
+    if (hasData === false && scope !== 'live_web') {
       return <NoDataMessage />;
     }
     return <FallbackMessage />;

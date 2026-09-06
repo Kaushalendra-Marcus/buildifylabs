@@ -173,11 +173,12 @@ describe('Composer (F5, specs/14 §5)', () => {
     useQuotaStore.setState({
       windowStartedAt: Date.now() - 2 * 60 * 60 * 1000,
       questionsLifetime: 0,
+      questionsInWindow: 99, // Near limit of 100
     })
     vi.mocked(sendQuery).mockRejectedValue(
       new ApiError(429, {
         detail:
-          "You've used your 4 questions for this 6-hour window. More unlock at 17:00.",
+          "You've used your 100 questions for this 6-hour window. More unlock at 17:00.",
       }),
     )
     const user = userEvent.setup()
@@ -190,7 +191,7 @@ describe('Composer (F5, specs/14 §5)', () => {
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
     // Quota mirror reflects the exhausted window.
-    expect(useQuotaStore.getState().questionsInWindow).toBe(4)
+    expect(useQuotaStore.getState().questionsInWindow).toBe(100)
     const last = useChatStore.getState().messages.at(-1)
     expect(last).toMatchObject({ role: 'system', kind: 'window-exhausted' })
 

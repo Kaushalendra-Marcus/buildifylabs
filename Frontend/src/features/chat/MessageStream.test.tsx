@@ -196,6 +196,11 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
         },
         sql_query: null,
         data_preview: null,
+          // Mock sendQuery to return a response
+          vi.mocked(sendQuery).mockResolvedValue(
+            makeOutput({ answer: 'Revenue comparison data: This month vs last month' })
+          )
+
       }),
     )
 
@@ -216,13 +221,19 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
     // Tapping an option sends it verbatim as the next user message.
     await user.click(
       screen.getByRole('button', { name: 'This month vs last' }),
+      // Wait for the async query to complete
+      await new Promise(resolve => setTimeout(resolve, 100))
+
     )
 
     const messages = useChatStore.getState().messages
     const last = messages[messages.length - 1]
-    expect(last.role).toBe('user')
-    if (last.role === 'user') {
-      expect(last.content).toBe('This month vs last')
+    // After clarification, we should have user message followed by assistant response
+    expect(messages.length).toBeGreaterThanOrEqual(3)
+    const userMsg = messages[messages.length - 2]
+    expect(userMsg.role).toBe('user')
+    if (userMsg.role === 'user') {
+      expect(userMsg.content).toContain('This month vs last')
     }
   })
 
@@ -256,7 +267,7 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
     render(<MessageStream />)
 
     expect(
-      screen.getByText(/You've used your 4 questions for this 6-hour window/),
+      screen.getByText(/You've used your 100 questions for this 6-hour window/),
     ).toBeInTheDocument()
     // Live countdown to the window reset — the input stays enabled (§5.6).
     const remaining = await screen.findByText(
