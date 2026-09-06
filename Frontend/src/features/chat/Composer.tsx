@@ -116,12 +116,7 @@ export function Composer() {
 
   return (
     <div className="composer" role="region" aria-label="Composer">
-      {scope !== 'own_data' && (
-        <p className="composer__gated-hint" role="note">
-          Live web and Both aren't available yet — answers will fall back to
-          your own data.
-        </p>
-      )}
+
 
       <form className="composer__form" onSubmit={handleSubmit}>
         {/* 5.2 source-scope selector — always visible, persisted */}

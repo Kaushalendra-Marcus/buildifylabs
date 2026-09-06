@@ -106,32 +106,36 @@ async def chat(
 ):
     started = time.monotonic()
 
-    if request.source_scope != "own_data":
-        output = fallback_output(
-            reason=(
-                "Live web and combined sources aren't available yet - I can "
-                "analyze your own data for now."
+    # For own_data or both, require user-uploaded data. Live web can work without it.
+    if request.source_scope in ("own_data", "both"):
+        if not await _user_has_data(db, user.id):
+            output = fallback_output(
+                reason=(
+                    "You haven't uploaded any data yet - add a CSV file to get "
+                    "started, then ask me a question about it."
+                )
             )
-        )
-        return await _log_and_return(
-            db, user.id, request.query, output, time.monotonic() - started
-        )
-
-    if not await _user_has_data(db, user.id):
-        output = fallback_output(
-            reason=(
-                "You haven't uploaded any data yet - add a CSV file to get "
-                "started, then ask me a question about it."
+            return await _log_and_return(
+                db, user.id, request.query, output, time.monotonic() - started
             )
-        )
-        return await _log_and_return(
-            db, user.id, request.query, output, time.monotonic() - started
-        )
 
-    table_name = user_data_table_name(user.id)
-    columns = await get_table_columns(db, table_name)
-    schema = build_data_schema(table_name, columns)
-    sql_prompt = build_sql_prompt(request.query, schema)
+    # Only process user data if scope includes own_data
+    db_data = []
+    if request.source_scope in ("own_data", "both"):
+        table_name = user_data_table_name(user.id)
+        columns = await get_table_columns(db, table_name)
+        schema = build_data_schema(table_name, columns)
+        sql_prompt = build_sql_prompt(request.query, schema)
+    else:
+        # For live_web only, skip SQL generation from user data
+        db_data = []
+        sql_prompt = None
+
+    if sql_prompt:  # Only generate SQL if we have user data
+        table_name = user_data_table_name(user.id)
+        columns = await get_table_columns(db, table_name)
+        schema = build_data_schema(table_name, columns)
+        sql_prompt = build_sql_prompt(request.query, schema)
 
     sql_result = await generate_response(
         prompt=sql_prompt,
