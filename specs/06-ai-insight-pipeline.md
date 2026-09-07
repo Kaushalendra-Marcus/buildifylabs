@@ -61,7 +61,9 @@ the frontend can render without further parsing or guessing.
   search queries via LLM (merging appended clarification answers into intent; one variant may
   target community discussion via a site: restriction when opinions/experiences are sought),
   fan out across them with dedupe, and resolve any named entity to a market symbol generically
-  (alias fast path, then symbol search). Raw user text is never sent to search as-is.
+  (alias fast path, then symbol search). Raw user text is never sent to search as-is. Snippets
+  and sources stay aligned 1:1 (title+snippet merged with its page URL; provider-only entries
+  kept, never dropped), so every citation `[n]` resolves to a listed source.
 - **FR11 (new): Citations, thinking, requested shapes.** Web snippets are numbered and factual
   claims carry `[n]` markers (phantom markers are stripped in code); every run records a
   machine-written thinking trace (`thinking: list[str]`, additive/optional for clients); an
@@ -176,6 +178,11 @@ reference to it.
     renders as a question with no preset pills instead of failing validation into a generic
     fallback. Covered by `test_clarification_with_null_options_*` in `test_pipeline_contract.py`
     and `test_chat_api.py`.
+11. **Structured narration fails but evidence exists** (seen live: transient Groq failures
+    mid-conversation) — a plain-text prose rescue answers from the real rows/snippets/series
+    (confidence 0.35, still through the visual guarantee) instead of the dead-end generic
+    fallback; JSON-looking rescue text is discarded. With no evidence at all, the honest
+    fallback stands. Covered by `test_prose_rescue_*`.
 
 ## 6. Acceptance Criteria
 

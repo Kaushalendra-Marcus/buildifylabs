@@ -9,7 +9,7 @@ import asyncio
 import app.services.llm.query_rewriter as rewriter_mod
 import app.services.web_search as web_search_mod
 from app.services.llm.query_rewriter import rewrite_search_queries
-from app.services.web_search import _dedupe_sources, _dedupe_texts, search_web
+from app.services.web_search import _DuckDuckGoParser, _dedupe_texts, search_web
 
 
 def _rewrite_fake(content=None, exc=None):
@@ -94,13 +94,30 @@ class TestFanOutMerge:
             "Other",
         ]
 
-    def test_dedupe_sources_by_url(self):
-        sources = [
-            {"title": "A", "url": "https://a.example", "provider": "X"},
-            {"title": "A2", "url": "https://a.example", "provider": "Y"},
-            {"title": "B", "url": "https://b.example", "provider": "X"},
+    def test_parser_merges_title_with_snippet_and_keeps_url(self):
+        html = (
+            '<div class="result">'
+            '<a class="result-link" href="https://a.example/x">Acme raises</a>'
+            '<a class="result__snippet" href="https://a.example/x">Acme raised $5M</a>'
+            "</div>"
+            '<div class="result">'
+            '<a class="result-link" href="https://b.example/y">Globex launches</a>'
+            "</div>"
+        )
+        parser = _DuckDuckGoParser()
+        parser.feed(html)
+        parser.close()
+        assert parser.pairs == [
+            ("Acme raises — Acme raised $5M", "https://a.example/x"),
+            ("Globex launches", "https://b.example/y"),
         ]
-        assert [s["title"] for s in _dedupe_sources(sources)] == ["A", "B"]
+
+    def test_parser_snippet_without_url_stays_provider_only(self):
+        html = '<div class="result__snippet">Bare snippet text</div>'
+        parser = _DuckDuckGoParser()
+        parser.feed(html)
+        parser.close()
+        assert parser.pairs == [("Bare snippet text", "")]
 
     def test_framed_queries_all_run_and_merge(self, monkeypatch):
         import json
@@ -114,16 +131,10 @@ class TestFanOutMerge:
         )
 
         async def fake_ddg(client, query_item, settings):
-            return (
-                [f"result for {query_item}", "shared result"],
-                [
-                    {
-                        "title": query_item,
-                        "url": f"https://{query_item.replace(' ', '-')}.example",
-                        "provider": "DuckDuckGo",
-                    }
-                ],
-            )
+            return [
+                (f"result for {query_item}", f"https://{query_item.replace(' ', '-')}.example", "DuckDuckGo"),
+                ("shared result", "", "DuckDuckGo"),
+            ]
 
         monkeypatch.setattr(web_search_mod, "_ddg_search", fake_ddg)
         # Force the DDG path (no Tavily key in test env).
@@ -136,4 +147,12 @@ class TestFanOutMerge:
         assert "result for second angle" in result.context
         # Shared hit merged once; both per-query sources kept.
         assert result.context.count("shared result") == 1
-        assert len(result.sources) == 2
+        assert len(result.sources) == 3
+        # Alignment: citation [n] always resolves to sources[n-1].
+        assert len(result.context) == len(result.sources)
+        assert result.sources[0]["url"] == "https://first-angle.example"
+        assert result.sources[1] == {
+            "title": "shared result",
+            "url": "",
+            "provider": "DuckDuckGo",
+        }

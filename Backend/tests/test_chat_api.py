@@ -430,6 +430,10 @@ class TestGracefulFallbacks:
         assert len(body["web_sources"]) == 2
         # No followups requested by the mock narration -> empty, not null.
         assert body["followups"] == []
+        # Every listed source carries a title + provider for its citation.
+        assert all(
+            {"title", "provider"} <= set(source) for source in body["web_sources"]
+        )
 
 
 class TestFlagEndpoint:

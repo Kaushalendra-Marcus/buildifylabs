@@ -838,3 +838,19 @@ class TestFollowups:
             return await _narrate_prose_rescue("q", [], [], [])
 
         assert asyncio.run(scenario()) is None
+
+    def test_sources_table_includes_provider_only_rows(self):
+        from app.services.llm.langchain_pipeline import _sources_table_visual
+
+        table = _sources_table_visual(
+            [
+                {"title": "Acme raises", "url": "https://a.example", "provider": "X"},
+                {"title": "Tavily answer", "url": "", "provider": "Tavily"},
+                {"title": "  ", "url": "", "provider": "Y"},
+            ]
+        )
+        assert table is not None
+        assert table.props["values"] == [
+            ["Acme raises", "X"],
+            ["Tavily answer", "Tavily"],
+        ]

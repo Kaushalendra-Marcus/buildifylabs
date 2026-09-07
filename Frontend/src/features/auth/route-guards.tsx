@@ -17,7 +17,7 @@ import './route-guards.css';
 function RouteLoading() {
   return (
     <div className="route-loading" role="status" aria-label="Loading">
-      <GooLoader size={0.55} />
+      <GooLoader size={0.8} />
       <span className="route-loading__text">Loading…</span>
     </div>
   );

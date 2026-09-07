@@ -28,6 +28,43 @@ describe('VisualCard — type→component lookup (F4)', () => {
     )
   })
 
+  it('compacts huge metric values but keeps the exact figure available', () => {
+    render(
+      <VisualCard
+        visual={{
+          visual_type: 'metric',
+          title: 'Total revenue',
+          props: { label: 'Total revenue', value: 47000000000, change_pct: null, direction: 'flat' },
+        }}
+      />,
+    )
+
+    const value = screen.getByText('47B')
+    expect(value).toHaveClass('visual-metric__value')
+    expect(value).toHaveAttribute('title', '47,000,000,000')
+  })
+
+  it('renders a pie graph as a donut with a total and percent legend', () => {
+    render(
+      <VisualCard
+        visual={{
+          visual_type: 'graph',
+          title: 'Split',
+          props: {
+            chart_type: 'pie',
+            labels: ['Enterprise API', 'Other'],
+            datasets: [{ name: 'Revenue', values: [40, 60] }],
+          },
+        }}
+      />,
+    )
+
+    expect(screen.getByText('100')).toHaveClass('visual-donut__total')
+    expect(screen.getByText('Enterprise API')).toHaveClass('visual-donut__legend-name')
+    expect(screen.getByText('40.0%')).toBeInTheDocument()
+    expect(screen.getByText('60.0%')).toBeInTheDocument()
+  })
+
   it('renders a GraphCard for graph across line, bar, pie and area', () => {
     const chartTypes = ['line', 'bar', 'pie', 'area'] as const
     for (const chart_type of chartTypes) {

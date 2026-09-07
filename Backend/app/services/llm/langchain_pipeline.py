@@ -202,7 +202,11 @@ STRICT RULES:
 - COMPLETE-SCOPE RULE: If the user asks for all available results, compare every
     relevant item and metric actually present in Web Search Results. Do not silently
     reduce a broad request to one example.
-- VISUAL MANDATE: every normal answer MUST include at least one visual whenever    anything plottable exists (evidence rows, market series, or prior data). Choose
+- VISUAL MANDATE: every normal answer MUST include visuals whenever anything
+    plottable exists (evidence rows, market series, or prior data) - and more than
+    one whenever the evidence supports more than one shape (chart AND table,
+    table AND metric, graph AND sources table). One lonely visual is a failure
+    when two honest ones fit. Choose
     by data shape, not by topic:
       a date-like column + a numeric column (3+ rows) -> line or area graph;
       a text column with 2-12 distinct values + a numeric column -> bar graph;
@@ -670,11 +674,13 @@ _SYNTH_SOURCES_MAX_ROWS = 8
 
 def _sources_table_visual(web_sources: list) -> Optional[VisualOutput]:
     """Honest visual for qualitative web answers: the actual cited sources as
-    a table (title + provider), so even a prose answer carries an artifact."""
+    a table (title + provider), so even a prose answer carries an artifact.
+    Provider-only entries (no URL) are included - the frontend renders them
+    without a link instead of dropping the citation."""
     rows = [
         [str(source.get("title", "Source"))[:80], str(source.get("provider", "Web"))]
         for source in (web_sources or [])
-        if source.get("url")
+        if str(source.get("title", "")).strip()
     ][:_SYNTH_SOURCES_MAX_ROWS]
     if not rows:
         return None

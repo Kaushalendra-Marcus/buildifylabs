@@ -6,7 +6,10 @@
 .visual-metric {
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 2px;
+  height: 100%;
+  min-height: 120px;
 }
 
 .visual-metric__label {
@@ -30,8 +33,11 @@
 .visual-metric__change {
   display: inline-flex;
   align-items: center;
+  align-self: flex-start;
   gap: 4px;
-  margin: 6px 0 0;
+  margin: 8px 0 0;
+  padding: 3px 10px;
+  border-radius: 999px;
   font-size: var(--font-size-caption);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -39,14 +45,17 @@
 
 .visual-metric__change--up {
   color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
 }
 
 .visual-metric__change--down {
   color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
 .visual-metric__change--flat {
   color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 14%, transparent);
 }
 
 /* ---------- GraphCard (graph) — Recharts, sized parent + fixed chart height ---------- */
@@ -55,6 +64,77 @@
   width: 100%;
   height: 220px;
   margin-top: 6px;
+}
+
+/* Donut: relative anchor for the center total + custom percent legend. */
+.visual-graph--donut {
+  height: auto;
+}
+
+.visual-donut__chart {
+  position: relative;
+}
+
+.visual-donut__center {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  pointer-events: none;
+}
+
+.visual-donut__total {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.visual-donut__caption {
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.visual-donut__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  justify-content: center;
+  margin: 10px 0 2px;
+  padding: 0;
+  list-style: none;
+}
+
+.visual-donut__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: var(--font-size-caption);
+}
+
+.visual-donut__legend i {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.visual-donut__legend-name {
+  color: var(--text-secondary);
+}
+
+.visual-donut__legend-value {
+  color: var(--text-primary);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- BusinessSummaryTable (table) ---------- */

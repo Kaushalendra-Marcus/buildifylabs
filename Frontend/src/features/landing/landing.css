@@ -67,8 +67,7 @@
   color: var(--bl-amber);
 }
 
-/* Logo tile — crops the fox face out of the wide public/logo.png banner
- * (1536x1024; face ~30–76% x, ~4–72% y). */
+/* Logo tile — the fox mark (public/logo.png, square face on black). */
 .bl-logo-tile {
   --tile: 26px;
   flex: none;
@@ -81,11 +80,9 @@
 
 .bl-logo-tile img {
   display: block;
-  width: calc(var(--tile) * 2.2);
-  max-width: none;
-  height: auto;
-  margin-left: calc(var(--tile) * -0.66);
-  margin-top: calc(var(--tile) * -0.06);
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .bl-nav__links {

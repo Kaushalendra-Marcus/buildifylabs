@@ -53,15 +53,24 @@ class WebSearchResult:
 
 
 class _DuckDuckGoParser(HTMLParser):
+    """Collects (text, url) pairs, merging each result's title with the
+    snippet that follows it ("title — snippet") so every snippet carries its
+    page URL. Pairs keep context[i] <-> sources[i] aligned 1:1 downstream."""
+
     def __init__(self) -> None:
         super().__init__()
-        self.results: list[str] = []
-        self.sources: list[str] = []
+        self.pairs: list[tuple[str, str]] = []
         self._capture = False
         self._buffer: list[str] = []
         self._kind = ""
         self._capture_tag = ""
         self._source_url = ""
+        self._pending: Optional[tuple[str, str]] = None
+
+    def _flush_pending(self) -> None:
+        if self._pending is not None:
+            self.pairs.append(self._pending)
+            self._pending = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
         classes = dict(attrs).get("class", "") or ""
@@ -76,6 +85,10 @@ class _DuckDuckGoParser(HTMLParser):
             self._buffer = []
             self._kind = "snippet"
             self._capture_tag = tag
+            # Snippets are often bare divs; fall back to the block's title URL.
+            self._source_url = dict(attrs).get("href", "") or (
+                self._pending[1] if self._pending else ""
+            )
 
     def handle_data(self, data: str) -> None:
         if self._capture:
@@ -85,13 +98,27 @@ class _DuckDuckGoParser(HTMLParser):
         if self._capture and tag == self._capture_tag:
             text = " ".join("".join(self._buffer).split())
             if text:
-                self.results.append(html.unescape(text))
-                if self._source_url:
-                    self.sources.append(self._source_url)
+                text = html.unescape(text)
+                if self._kind == "title":
+                    self._flush_pending()
+                    self._pending = (text, self._source_url)
+                else:
+                    if self._pending is not None:
+                        title, url = self._pending
+                        self._pending = None
+                        self.pairs.append(
+                            (f"{title} — {text}", self._source_url or url)
+                        )
+                    else:
+                        self.pairs.append((text, self._source_url))
             self._capture = False
             self._kind = ""
             self._capture_tag = ""
             self._source_url = ""
+
+    def close(self) -> None:
+        super().close()
+        self._flush_pending()
 
 
 def _dedupe_texts(items: list[str]) -> list[str]:
@@ -102,17 +129,6 @@ def _dedupe_texts(items: list[str]) -> list[str]:
         if key and key not in seen:
             seen.add(key)
             merged.append(item)
-    return merged
-
-
-def _dedupe_sources(sources: list[dict]) -> list[dict]:
-    seen: set[str] = set()
-    merged: list[dict] = []
-    for source in sources:
-        url = str(source.get("url", ""))
-        if url and url not in seen:
-            seen.add(url)
-            merged.append(source)
     return merged
 
 
@@ -194,7 +210,8 @@ async def _fetch_market_series(
 
 async def _tavily_search(
     client: httpx.AsyncClient, query_item: str, settings
-) -> tuple[list[str], list[dict]]:
+) -> list[tuple[str, str, str]]:
+    """Returns (text, url-or-"", provider) triples, answer first."""
     response = await client.post(
         "https://api.tavily.com/search",
         json={
@@ -207,29 +224,26 @@ async def _tavily_search(
     )
     response.raise_for_status()
     payload = response.json()
-    results: list[str] = []
+    triples: list[tuple[str, str, str]] = []
     if payload.get("answer"):
-        results.append(payload["answer"])
-    results.extend(
-        f"{item.get('title', '')}: {item.get('content', '')}"
-        for item in payload.get("results", [])
-        if item.get("content")
-    )
-    sources = [
-        {
-            "title": item.get("title", "Web result"),
-            "url": item.get("url", "https://tavily.com/"),
-            "provider": "Tavily",
-        }
-        for item in payload.get("results", [])
-        if item.get("url")
-    ]
-    return results, sources
+        triples.append((str(payload["answer"]), "", "Tavily"))
+    for item in payload.get("results", []):
+        if not item.get("content"):
+            continue
+        triples.append(
+            (
+                f"{item.get('title', '')}: {item.get('content', '')}",
+                str(item.get("url", "")),
+                "Tavily",
+            )
+        )
+    return triples
 
 
 async def _ddg_search(
     client: httpx.AsyncClient, query_item: str, settings
-) -> tuple[list[str], list[dict]]:
+) -> list[tuple[str, str, str]]:
+    """Returns (text, url-or-"", provider) triples from merged title/snippet pairs."""
     response = await client.get(
         f"https://html.duckduckgo.com/html/?q={quote_plus(query_item)}",
         headers=_HEADERS,
@@ -237,12 +251,11 @@ async def _ddg_search(
     response.raise_for_status()
     parser = _DuckDuckGoParser()
     parser.feed(response.text)
-    results = parser.results[: settings.WEB_SEARCH_MAX_RESULTS]
-    sources = [
-        {"title": result, "url": url, "provider": "DuckDuckGo"}
-        for result, url in zip(parser.results, parser.sources)
+    parser.close()
+    return [
+        (text, url, "DuckDuckGo")
+        for text, url in parser.pairs[: settings.WEB_SEARCH_MAX_RESULTS]
     ]
-    return results, sources
 
 
 async def search_web(
@@ -287,28 +300,51 @@ async def search_web(
                     market_data.append(series)
                     market_sources.append(source)
 
-            snippet_texts: list[str] = []
-            snippet_sources: list[dict] = []
+            snippet_triples: list[tuple[str, str, str]] = []
             for query_item in search_queries:
                 if not query_item:
                     continue
                 try:
                     if settings.WEB_SEARCH_API_KEY:
-                        results, sources = await _tavily_search(
+                        triples = await _tavily_search(
                             client, query_item, settings
                         )
                     else:
-                        results, sources = await _ddg_search(
+                        triples = await _ddg_search(
                             client, query_item, settings
                         )
                 except (httpx.HTTPError, ValueError, KeyError) as exc:
                     logger.warning("Snippet search failed for %r: %s", query_item, exc)
                     continue
-                snippet_texts.extend(results)
-                snippet_sources.extend(sources)
+                snippet_triples.extend(triples)
 
-            context = _dedupe_texts(market_texts + snippet_texts)
-            sources = _dedupe_sources(market_sources + snippet_sources)
+            # Merge across queries, deduped by normalized text. Triples keep
+            # context[i] <-> sources[i] aligned 1:1, so citation [n] always
+            # resolves to a listed source (URL or provider-only).
+            seen_texts: set[str] = set()
+            seen_urls: set[str] = set()
+            merged_texts: list[str] = []
+            merged_sources: list[dict] = []
+            for text, url, provider in snippet_triples:
+                text_key = " ".join(text.lower().split())
+                if not text_key or text_key in seen_texts:
+                    continue
+                if url and url in seen_urls:
+                    continue
+                seen_texts.add(text_key)
+                if url:
+                    seen_urls.add(url)
+                merged_texts.append(text)
+                merged_sources.append(
+                    {
+                        "title": text[:80],
+                        "url": url,
+                        "provider": provider,
+                    }
+                )
+            total_cap = settings.WEB_SEARCH_MAX_RESULTS * max(1, len(search_queries))
+            context = _dedupe_texts(market_texts) + merged_texts[:total_cap]
+            sources = market_sources + merged_sources[:total_cap]
             return WebSearchResult(context, sources, market_data)
     except Exception as exc:
         logger.warning("Live web search failed: %s", exc)

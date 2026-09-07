@@ -14,6 +14,7 @@
 import { FileUp, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { listFiles } from '../../../api/files';
+import { BoxLoader } from '../../../components/BoxLoader';
 import { useAuth } from '../../../hooks/useAuth';
 import { useChatStore } from '../chat-store';
 import { UploadPopover } from '../UploadPopover';
@@ -74,8 +75,9 @@ export function EmptyThread() {
   return (
     <div className="empty-thread">
       {checking && hasData === null ? (
-        <span className="empty-thread__loading" role="status">
-          Loading your workspace…
+        <span className="empty-thread__loading" role="status" aria-label="Loading your workspace">
+          <BoxLoader size="sm" tone="page" />
+          <span aria-hidden="true">Loading your workspace…</span>
         </span>
       ) : (
         <>

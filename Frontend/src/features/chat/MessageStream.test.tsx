@@ -218,11 +218,19 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
       screen.queryByRole('button', { name: 'Flag this answer' }),
     ).not.toBeInTheDocument()
 
-    // Tapping an option sends it and gets a response
+    // Selecting an option arms it; Send submits and gets a response.
+    // The Send button stays disabled until something is selected.
+    expect(
+      screen.getByRole('button', { name: 'Send selected' }),
+    ).toBeDisabled()
     await user.click(
       screen.getByRole('button', { name: 'This month vs last' }),
     )
-    
+    expect(
+      screen.getByRole('button', { name: 'This month vs last' }),
+    ).toHaveAttribute('aria-pressed', 'true')
+    await user.click(screen.getByRole('button', { name: 'Send selected' }))
+
     // Wait for async query completion
     await new Promise(resolve => setTimeout(resolve, 100))
 
@@ -233,6 +241,49 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
     expect(userMsg.role).toBe('user')
     if (userMsg.role === 'user') {
       expect(userMsg.content).toContain('This month vs last')
+    }
+  })
+
+  it('sends several selected options joined in one follow-up', async () => {
+    const user = userEvent.setup()
+    vi.mocked(sendQuery).mockResolvedValue(
+      makeOutput({ answer: 'Multi response' })
+    )
+
+    useChatStore.getState().addUserMessage('compare agents?')
+    useChatStore.getState().addAssistantMessage(
+      makeOutput({
+        answer: '',
+        visuals: [],
+        clarification: {
+          question: 'Which metrics?',
+          options: ['Total users', 'Active users', 'Revenue'],
+        },
+        sql_query: null,
+        data_preview: null,
+      }),
+    )
+
+    render(<MessageStream />)
+
+    await user.click(screen.getByRole('button', { name: 'Total users' }))
+    await user.click(screen.getByRole('button', { name: 'Active users' }))
+    // Toggling twice deselects.
+    await user.click(screen.getByRole('button', { name: 'Revenue' }))
+    await user.click(screen.getByRole('button', { name: 'Revenue' }))
+    expect(
+      screen.getByRole('button', { name: 'Revenue' }),
+    ).toHaveAttribute('aria-pressed', 'false')
+
+    await user.click(screen.getByRole('button', { name: 'Send 2 selected' }))
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    const messages = useChatStore.getState().messages
+    const userMsg = messages[messages.length - 2]
+    expect(userMsg.role).toBe('user')
+    if (userMsg.role === 'user') {
+      expect(userMsg.content).toBe('compare agents? - Total users, Active users')
     }
   })
 
@@ -577,6 +628,9 @@ describe('stripPriorOptionAnswer', () => {
     render(<MessageStream />)
 
     await user.click(screen.getByRole('button', { name: 'Revenue ways' }))
+    // Two clarification blocks render; Send on the current (last) one.
+    const sendButtons = screen.getAllByRole('button', { name: 'Send selected' })
+    await user.click(sendButtons[sendButtons.length - 1])
 
     await new Promise((resolve) => setTimeout(resolve, 100))
 

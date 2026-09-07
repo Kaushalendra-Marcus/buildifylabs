@@ -108,8 +108,10 @@ turn:
 
 ### 4.3 Assistant message — clarification
 Visually distinct from 4.2: an accent-colored left edge, the `question` text, and `options[]` as
-tappable pill buttons — tapping one sends it as the next user message verbatim. No answer body, no
-cards, no trust footer (nothing to verify yet).
+tappable pill buttons — pills toggle single- or multi-select (`aria-pressed`), and Send submits
+the joined pick as the next user message verbatim; a free-text box offers the same path for
+answers that fit no preset option. No answer body, no cards, no trust footer (nothing to verify
+yet).
 
 ### 4.4 Assistant message — fallback / low confidence
 When the pipeline degrades to its safe fallback (`06` FR4, `confidence = 0.0`), show a distinct

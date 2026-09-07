@@ -27,8 +27,8 @@ question in-session) and the core loop has real-user evidence.
   graph — values only from real rows/stats/series). The route's hardcoded "One-month stock"
   chart hack is deleted. No contract change — frontend untouched.
 
-- **Pipeline live-hardening round 2** — done, test-verified (backend **183 tests**, 182 green + the same
-  1 pre-existing env failure; frontend build/lint/`npm test` all green — **105 tests**): (1) LLM query
+- **Pipeline live-hardening round 2** — done, test-verified (backend **188 tests**, 187 green + the same
+  1 pre-existing env failure; frontend build/lint/`npm test` all green — **113 tests**): (1) LLM query
   framing — live scopes rewrite the message (merging appended clarification answers) into 1–3 clean
   queries with a community-discussion variant when opinions are sought, fanned out with dedupe, and
   any entity resolves to a market symbol generically (was a 5-name hardcoded list); raw user text
@@ -39,9 +39,16 @@ question in-session) and the core loop has real-user evidence.
   (7) Clarifications accept free-text replies as well as pills (frontend); empty options are
   backfilled from the judge's evidence-grounded suggestions so both always render together.
   (8) Groq JSON mode for judge/narration/rewriter (HF fallback unaffected) — the live empty-completion
-  failures. (9) Tap-to-ask `followups` on answers (additive field + chips). (10) Inline markdown
+  failures. (9) Tap-to-ask `followups` on answers (additive field + chips).   (10) Inline markdown
   (`**bold**` etc.) renders in prose and clarification questions instead of literally.
-  Specs/06 FR10–FR12.
+  (11) Prose rescue: failed structured narration answers plainly from real evidence
+  (confidence 0.35, still guaranteed visuals) instead of the mid-conversation dead-end fallback.
+  (12) Chained clarifications send "base - new pick" (prior option suffix stripped), never the
+  doubled "base - old - new" bubbles.
+  (13) Snippet↔source 1:1 alignment (title+snippet merged with its URL; provider-only kept) so no
+  citation is orphaned; bogus "your data" chip on empty previews removed; multi-select pills + Send;
+  multi-visual mandate (two honest visuals beat one).
+  Specs/06 FR10–FR12; specs/14 §4.3.
 
 - **F6 — Remaining states** — done, test-verified (`npm run build`, `npm run lint`, `npm test`
   all green — **65 tests**, up from 56; dev server boots on 5173):

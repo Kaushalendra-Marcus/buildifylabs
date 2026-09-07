@@ -5,22 +5,33 @@
  * intelligence palette: amber blocks (#ffbf48 → #e89b2e) on the dark card
  * surface. Pure CSS, no JS.
  */
+import type { CSSProperties } from 'react';
 import './BoxLoader.css';
 
 const BOXES = [0, 1, 2, 3, 4, 5, 6, 7];
 
 export function BoxLoader({
-  label = 'Assembling answer blocks',
+  label,
   size = 'md',
+  tone = 'card',
 }: {
+  /** Accessible label. Omit for a purely decorative instance (aria-hidden). */
   label?: string;
   size?: 'md' | 'sm';
+  /** Surface behind the figure — the mask curtains must match it exactly. */
+  tone?: 'card' | 'page';
 }) {
   return (
     <div
       className={`bl-boxloader${size === 'sm' ? ' bl-boxloader--sm' : ''}`}
-      role="img"
+      role={label ? 'img' : undefined}
       aria-label={label}
+      aria-hidden={label ? undefined : true}
+      style={
+        {
+          '--bl-box-mask': tone === 'page' ? '#0a0a0b' : undefined,
+        } as CSSProperties
+      }
     >
       {BOXES.map((box) => (
         <div

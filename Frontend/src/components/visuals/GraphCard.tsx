@@ -22,12 +22,23 @@ import {
   YAxis,
 } from 'recharts';
 import type { GraphProps } from '../../lib/schemas/visuals';
+import { formatCompactNumber } from '../../lib/format';
 
 const DATASET_COLORS = [
   'var(--accent)',
   'var(--success)',
   'var(--warning)',
   'var(--danger)',
+];
+
+/** Donut ramp: brand amber first, then ember, then receding warm neutrals. */
+const PIE_COLORS = [
+  '#ffbf48',
+  '#c96a24',
+  '#8f8a83',
+  '#5f5a53',
+  '#403b36',
+  '#2e2a26',
 ];
 
 const TOOLTIP_STYLE = {
@@ -69,28 +80,53 @@ export function GraphCard({ props }: { props: GraphProps }) {
       name: label,
       value: datasets[0]?.values[index] ?? 0,
     }));
+    const total = pieData.reduce((sum, slice) => sum + slice.value, 0);
     return (
-      <div className="visual-graph" role="img" aria-label={`${chart_type} chart`}>
-        <ResponsiveContainer width="100%" height={220}>
-          <PieChart>
-            <Pie
-              data={pieData}
-              dataKey="value"
-              nameKey="name"
-              outerRadius={80}
-              paddingAngle={2}
-            >
-              {pieData.map((slice, index) => (
-                <Cell
-                  key={slice.name}
-                  fill={DATASET_COLORS[index % DATASET_COLORS.length]}
-                />
-              ))}
-            </Pie>
-            <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-          </PieChart>
-        </ResponsiveContainer>
+      <div className="visual-graph visual-graph--donut" role="img" aria-label={`${chart_type} chart`}>
+        <div className="visual-donut__chart">
+          <ResponsiveContainer width="100%" height={200}>
+            <PieChart>
+              <Pie
+                data={pieData}
+                dataKey="value"
+                nameKey="name"
+                innerRadius={54}
+                outerRadius={80}
+                paddingAngle={2}
+                stroke="var(--surface-card)"
+                strokeWidth={3}
+              >
+                {pieData.map((slice, index) => (
+                  <Cell
+                    key={slice.name}
+                    fill={PIE_COLORS[index % PIE_COLORS.length]}
+                  />
+                ))}
+              </Pie>
+              <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="visual-donut__center" aria-hidden="true">
+            <span className="visual-donut__total" title={total.toLocaleString()}>
+              {formatCompactNumber(total)}
+            </span>
+            <span className="visual-donut__caption">total</span>
+          </div>
+        </div>
+        <ul className="visual-donut__legend">
+          {pieData.map((slice, index) => (
+            <li key={slice.name}>
+              <i
+                aria-hidden="true"
+                style={{ background: PIE_COLORS[index % PIE_COLORS.length] }}
+              />
+              <span className="visual-donut__legend-name">{slice.name}</span>
+              <span className="visual-donut__legend-value">
+                {total > 0 ? `${((slice.value / total) * 100).toFixed(1)}%` : '—'}
+              </span>
+            </li>
+          ))}
+        </ul>
       </div>
     );
   }

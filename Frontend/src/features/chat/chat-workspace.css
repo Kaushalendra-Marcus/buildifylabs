@@ -572,8 +572,8 @@ a.chat-header__brand:hover .chat-header__brand-name {
   color-scheme: dark;
 }
 
-/* Logo tile — crops the fox face out of the wide public/logo.png banner.
- * logo.png is 1536x1024; the face sits ~30–76% x, ~4–72% y. */
+/* Logo tile — the fox mark (public/logo.png, square face on black). The
+ * face fills the frame, so the tile shows it direct with no crop math. */
 .brand-tile {
   --tile: 30px;
   flex: none;
@@ -591,11 +591,9 @@ a.chat-header__brand:hover .chat-header__brand-name {
 
 .brand-tile img {
   display: block;
-  width: calc(var(--tile) * 2.2);
-  max-width: none;
-  height: auto;
-  margin-left: calc(var(--tile) * -0.66);
-  margin-top: calc(var(--tile) * -0.06);
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 /* ---------- Header (intelligence) ---------- */

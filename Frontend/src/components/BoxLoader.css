@@ -24,11 +24,11 @@
   transform-origin: top left;
 }
 
-/* Docked variant shows the joining blocks only — no ground spotlight,
- * shine, or mask curtains. */
-.bl-boxloader--sm .bl-boxloader__ground,
-.bl-boxloader--sm:before,
-.bl-boxloader--sm:after {
+/* Docked variant: the joining blocks only, no ground spotlight or shine.
+ * The mask curtains stay — they are background-colored planes that swallow
+ * the blocks as they fall; without them the cubes pile up below visibly.
+ * Their color follows `--bl-box-mask` (see the `tone` prop). */
+.bl-boxloader--sm .bl-boxloader__ground {
   display: none;
 }
 

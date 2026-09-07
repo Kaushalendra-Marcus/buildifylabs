@@ -476,6 +476,48 @@
   background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
+.message__clarification-option[aria-pressed='true'] {
+  color: #14100a;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.message__clarification-send-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.message__clarification-hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.message__clarification-send {
+  font: inherit;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: #14100a;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 8px 18px;
+  cursor: pointer;
+}
+
+.message__clarification-send:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.message__clarification-send:disabled {
+  color: var(--text-muted);
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.14);
+  cursor: not-allowed;
+}
+
 /* Free-text reply: same follow-up path as tapping a pill. */
 
 .message__clarification-custom {
@@ -819,6 +861,10 @@
 }
 
 .empty-thread__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   font-size: var(--font-size-caption);
   color: var(--text-muted);
 }

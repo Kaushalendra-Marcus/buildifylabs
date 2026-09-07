@@ -30,10 +30,12 @@ export function tablesFromSql(sql: string | null): string[] {
 export function deriveSources(output: PipelineOutput): DerivedSource[] {
   const sources: DerivedSource[] = [];
 
-  const hasReceipt = output.sql_query !== null || output.data_preview !== null;
+  const rows = output.data_preview ?? [];
+  // An empty preview is no receipt: live-web answers carry `data_preview: []`
+  // by construction, and must not show a bogus "your data" source.
+  const hasReceipt = output.sql_query !== null || rows.length > 0;
   if (hasReceipt) {
     const tables = tablesFromSql(output.sql_query);
-    const rows = output.data_preview ?? [];
     const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
     const rowBit = `${rows.length} row${rows.length === 1 ? '' : 's'}`;
     const colBit = columns.length > 0 ? ` · ${columns.slice(0, 4).join(', ')}` : '';

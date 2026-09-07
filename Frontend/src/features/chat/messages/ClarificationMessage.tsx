@@ -28,6 +28,23 @@ export function ClarificationMessage({ output }: { output: PipelineOutput }) {
   const scope = useScopeStore((state) => state.scope);
   const [customReply, setCustomReply] = useState('');
   const customInputId = useId();
+  // Multi-select: pills toggle (one or many), then Send submits the joined
+  // pick. Single-option questions stay one tap + Send.
+  const [selected, setSelected] = useState<string[]>([]);
+
+  const toggleOption = (option: string) => {
+    setSelected((current) =>
+      current.includes(option)
+        ? current.filter((item) => item !== option)
+        : [...current, option],
+    );
+  };
+
+  const handleSendSelected = () => {
+    if (selected.length === 0) return;
+    setSelected([]);
+    void sendFollowUp(selected.join(', '));
+  };
 
   const clarification = output.clarification;
   if (!clarification) return null;
@@ -104,11 +121,29 @@ export function ClarificationMessage({ output }: { output: PipelineOutput }) {
               key={option}
               type="button"
               className="message__clarification-option"
-              onClick={() => void sendFollowUp(option)}
+              aria-pressed={selected.includes(option)}
+              onClick={() => toggleOption(option)}
             >
               {option}
             </button>
           ))}
+        </div>
+      )}
+      {clarification.options.length > 0 && (
+        <div className="message__clarification-send-row">
+          <span className="message__clarification-hint">
+            Select one or more, then send
+          </span>
+          <button
+            type="button"
+            className="message__clarification-send"
+            disabled={selected.length === 0}
+            onClick={handleSendSelected}
+          >
+            {selected.length > 1
+              ? `Send ${selected.length} selected`
+              : 'Send selected'}
+          </button>
         </div>
       )}
       <form
