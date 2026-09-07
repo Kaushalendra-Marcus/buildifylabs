@@ -73,6 +73,13 @@ describe('Evidence stack — sources, citations, process', () => {
     await user.click(screen.getByRole('button', { name: /2 sources/ }))
     expect(screen.getByText('financials, costs')).toBeInTheDocument()
     expect(screen.getByText('Infrastructure cost breakdown')).toBeInTheDocument()
+    // Titles only: no raw URL text, no provider tag in the cards —
+    // the heading itself stays the clickable link.
+    expect(screen.queryByText('https://example.com/costs')).not.toBeInTheDocument()
+    expect(screen.queryByText('Example')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('link', { name: 'Infrastructure cost breakdown' }),
+    ).toHaveAttribute('href', 'https://example.com/costs')
   })
 
   it('expands the process trace with derived steps and no invented timings', async () => {

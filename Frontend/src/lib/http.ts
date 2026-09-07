@@ -15,6 +15,18 @@ import type { ApiErrorBody, QuotaErrorBody } from '../types';
 const API_BASE_URL: string =
   import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
+/** Base URL + bearer headers, shared by the JSON client and the SSE reader. */
+export function apiUrl(path: string): string {
+  return `${API_BASE_URL}${path}`;
+}
+
+export function authHeaders(): Headers {
+  const headers = new Headers();
+  const token = tokenStorage.getAccessToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  return headers;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly body: unknown;
@@ -52,9 +64,7 @@ async function request<T>(
   method: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const headers = new Headers();
-  const token = tokenStorage.getAccessToken();
-  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const headers = authHeaders();
 
   let body: BodyInit | undefined;
   if (options.isFormData) {

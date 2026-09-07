@@ -68,13 +68,17 @@ class TestRewriteSearchQueries:
         )
 
         framed = asyncio.run(rewrite_search_queries("raw question?"))
-        assert framed == {"queries": ["raw question?"], "entities": []}
+        assert framed["queries"] == ["raw question?"]
+        assert framed["entities"] == []
+        assert framed["time_sensitive"] is False
 
     def test_empty_reply_falls_back_to_raw_query(self, monkeypatch):
         monkeypatch.setattr(rewriter_mod, "generate_response", _rewrite_fake("   "))
 
         framed = asyncio.run(rewrite_search_queries("raw question?"))
-        assert framed == {"queries": ["raw question?"], "entities": []}
+        assert framed["queries"] == ["raw question?"]
+        assert framed["entities"] == []
+        assert framed["time_sensitive"] is False
 
     def test_transport_failure_falls_back_to_raw_query(self, monkeypatch):
         monkeypatch.setattr(
@@ -84,7 +88,9 @@ class TestRewriteSearchQueries:
         )
 
         framed = asyncio.run(rewrite_search_queries("raw question?"))
-        assert framed == {"queries": ["raw question?"], "entities": []}
+        assert framed["queries"] == ["raw question?"]
+        assert framed["entities"] == []
+        assert framed["time_sensitive"] is False
 
 
 class TestFanOutMerge:

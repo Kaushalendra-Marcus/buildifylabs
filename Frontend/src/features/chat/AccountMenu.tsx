@@ -1,14 +1,17 @@
 /**
- * AccountMenu (F2 shell) — the header account affordance (specs/14 §3): an
- * initials avatar + name trigger opening a dropdown with the signed-in
- * identity (name + email, or Guest + plan) and four items — Plan & billing,
- * Data sources, Contact us (each opens a small dialog on a live seam), and
- * Sign out in danger red. Amber accent only, never purple.
+ * AccountMenu (F2 shell) — the account affordance, docked in the history-rail
+ * footer: an initials avatar + name trigger opening a dropdown with the
+ * signed-in identity (name + email, or Guest + plan) and four items — Plan &
+ * billing, Data sources, Contact us (each opens a small dialog on a live
+ * seam), and Sign out in danger red. Amber accent only, never purple.
  *
+ * `align="up"` opens the menu above the trigger (rail footer); the dialogs
+ * portal to `document.body` so no overflow-clipped ancestor can trap them.
  * Closes on outside click, on Escape, or after picking an item.
  */
 import { ChevronDown, CreditCard, Database, LogOut, Mail } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { AccountDialog, type AccountDialogKind } from './AccountDialog';
 
@@ -24,7 +27,7 @@ function initialsFor(label: string): string {
   return initials || '•';
 }
 
-export function AccountMenu() {
+export function AccountMenu({ align = 'down' }: { align?: 'down' | 'up' }) {
   const { user, signOut } = useAuth();
   const [open, setOpen] = useState(false);
   const [dialog, setDialog] = useState<AccountDialogKind | null>(null);
@@ -74,7 +77,10 @@ export function AccountMenu() {
       </button>
 
       {open && (
-        <div className="account-menu__menu" role="menu">
+        <div
+          className={`account-menu__menu${align === 'up' ? ' account-menu__menu--up' : ''}`}
+          role="menu"
+        >
           <div className="account-menu__identity">
             <span className="account-menu__identity-name">{displayName}</span>
             {displayEmail !== null && !isGuest ? (
@@ -118,9 +124,11 @@ export function AccountMenu() {
         </div>
       )}
 
-      {dialog !== null && (
-        <AccountDialog kind={dialog} onClose={() => setDialog(null)} />
-      )}
+      {dialog !== null &&
+        createPortal(
+          <AccountDialog kind={dialog} onClose={() => setDialog(null)} />,
+          document.body,
+        )}
     </div>
   );
 }

@@ -696,7 +696,7 @@ class TestRobustnessLoop:
         tables = [v for v in output.visuals if v.visual_type == "table"]
         assert tables
         assert tables[0].title == "Sources cited"
-        assert tables[0].props["columns"] == ["Source", "Provider"]
+        assert tables[0].props["columns"] == ["Source"]
 
     def test_empty_options_backfilled_from_judge(self, monkeypatch):
         # Both affordances, always: the narrator left options empty, so the
@@ -850,7 +850,158 @@ class TestFollowups:
             ]
         )
         assert table is not None
+        assert table.props["columns"] == ["Source"]
         assert table.props["values"] == [
-            ["Acme raises", "X"],
-            ["Tavily answer", "Tavily"],
+            ["Acme raises"],
+            ["Tavily answer"],
         ]
+
+
+class TestEvidenceConfidence:
+    def _answer_run(self, monkeypatch, narration, **kwargs):
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(_decision_json(), narration),
+        )
+        return asyncio.run(run_pipeline(user_query="q", **kwargs))
+
+    def test_thin_evidence_caps_high_confidence(self, monkeypatch):
+        output = self._answer_run(
+            monkeypatch,
+            _pipeline_json(answer="One fact.", visuals=[], confidence=0.9),
+            db_data=[],
+            source_scope="live_web",
+            news_context=["only snippet"],
+        )
+        assert output.confidence == 0.65
+
+    def test_rich_evidence_keeps_confidence(self, monkeypatch):
+        output = self._answer_run(
+            monkeypatch,
+            _pipeline_json(answer="Solid.", visuals=[], confidence=0.85),
+            db_data=ROWS,
+            computed_numbers=COMPUTED,
+        )
+        assert output.confidence == 0.85
+
+    def test_no_evidence_caps_at_floor(self, monkeypatch):
+        output = self._answer_run(
+            monkeypatch,
+            _pipeline_json(answer="Guessy.", visuals=[], confidence=0.8),
+            db_data=[],
+        )
+        assert output.confidence == 0.35
+
+    def test_stages_emitted_in_order(self, monkeypatch):
+        stages: list[str] = []
+
+        async def on_stage(stage: str) -> None:
+            stages.append(stage)
+
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(), _pipeline_json(visuals=[], confidence=0.7)
+            ),
+        )
+        asyncio.run(
+            run_pipeline(user_query="how is revenue?", db_data=ROWS, on_stage=on_stage)
+        )
+        assert stages == ["judging", "narrating", "visuals"]
+
+    def test_failing_stage_callback_never_breaks_run(self, monkeypatch):
+        async def boom(stage: str) -> None:
+            raise RuntimeError("listener down")
+
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(), _pipeline_json(visuals=[], confidence=0.7)
+            ),
+        )
+        output = asyncio.run(
+            run_pipeline(user_query="how is revenue?", db_data=ROWS, on_stage=boom)
+        )
+        assert output.answer
+
+
+class TestCitedFigures:
+    SNIPPETS = [
+        "HeadshotPro earned $300k per month while solo.",
+        "Headlime was sold for $1M just eight months after launch.",
+        "Explore 30 practical ideas over 8 months of work in 2024.",
+    ]
+
+    def test_extracts_money_only_not_bare_numbers_or_years(self):
+        from app.services.llm.langchain_pipeline import _figures_from_snippets
+
+        figures = _figures_from_snippets(self.SNIPPETS)
+        texts = [figure["text"] for figure in figures]
+        assert "$300k" in texts
+        assert "$1M" in texts
+        # "30 ideas", "8 months", "2024" carry no unit and must not qualify.
+        assert not any("30" in text and "$" not in text for text in texts)
+        assert not any("2024" in text for text in texts)
+        assert all(figure["unit"] == "money" for figure in figures)
+
+    def test_extracts_percents(self):
+        from app.services.llm.langchain_pipeline import _figures_from_snippets
+
+        figures = _figures_from_snippets(["Growth hit 68% in Q1, up from 40%."])
+        assert [(f["text"], f["value"]) for f in figures] == [
+            ("68%", 68.0),
+            ("40%", 40.0),
+        ]
+
+    def test_bar_normalizes_kilos_and_millions(self, monkeypatch):
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(), _pipeline_json(visuals=[], confidence=0.7)
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(
+                user_query="ai revenue examples",
+                db_data=[],
+                source_scope="live_web",
+                news_context=self.SNIPPETS,
+                web_sources=[],
+            )
+        )
+        kinds = [visual.visual_type for visual in output.visuals]
+        assert "graph" in kinds
+        graph = next(v for v in output.visuals if v.visual_type == "graph")
+        assert graph.props["chart_type"] == "bar"
+        assert graph.props["datasets"][0]["values"] == [300000.0, 1000000.0]
+        tables = [v for v in output.visuals if v.visual_type == "table"]
+        assert tables[0].title == "Figures cited"
+
+    def test_no_figures_no_figures_visuals(self, monkeypatch):
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(), _pipeline_json(visuals=[], confidence=0.6)
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(
+                user_query="follower tools?",
+                db_data=[],
+                source_scope="live_web",
+                news_context=["Free follower counter tools exist online."],
+                web_sources=[
+                    {"title": "Counter", "url": "https://c.example", "provider": "X"}
+                ],
+            )
+        )
+        # No plottable figures: only the honest sources table goes out.
+        assert [v.visual_type for v in output.visuals] == ["table"]
+        assert output.visuals[0].title == "Sources cited"

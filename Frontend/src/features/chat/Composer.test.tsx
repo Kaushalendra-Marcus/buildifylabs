@@ -99,10 +99,13 @@ describe('Composer (F5, specs/14 §5)', () => {
     expect(screen.getByRole('button', { name: 'Send message' })).toBeEnabled()
     await user.click(screen.getByRole('button', { name: 'Send message' }))
 
-    expect(sendQuery).toHaveBeenCalledWith({
-      query: 'Why did revenue drop last week?',
-      source_scope: 'own_data',
-    })
+    expect(sendQuery).toHaveBeenCalledWith(
+      {
+        query: 'Why did revenue drop last week?',
+        source_scope: 'own_data',
+      },
+      expect.any(Function),
+    )
 
     const quota = useQuotaStore.getState()
     expect(quota.questionsInWindow).toBe(1)
@@ -116,6 +119,24 @@ describe('Composer (F5, specs/14 §5)', () => {
     )
   })
 
+  it('feeds stream stages into the store while sending', async () => {
+    signedInAs('free')
+    vi.mocked(sendQuery).mockResolvedValue(makeOutput())
+    const user = userEvent.setup()
+    render(<Composer />)
+
+    await user.type(
+      screen.getByPlaceholderText('Why did revenue drop last week?'),
+      'staged question?',
+    )
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+    const onStage = vi.mocked(sendQuery).mock.calls[0][1]
+    expect(typeof onStage).toBe('function')
+    onStage?.('judging')
+    expect(useChatStore.getState().pendingStage).toBe('judging')
+  })
+
   it('Enter (without Shift) also sends the draft', async () => {
     signedInAs('free')
     vi.mocked(sendQuery).mockResolvedValue(makeOutput())
@@ -126,7 +147,10 @@ describe('Composer (F5, specs/14 §5)', () => {
       screen.getByPlaceholderText('Why did revenue drop last week?'),
       'Hello{Enter}',
     )
-    expect(sendQuery).toHaveBeenCalledWith({ query: 'Hello', source_scope: 'own_data' })
+    expect(sendQuery).toHaveBeenCalledWith(
+      { query: 'Hello', source_scope: 'own_data' },
+      expect.any(Function),
+    )
   })
 
   it('the upload button is ABSENT for guest plans (nothing shown, not disabled)', () => {

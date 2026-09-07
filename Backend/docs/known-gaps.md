@@ -72,6 +72,24 @@ starting; don't fix from this summary alone.
   `data_preview`, `query_log_id`).
 - **[Closed, B4]** `run_pipeline(news_context: list = [])` mutable default fixed to `None`.
 
+## Live-web evidence tools (`app/services/web_search.py`, `specs/11` §3.3–3.4 partial)
+
+- Yahoo `quoteSummary` needs a crumb+cookie handshake (`_get_yahoo_crumb`, 30-min process cache,
+  one fresh-crumb retry on 401) — an undocumented endpoint that can break or throttle without
+  notice; any failure skips fundamentals gracefully, never the request.
+- FRED macro series need `FRED_API_KEY` (free, 32-char) — absent means the macro adapter logs
+  and skips; only 4 fixed series mapped (CPIAUCSL/UNRATE/FEDFUNDS/GDP).
+- Wikipedia grounding is entity-driven (max 2, 600-char summaries); disambiguation pages are
+  skipped, not guessed.
+- Tavily Extract fires only on a verbatim URL in the query (1 URL, 4000 chars, needs the Tavily
+  key) — follow-ups about a cited article without a pasted URL still use snippets.
+- What-if v1 (`stats.py::apply_what_if`) is price-scenarios only with the quantity-unaffected
+  assumption; no elasticity, no cost/discount-column modeling beyond effective-price inversion.
+- Judge-directed routing (`plan_tools` → `tools_needed`) is advisory: one extra fast-model call
+  per live-web request (overlapped with SQL generation, not serial), and any planner failure or
+  empty/unknown plan degrades to the deterministic intent predicates. The regex predicates are
+  therefore still the guarantee path, not dead code — do not delete them.
+
 ## LLM config (`specs/12-llm-orchestration.md`)
 
 - `config.py`'s `GROQ_MODEL` default (`llama-3.1-70b-versatile`) is a Groq model ID decommissioned

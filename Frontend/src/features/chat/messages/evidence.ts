@@ -49,16 +49,18 @@ export function deriveSources(output: PipelineOutput): DerivedSource[] {
   }
 
   for (const web of output.web_sources ?? []) {
-    let retrieved = '';
+    // Titles only — the heading links out; raw redirect URLs and the
+    // provider tag stay out of the card body.
+    let subtitle = '';
     const parsed = new Date(web.retrieved_at);
     if (!Number.isNaN(parsed.getTime())) {
-      retrieved = ` · retrieved ${parsed.toLocaleString()}`;
+      subtitle = `Retrieved ${parsed.toLocaleString()}`;
     }
     sources.push({
       kind: 'live-web',
       title: web.title,
-      subtitle: `${web.provider}${retrieved}`,
-      detail: web.url,
+      subtitle,
+      detail: null,
       url: web.url,
     });
   }

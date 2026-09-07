@@ -21,8 +21,9 @@ export function QuotaChip() {
       </span>
       {resetsAt !== null && now !== null && (
         <>
-          {' '}
-          · resets in <span className="quota-chip__resets">{formatRemaining(resetsAt - now)}</span>
+          {' · '}
+          resets in{' '}
+          <span className="quota-chip__resets">{formatRemaining(resetsAt - now)}</span>
         </>
       )}
     </span>

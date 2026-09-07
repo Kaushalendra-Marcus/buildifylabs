@@ -9,6 +9,7 @@
  * purple anywhere (workspace intelligence theme).
  */
 import { Plus } from 'lucide-react';
+import { AccountMenu } from './AccountMenu';
 import { useChatStore } from './chat-store';
 import { useNow } from '../../hooks/useNow';
 
@@ -131,6 +132,9 @@ export function HistoryRail({ open, onNewChat }: HistoryRailProps) {
             </section>
           ))
         )}
+      </div>
+      <div className="history-rail__footer">
+        <AccountMenu align="up" />
       </div>
     </aside>
   );

@@ -55,13 +55,21 @@ the frontend can render without further parsing or guessing.
 - **FR9 (new): Visual guarantee.** A validated normal answer never goes out naked while plottable
   tool outputs exist: deterministic code synthesizes a chart (date→line, few categories→bar),
   a grounding table, and a headline metric from real rows/stats/series only — never invented
-  values. Follow-ups referencing the previous answer ("chart that") resolve from its logged rows.
+  values. Cited money/percent figures in web snippets become a "Figures cited" table plus a
+  normalized bar chart when comparable (bare numbers, years, and counts never qualify).
+  Follow-ups referencing the previous answer ("chart that") resolve from its logged rows.
   Qualitative web-only answers carry at least one snippet-grounded insight card instead.
 - **FR10 (new): Framed web retrieval.** Live scopes reframe the chat message into 1–3 clean
   search queries via LLM (merging appended clarification answers into intent; one variant may
   target community discussion via a site: restriction when opinions/experiences are sought),
   fan out across them with dedupe, and resolve any named entity to a market symbol generically
-  (alias fast path, then symbol search). Raw user text is never sent to search as-is. Snippets
+  (alias fast path, then symbol search). Tool selection is judge-directed, not a regex per
+  tool: a fast planning call (`plan_tools`, same `Decision` type as FR8) returns
+  `tools_needed` from a short catalog (snippets/market/fundamentals/wikipedia/macro/extract)
+  and dispatch runs exactly those adapters — overlapping the SQL-generation call so it adds
+  no serial latency. The plan is advisory: None/empty/unknown degrades to the deterministic
+  intent predicates, so a planner outage can never narrow an answer.
+  Raw user text is never sent to search as-is. Snippets
   and sources stay aligned 1:1 (title+snippet merged with its page URL; provider-only entries
   kept, never dropped), so every citation `[n]` resolves to a listed source.
 - **FR11 (new): Citations, thinking, requested shapes.** Web snippets are numbered and factual
@@ -74,6 +82,12 @@ the frontend can render without further parsing or guessing.
   and is unaffected, so parsing stays defensive). Normal answers include 2–3 tap-to-ask
   `followups` (capped/cleaned in code; `[]` when none fit). Model copy may use inline markdown
   (`**bold**`, `*italic*`, `` `code` ``) — the frontend renders it; citations still parse first.
+- **FR13 (new): Answer streaming, evidence-capped confidence, tiered keys.** `POST /chat/stream`
+  serves the same `PipelineOutput` as server-sent events (`stage` updates, then one `result`;
+  quota 429s stay regular JSON errors). Model confidence is capped by evidence strength (strong
+  0.90 / thin 0.65 / none 0.35) so single-source claims never read "High". Small structured
+  calls run on `GROQ_FAST_MODEL`; Groq keys (`GROQ_API_KEY`..4) rotate round-robin with failover
+  (401 retires a key) before the HF fallback.
 
 ## 3. API Contracts (internal — no HTTP surface yet)
 
@@ -109,6 +123,8 @@ class Decision(BaseModel):  # FR8 sufficiency judge verdict (internal, never ser
     chart_from_prior: bool = False
     visual_plan: List[VisualPlanItem] = []
     suggested_options: List[str] = []
+    tools_needed: List[str] = []  # judge-directed routing verdict (TOOL_CATALOG keys);
+    # empty = no opinion -> deterministic dispatch predicates (planner is advisory)
 
 class PipelineOutput(BaseModel):
     answer: str

@@ -15,11 +15,27 @@ as before the rewrite step existed.
 """
 import json
 import logging
+import re
 from typing import Any, Optional
 
 from app.services.llm.groq_service import generate_response
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Time-sensitive intent: the model has no recency signal without this, so
+# "latest/current/this week" questions need topic="news" + time_range upstream.
+TIME_SENSITIVE_RE = re.compile(
+    r"\b(latest|current|today|now|breaking|live|real[\s-]?time|update[sd]?|"
+    r"recent|this\s+(week|month|year|quarter)|past\s+\d+\s+days?|"
+    r"news|price right now)\b|\b20(2[4-9]|3\d)\b",
+    re.IGNORECASE,
+)
+
+
+def is_time_sensitive_query(text: str) -> bool:
+    """Deterministic recency gate (no LLM needed)."""
+    return bool(text and TIME_SENSITIVE_RE.search(text))
 
 REWRITE_SYSTEM_PROMPT = """You frame web-search queries. You do NOT answer the user.
 
@@ -27,7 +43,7 @@ You receive a chat message (possibly with appended clarification answers joined
 by " - ") and optional prior context. Extract what to search for and return
 1-3 short search queries as JSON:
 
-{"queries": ["primary query", "optional second angle"], "entities": ["named things"]}
+{"queries": ["primary query", "optional second angle"], "entities": ["named things"], "time_sensitive": false}
 
 Rules (all generic, no topic special-casing):
 - Strip chat phrasing ("can you tell me", "please", "show in chart form") and
@@ -39,6 +55,9 @@ Rules (all generic, no topic special-casing):
   fast-moving facts, make one variant target community discussion with a
   site: restriction (site:reddit.com, site:x.com, or site:indiehackers.com -
   pick at most one, whichever fits the question best).
+- Set "time_sensitive" true when the question asks about recency ("latest",
+  "current", "today", "this week/month", "news", "price right now", a year
+  like 2025/2026) - false otherwise.
 - Never invent entities, dates, or numbers not present in the message.
 - Return ONLY the JSON object, no other text."""
 
@@ -47,7 +66,11 @@ MAX_REWRITE_QUERIES = 3
 
 def _coerce_rewrite_payload(payload: Any, raw_query: str) -> dict:
     if not isinstance(payload, dict):
-        return {"queries": [raw_query], "entities": []}
+        return {
+            "queries": [raw_query],
+            "entities": [],
+            "time_sensitive": is_time_sensitive_query(raw_query),
+        }
     queries = payload.get("queries")
     if not isinstance(queries, list):
         queries = [raw_query]
@@ -55,9 +78,18 @@ def _coerce_rewrite_payload(payload: Any, raw_query: str) -> dict:
     entities = payload.get("entities")
     if not isinstance(entities, list):
         entities = []
+    coerced_queries = cleaned[:MAX_REWRITE_QUERIES] or [raw_query]
+    flag = payload.get("time_sensitive")
+    if not isinstance(flag, bool):
+        # Deterministic backstop: regex over the raw message + framed queries
+        # so a model that omits the flag still gets recency routing.
+        flag = is_time_sensitive_query(
+            raw_query + " " + " ".join(coerced_queries)
+        )
     return {
-        "queries": cleaned[:MAX_REWRITE_QUERIES] or [raw_query],
+        "queries": coerced_queries,
         "entities": [str(item).strip() for item in entities if str(item).strip()],
+        "time_sensitive": flag,
     }
 
 
@@ -81,6 +113,7 @@ async def rewrite_search_queries(
         result = await generate_response(
             prompt=prompt,
             system_prompt=REWRITE_SYSTEM_PROMPT,
+            model=get_settings().groq_fast_model,
             temperature=0.0,
             max_tokens=300,
             json_mode=True,
@@ -92,4 +125,8 @@ async def rewrite_search_queries(
         return _coerce_rewrite_payload(json.loads(text), user_query)
     except Exception as exc:
         logger.warning(f"Query rewrite failed, searching raw query: {exc}")
-        return {"queries": [user_query], "entities": []}
+        return {
+            "queries": [user_query],
+            "entities": [],
+            "time_sensitive": is_time_sensitive_query(user_query),
+        }

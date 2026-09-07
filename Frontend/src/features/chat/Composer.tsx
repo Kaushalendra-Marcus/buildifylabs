@@ -84,7 +84,10 @@ export function Composer() {
           }
         }, 1400);
       }
-      const output = await sendQuery({ query: text, source_scope: scope });
+      const output = await sendQuery(
+        { query: text, source_scope: scope },
+        (stage) => useChatStore.getState().setPendingStage(stage),
+      );
       useQuotaStore.getState().recordQuestion();
       useChatStore.getState().addAssistantMessage(output);
     } catch (caught) {

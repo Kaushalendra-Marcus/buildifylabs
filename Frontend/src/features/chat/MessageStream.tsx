@@ -21,6 +21,7 @@ import './message-stream.css';
 export function MessageStream() {
   const messages = useChatStore((state) => state.messages);
   const pending = useChatStore((state) => state.pending);
+  const pendingStage = useChatStore((state) => state.pendingStage);
   const scope = useScopeStore((state) => state.scope);
 
   // F6 §6: no messages yet → the empty-thread invite (guest / no-files).
@@ -46,7 +47,7 @@ export function MessageStream() {
         })}
         {pending === 'cold-start' && <ColdStartNotice />}
         {(pending === 'searching' || pending === 'judging' || pending === 'thinking') && (
-          <ProcessRunning liveWeb={scope === 'live_web'} stage={pending} />
+          <ProcessRunning liveWeb={scope === 'live_web'} stage={pending} serverStage={pendingStage} />
         )}
       </div>
     </div>

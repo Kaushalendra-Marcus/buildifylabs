@@ -5,7 +5,14 @@
  * backend already returned (specs/11 §2: the LLM never does arithmetic).
  */
 import { ArrowDownRight, ArrowUpRight } from 'lucide-react';
+import { formatCompactNumber } from '../../lib/format';
 import type { ComparisonProps } from '../../lib/schemas/visuals';
+
+function exact(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 2,
+  }).format(value);
+}
 
 export function ComparisonCard({ props }: { props: ComparisonProps }) {
   const { value, baseline, groups } = props;
@@ -18,7 +25,9 @@ export function ComparisonCard({ props }: { props: ComparisonProps }) {
   return (
     <div className="visual-comparison">
       <div className="visual-comparison__head">
-        <p className="visual-comparison__value">{value}</p>
+        <p className="visual-comparison__value" title={exact(value)}>
+          {formatCompactNumber(value)}
+        </p>
         <p
           className={`visual-comparison__delta ${
             isUp
@@ -30,7 +39,9 @@ export function ComparisonCard({ props }: { props: ComparisonProps }) {
           {deltaPct === null ? delta : `${deltaPct.toFixed(1)}%`}
         </p>
       </div>
-      <p className="visual-comparison__baseline">Baseline: {baseline}</p>
+      <p className="visual-comparison__baseline" title={exact(baseline)}>
+        Baseline: {formatCompactNumber(baseline)}
+      </p>
       <ul className="visual-comparison__groups">
         {groups.map((group) => (
           <li key={group.label} className="visual-comparison__group">
@@ -45,8 +56,8 @@ export function ComparisonCard({ props }: { props: ComparisonProps }) {
                 }}
               />
             </span>
-            <span className="visual-comparison__group-value">
-              {group.value}
+            <span className="visual-comparison__group-value" title={exact(group.value)}>
+              {formatCompactNumber(group.value)}
             </span>
           </li>
         ))}

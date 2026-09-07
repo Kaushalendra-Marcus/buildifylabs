@@ -1,8 +1,17 @@
 # Spec 07 — External Context: User-Directed Source Scope
 
-**Status:** ❌ Not started. No code exists. This spec is forward-looking, based on design
-discussion, to unblock future work — not to certify current behavior.
-**Source files:** none yet.
+**Status:** ⚠️ Partial. Live-web retrieval exists (`Backend/app/services/web_search.py`:
+Tavily + DuckDuckGo concurrent fan-out with per-URL/per-text dedupe, Yahoo
+market series + fundamentals, FRED macro series, repeat-query TTL cache in
+`Backend/app/services/web_search_cache.py` — Redis when `REDIS_URL` is set,
+in-memory fallback otherwise; recency via `published_date` + time-sensitive
+routing) wired into `POST /chat` (`live_web`/`both` scopes, one merged answer).
+Still open: FR3 persistent scope selector (frontend), FR4 disagreement
+quick-pick, category-based source lists, Pinecone.
+**Source files:** `Backend/app/services/web_search.py`,
+`Backend/app/services/web_search_cache.py`,
+`Backend/app/services/llm/query_rewriter.py` (time-sensitive flag),
+`Backend/app/routes/chat.py`.
 
 > **Design history:** this module has gone through three interaction models. First, a simple
 > opt-in toggle. Then, an automatic "always fetch live context unless the query is fully answerable

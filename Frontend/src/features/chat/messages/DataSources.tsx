@@ -73,7 +73,9 @@ export function DataSources({ output }: { output: PipelineOutput }) {
                     source.title
                   )}
                 </p>
-                <p className="source-card__subtitle">{source.subtitle}</p>
+                {source.subtitle && (
+                  <p className="source-card__subtitle">{source.subtitle}</p>
+                )}
                 {source.detail && (
                   <p className="source-card__detail">{source.detail}</p>
                 )}

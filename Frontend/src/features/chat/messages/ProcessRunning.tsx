@@ -25,23 +25,45 @@ const LIVE_WEB_STEPS = [
   'Preparing answer',
 ];
 
+/** Map a live server stage onto the step list (unknown stages pin the last).
+ *  Server order is evidence -> judging -> narrating -> visuals. */
+const SERVER_STAGE_ORDER = ['evidence', 'judging', 'narrating', 'visuals'];
+
+function serverStageIndex(serverStage: string, stepCount: number): number {
+  const position = SERVER_STAGE_ORDER.indexOf(serverStage);
+  if (position === -1) return stepCount - 1;
+  // Spread the four server stages across the visible steps.
+  return Math.min(
+    stepCount - 1,
+    Math.floor((position / SERVER_STAGE_ORDER.length) * stepCount),
+  );
+}
+
 export function ProcessRunning({
   liveWeb = false,
   stage = 'thinking',
+  serverStage = null,
 }: {
   liveWeb?: boolean;
   stage?: 'searching' | 'judging' | 'thinking';
+  /** Live pipeline stage from the answer stream (`evidence`, `judging`,
+   *  `narrating`, `visuals`). When present it drives the active step for
+   *  real; otherwise the coarse local `stage` mapping applies. */
+  serverStage?: string | null;
 }) {
   const steps = liveWeb ? LIVE_WEB_STEPS : OWN_DATA_STEPS;
-  const activeIndex = liveWeb
-    ? stage === 'searching'
-      ? 0
-      : stage === 'judging'
-        ? 1
-        : 2
-    : stage === 'thinking'
-      ? 3
-      : 1;
+  const activeIndex =
+    serverStage !== null && serverStage !== undefined
+      ? serverStageIndex(serverStage, steps.length)
+      : liveWeb
+        ? stage === 'searching'
+          ? 0
+          : stage === 'judging'
+            ? 1
+            : 2
+        : stage === 'thinking'
+          ? 3
+          : 1;
   const statusLabel = !liveWeb
     ? 'Assistant is thinking'
     : stage === 'searching'

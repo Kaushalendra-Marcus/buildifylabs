@@ -130,8 +130,8 @@ describe('VisualCard — type→component lookup (F4)', () => {
       />,
     )
 
-    expect(screen.getByText('1200')).toHaveClass('visual-comparison__value')
-    expect(screen.getByText('Baseline: 1000')).toBeInTheDocument()
+    expect(screen.getByText('1.2K')).toHaveClass('visual-comparison__value')
+    expect(screen.getByText('Baseline: 1K')).toBeInTheDocument()
     expect(screen.getByText('20.0%')).toHaveClass(
       'visual-comparison__delta--up',
     )

@@ -260,6 +260,9 @@
   color: var(--text-primary);
   text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ---------- InsightCard (insight) ---------- */

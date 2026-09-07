@@ -22,6 +22,7 @@
  * session's first request, §5.7, otherwise `thinking` — F6 renders it).
  */
 import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
 import type { PipelineOutput } from '../../types/chat';
 
 export type PendingKind = 'cold-start' | 'searching' | 'judging' | 'thinking';
@@ -100,6 +101,10 @@ interface ChatState {
   pending: PendingKind | null;
   /** Name of the latest completed upload — the file chip above user bubbles. */
   activeFileName: string | null;
+  /** Live pipeline stage from the answer stream (`judging`, `narrating`,
+   *  `visuals`, …) — the thinking indicator shows it while a send is
+   *  in flight. Null when idle or when the stage is unknown. */
+  pendingStage: string | null;
   /** Whether the user has at least one completed data file (F6, specs/14 §6):
    *  `null` = unknown (not yet checked), `true` = has data, `false` = none.
    *  Drives the empty-thread invite (registered + no files → invite an upload)
@@ -110,6 +115,7 @@ interface ChatState {
   addAssistantMessage(output: PipelineOutput): void;
   addSystemNotice(kind: SystemNoticeKind, resetAt?: number | null, text?: string | null): void;
   setPending(pending: PendingKind | null): void;
+  setPendingStage(stage: string | null): void;
   setActiveFileName(fileName: string | null): void;
   setHasData(hasData: boolean | null): void;
   clearChat(): void;
@@ -123,11 +129,14 @@ function makeId(): string {
   return `m-${nextId}`;
 }
 
-export const useChatStore = create<ChatState>((set) => ({
+export const useChatStore = create<ChatState>()(
+  persist(
+    (set) => ({
   messages: [],
   conversations: [],
   activeConversationId: null,
   pending: null,
+  pendingStage: null,
   activeFileName: null,
   hasData: null,
 
@@ -186,15 +195,35 @@ addUserMessage: (content, fileName = null) =>
       ],
     })),
 
-  setPending: (pending) => set({ pending }),
+  setPending: (pending) =>
+    set(pending === null ? { pending, pendingStage: null } : { pending }),
+
+  setPendingStage: (pendingStage) => set({ pendingStage }),
 
   setActiveFileName: (fileName) => set({ activeFileName: fileName }),
 
   setHasData: (hasData) => set({ hasData }),
 
-  clearChat: () => set({ messages: [], pending: null, activeConversationId: null }),
+  clearChat: () => set({ messages: [], pending: null, pendingStage: null, activeConversationId: null }),
 
   newChat: () => set({ messages: [], pending: null, activeConversationId: null }),
 
   selectConversation: (id) => set({ activeConversationId: id }),
-}));
+    }),
+    {
+      // Thread history survives reloads (business data included — same
+      // localStorage tradeoff as the refresh token, see token-storage.ts).
+      // Transient send/upload state never persists; the tail is capped so a
+      // long thread with 50-row previews cannot blow the 5MB quota.
+      name: 'buildifylabs-chat',
+      version: 1,
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        messages: state.messages.slice(-50),
+        conversations: state.conversations.slice(-20),
+        activeConversationId: state.activeConversationId,
+        hasData: state.hasData,
+      }),
+    },
+  ),
+);

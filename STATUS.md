@@ -27,8 +27,8 @@ question in-session) and the core loop has real-user evidence.
   graph — values only from real rows/stats/series). The route's hardcoded "One-month stock"
   chart hack is deleted. No contract change — frontend untouched.
 
-- **Pipeline live-hardening round 2** — done, test-verified (backend **188 tests**, 187 green + the same
-  1 pre-existing env failure; frontend build/lint/`npm test` all green — **113 tests**): (1) LLM query
+- **Pipeline live-hardening round 2** — done, test-verified (backend **204 tests**, 203 green + the same
+  1 pre-existing env failure; frontend build/lint/`npm test` all green — **121 tests**): (1) LLM query
   framing — live scopes rewrite the message (merging appended clarification answers) into 1–3 clean
   queries with a community-discussion variant when opinions are sought, fanned out with dedupe, and
   any entity resolves to a market symbol generically (was a 5-name hardcoded list); raw user text
@@ -47,8 +47,20 @@ question in-session) and the core loop has real-user evidence.
   doubled "base - old - new" bubbles.
   (13) Snippet↔source 1:1 alignment (title+snippet merged with its URL; provider-only kept) so no
   citation is orphaned; bogus "your data" chip on empty previews removed; multi-select pills + Send;
-  multi-visual mandate (two honest visuals beat one).
+  multi-visual mandate (two honest visuals beat one). Cited money/percent figures become a
+  "Figures cited" table plus a normalized bar (bare numbers/years never qualify).
   Specs/06 FR10–FR12; specs/14 §4.3.
+
+- **Scale + trust + feedback batch** — done, test-verified (backend **200 tests**, 199 green + the same
+  1 pre-existing env failure; frontend build/lint/`npm test` all green — **121 tests**):
+  (1) Groq multi-key rotation (`GROQ_API_KEY`..4, round-robin + failover, 401 retires a key, HF last)
+  with `GROQ_FAST_MODEL` tiering for judge/rewriter calls. (2) Parallel evidence branches in
+  `/chat` (SQL execution overlaps live search). (3) Evidence-capped confidence (strong 0.90 / thin
+  0.65 / none 0.35) so single-source claims never read "High". (4) `POST /chat/stream` SSE with live
+  `judging → narrating → visuals` stages driving the process card; quota 429s stay JSON errors.
+  (5) `scripts/eval_pipeline.py` (live golden properties, 8/8 passing) + `scripts/review_feedback.py`
+  (flagged/fallback review). (6) Chat thread persists across reloads (zustand/persist, capped tail).
+  Specs/06 FR13.
 
 - **F6 — Remaining states** — done, test-verified (`npm run build`, `npm run lint`, `npm test`
   all green — **65 tests**, up from 56; dev server boots on 5173):

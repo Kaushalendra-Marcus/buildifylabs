@@ -70,6 +70,22 @@ describe('ChatWorkspace shell (F2)', () => {
     expect(screen.getByRole('region', { name: 'Composer' })).toBeInTheDocument()
   })
 
+  it('docks the account profile in the rail footer instead of the header', async () => {
+    stubMatchMedia(false)
+    const user = userEvent.setup()
+    renderWorkspace()
+
+    expect(document.querySelector('.chat-header .account-menu')).toBeNull()
+    const footer = document.querySelector('.history-rail__footer')
+    expect(footer?.querySelector('.account-menu__trigger')).toBeInTheDocument()
+
+    // The footer menu opens upward.
+    await user.click(screen.getByRole('button', { name: 'Account' }))
+    expect(
+      document.querySelector('.account-menu__menu--up'),
+    ).toBeInTheDocument()
+  })
+
   it('links the header brand to the home page', () => {
     stubMatchMedia(false)
     renderWorkspace()

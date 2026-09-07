@@ -278,7 +278,7 @@ class TestGracefulFallbacks:
         mock_llms(monkeypatch)
         monkeypatch.setattr(
             "app.routes.chat.search_web",
-            lambda query, company_name=None, prior_clarification=None: asyncio.sleep(0, result=["Live result for q"]),
+            lambda query, company_name=None, prior_clarification=None, **kwargs: asyncio.sleep(0, result=["Live result for q"]),
         )
         resp = client.post("/chat", json={"query": "q", "source_scope": "live_web"})
         assert resp.status_code == 200
@@ -364,7 +364,7 @@ class TestGracefulFallbacks:
 
         monkeypatch.setattr(
             "app.routes.chat.search_web",
-            lambda query, company_name=None, prior_clarification=None: asyncio.sleep(0, result=["Live result for q"]),
+            lambda query, company_name=None, prior_clarification=None, **kwargs: asyncio.sleep(0, result=["Live result for q"]),
         )
         second = client.post(
             "/chat", json={"query": "show in chart form", "source_scope": "live_web"}
@@ -394,7 +394,7 @@ class TestGracefulFallbacks:
         )
         monkeypatch.setattr(
             "app.routes.chat.search_web",
-            lambda query, company_name=None, prior_clarification=None: asyncio.sleep(
+            lambda query, company_name=None, prior_clarification=None, **kwargs: asyncio.sleep(
                 0,
                 result=SimpleNamespace(
                     context=["Acme raised $50M in 2024", "Globex launched Y"],
@@ -424,7 +424,11 @@ class TestGracefulFallbacks:
         assert "[1]" in body["answer"]
         assert "[7]" not in body["answer"]
         tables = [v for v in body["visuals"] if v["visual_type"] == "table"]
-        assert tables and tables[0]["title"] == "Sources cited"
+        assert [table["title"] for table in tables] == [
+            "Figures cited",
+            "Sources cited",
+        ]
+        assert tables[0]["props"]["columns"] == ["Figure", "Context"]
         assert body["thinking"]
         assert any("Judged" in step for step in body["thinking"])
         assert len(body["web_sources"]) == 2
@@ -434,6 +438,32 @@ class TestGracefulFallbacks:
         assert all(
             {"title", "provider"} <= set(source) for source in body["web_sources"]
         )
+
+
+class TestChatStream:
+    def test_stream_emits_stages_then_result(self, client, seed, monkeypatch):
+        import json as jsonlib
+
+        mock_llms(monkeypatch, pipeline_json={**PIPELINE_JSON, "visuals": []})
+        resp = client.post("/chat/stream", json={"query": "how is revenue?"})
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+
+        events = [
+            jsonlib.loads(line[len("data: "):])
+            for line in resp.text.splitlines()
+            if line.startswith("data: ")
+        ]
+        stages = [event["stage"] for event in events if "stage" in event]
+        assert stages[:2] == ["evidence", "judging"]
+        assert "narrating" in stages and "visuals" in stages
+
+        results = [event["result"] for event in events if "result" in event]
+        assert len(results) == 1
+        assert results[0]["answer"]
+        assert results[0]["query_log_id"]
+        kinds = [visual["visual_type"] for visual in results[0]["visuals"]]
+        assert "table" in kinds
 
 
 class TestFlagEndpoint:

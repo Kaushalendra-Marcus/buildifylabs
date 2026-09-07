@@ -18,13 +18,54 @@ class Settings(BaseSettings):
     # currently uses. They become required again as each feature actually
     # ships.
     GROQ_API_KEY: Optional[str] = Field(None, env="GROQ_API_KEY")
-    # Interim model id — llama-3.1-70b-versatile is decommissioned (every call
-    # fails and silently falls back to HF). This model is itself scheduled to
-    # retire 2026-08-16; needs a durable choice before then (see plan B5).
-    GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    # Extra Groq keys: rotated round-robin per call and failed over on
+    # 401/429/transport errors, so one exhausted or revoked key never takes
+    # the pipeline down. Add GROQ_API_KEY2/3/4 in .env to use them.
+    GROQ_API_KEY2: Optional[str] = Field(None, env="GROQ_API_KEY2")
+    GROQ_API_KEY3: Optional[str] = Field(None, env="GROQ_API_KEY3")
+    GROQ_API_KEY4: Optional[str] = Field(None, env="GROQ_API_KEY4")
+    GROQ_MODEL: str = Field(..., env="GROQ_MODEL")
+    # Optional override for small structured calls. When omitted, use GROQ_MODEL.
+    GROQ_FAST_MODEL: Optional[str] = Field(None, env="GROQ_FAST_MODEL")
+
+    @property
+    def groq_api_keys(self) -> list[str]:
+        """Configured Groq keys in priority order, empties dropped."""
+        return [
+            key
+            for key in (
+                self.GROQ_API_KEY,
+                self.GROQ_API_KEY2,
+                self.GROQ_API_KEY3,
+                self.GROQ_API_KEY4,
+            )
+            if key
+        ]
+
+    @property
+    def groq_fast_model(self) -> str:
+        return self.GROQ_FAST_MODEL or self.GROQ_MODEL
+
+    @property
+    def groq_strong_model(self) -> str:
+        """Model for trust-sensitive live-web synthesis. Falls back to the
+        default model when no stronger override is configured."""
+        return self.GROQ_STRONG_MODEL or self.GROQ_MODEL
 
     WEB_SEARCH_API_KEY: Optional[str] = Field(None, env="WEB_SEARCH_API_KEY")
     WEB_SEARCH_MAX_RESULTS: int = 5
+    # Live-web cache TTL (specs/07 FR5: ~6h so repeat external questions
+    # share evidence instead of re-scraping at full latency/cost).
+    WEB_SEARCH_CACHE_TTL_SECONDS: int = 21600
+
+    # FRED (macro series) needs an API key for the observations endpoint
+    # (free at api.stlouisfed.org). Absent -> macro adapter skips gracefully.
+    FRED_API_KEY: Optional[str] = Field(None, env="FRED_API_KEY")
+
+    # Stronger model for live-web narration (specs/12 synthesis touchpoint):
+    # when set, source_scope in ("live_web", "both") narrates with this
+    # model instead of GROQ_MODEL. Unset -> GROQ_MODEL (no behavior change).
+    GROQ_STRONG_MODEL: Optional[str] = Field(None, env="GROQ_STRONG_MODEL")
 
     HF_API_KEY: Optional[str] = Field(None, env="HF_API_KEY")
     HF_MODEL: str = "mistralai/Mixtral-8x7B-Instruct-v0.1"

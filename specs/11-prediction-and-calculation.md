@@ -1,6 +1,6 @@
 # 11 — Prediction, Calculation & Benchmarking
 
-**Status:** ⚠️ §3.1 done (B4), §3.2–3.4 not started. §3.1's deterministic statistical calculations
+**Status:** ⚠️ §3.1 done (B4), §3.3 v1 + §3.4 partial done (evidence tools), §3.2 not started. §3.1's deterministic statistical calculations
 (§3.1 + §5's no-new-infrastructure constraint) are implemented in `app/services/data/stats.py` and
 consumed by B4's `POST /chat` — the LLM narrates precomputed numbers, never computes them. §3.4's
 "ask, don't guess" interaction pattern (§4) is implemented in the pipeline's SYSTEM_PROMPT; its
@@ -103,8 +103,14 @@ chat answer, closing the loop back into the same request once answered.
       concrete use lands with B6.)*
 - [ ] A forecast always states its method and a confidence range, never a bare number.
       *(§3.2, pending.)*
-- [ ] A what-if scenario always states its assumptions (e.g. "assumes quantity is unaffected")
-      alongside the result.
+- [x] A what-if scenario always states its assumptions (e.g. "assumes quantity is unaffected")
+      alongside the result. *(`stats.py::apply_what_if` v1: price-scenario recompute from the
+      executed rows — price×quantity when both columns exist, revenue-column scaling otherwise;
+      the `assumption` string is returned for verbatim narration and the SYSTEM_PROMPT's
+      WHAT-IF RULE enforces quoting it. No elasticity modeling; non-price scenarios return None.)*
 - [ ] Benchmarking never presents a guessed competitor number as fact — it either clearly labels
       data as best-effort/incomplete, falls back to industry averages, or asks the user for the
-      competitor's numbers directly.
+      competitor's numbers directly. *(Partial: structured fundamentals via Yahoo quoteSummary
+      (`_fetch_fundamentals` with crumb handshake, graceful skip on 401) feed a market-cap
+      comparison visual from real numbers only; Wikipedia summaries ground entity facts instead
+      of snippet-scraped prose. Industry-average fallback still pending.)*
