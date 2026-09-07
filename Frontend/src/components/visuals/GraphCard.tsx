@@ -32,10 +32,21 @@ const DATASET_COLORS = [
 
 const TOOLTIP_STYLE = {
   background: 'var(--surface-raised)',
-  border: '1px solid color-mix(in srgb, var(--text-muted) 40%, transparent)',
+  border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
   borderRadius: 8,
   fontSize: 12,
+  color: 'var(--text-secondary)',
 };
+
+const TOOLTIP_LABEL_STYLE = {
+  color: 'var(--text-primary)',
+  fontSize: 12,
+  fontWeight: 600,
+};
+
+/** Hover wash: a whisper of amber, never Recharts' default grey block. */
+const BAR_CURSOR = { fill: 'rgba(255, 191, 72, 0.08)', stroke: 'none' };
+const LINE_CURSOR = { stroke: 'rgba(255, 191, 72, 0.45)', strokeDasharray: '4 4' };
 
 type Row = Record<string, string | number>;
 
@@ -76,7 +87,7 @@ export function GraphCard({ props }: { props: GraphProps }) {
                 />
               ))}
             </Pie>
-            <Tooltip contentStyle={TOOLTIP_STYLE} />
+            <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
             <Legend wrapperStyle={{ fontSize: 12 }} />
           </PieChart>
         </ResponsiveContainer>
@@ -96,9 +107,16 @@ export function GraphCard({ props }: { props: GraphProps }) {
         tick={{ fontSize: 12, fill: 'var(--text-muted)' }}
       />
       <YAxis tick={{ fontSize: 12, fill: 'var(--text-muted)' }} />
-      <Tooltip contentStyle={TOOLTIP_STYLE} />
       <Legend wrapperStyle={{ fontSize: 12 }} />
     </>
+  );
+
+  const tooltip = (cursor: typeof BAR_CURSOR | typeof LINE_CURSOR) => (
+    <Tooltip
+      contentStyle={TOOLTIP_STYLE}
+      labelStyle={TOOLTIP_LABEL_STYLE}
+      cursor={cursor}
+    />
   );
 
   return (
@@ -107,6 +125,7 @@ export function GraphCard({ props }: { props: GraphProps }) {
         {chart_type === 'line' ? (
           <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
             {axes}
+            {tooltip(LINE_CURSOR)}
             {datasets.map((dataset, index) => (
               <Line
                 key={dataset.name}
@@ -120,6 +139,7 @@ export function GraphCard({ props }: { props: GraphProps }) {
         ) : chart_type === 'bar' ? (
           <BarChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
             {axes}
+            {tooltip(BAR_CURSOR)}
             {datasets.map((dataset, index) => (
               <Bar
                 key={dataset.name}
@@ -132,6 +152,7 @@ export function GraphCard({ props }: { props: GraphProps }) {
         ) : (
           <AreaChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
             {axes}
+            {tooltip(LINE_CURSOR)}
             {datasets.map((dataset, index) => (
               <Area
                 key={dataset.name}

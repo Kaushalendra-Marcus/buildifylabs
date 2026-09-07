@@ -132,6 +132,44 @@
   white-space: pre-wrap;
 }
 
+.message__answer-prose strong {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.message__answer-prose code {
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 0.88em;
+  background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+
+/* Follow-up question chips under a normal answer. */
+
+.followup-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.followup-chips__chip {
+  font: inherit;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.followup-chips__chip:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
 /* Visual cards grid: repeat(auto-fit, minmax(240px, 1fr));
  * graph + table span two columns (specs/14 §4.2). */
 .visual-cards-grid {
@@ -1105,6 +1143,9 @@
 
 .process-card--running {
   align-self: stretch;
+  /* The docked blocks figure flies outside its layout box mid-cycle —
+   * clip at the card edge so the stream stays tidy. */
+  overflow: hidden;
 }
 
 .process-card__body {
@@ -1122,7 +1163,7 @@
 }
 
 .process-card__body .bl-boxloader {
-  margin: -8px 4px -32px 0;
+  margin-right: 8px;
 }
 
 @media (max-width: 560px) {

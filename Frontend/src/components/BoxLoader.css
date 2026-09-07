@@ -16,12 +16,20 @@
 }
 
 /* Small docked variant (processing card): same figure, scaled into a
- * 90x144 layout box. transform (not `zoom`) for standards compliance. */
+ * 72x115 layout box. transform (not `zoom`) for standards compliance. */
 .bl-boxloader--sm {
-  width: 90px;
-  height: 144px;
-  transform: scale(0.45);
+  width: 72px;
+  height: 115px;
+  transform: scale(0.36);
   transform-origin: top left;
+}
+
+/* Docked variant shows the joining blocks only — no ground spotlight,
+ * shine, or mask curtains. */
+.bl-boxloader--sm .bl-boxloader__ground,
+.bl-boxloader--sm:before,
+.bl-boxloader--sm:after {
+  display: none;
 }
 
 .bl-boxloader:before,

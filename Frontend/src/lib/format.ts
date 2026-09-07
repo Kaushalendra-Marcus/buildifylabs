@@ -25,3 +25,15 @@ export function formatTime(epochMs: number): string {
     minute: '2-digit',
   });
 }
+
+/**
+ * formatCompactNumber — headline-size numbers for metric values and donut
+ * totals: 47,000,000,000 → "47B", 1,200 → "1.2K", 4.2 → "4.2". Pair with the
+ * exact figure in a `title` tooltip so nothing is lost.
+ */
+export function formatCompactNumber(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    notation: 'compact',
+    maximumFractionDigits: 2,
+  }).format(value);
+}

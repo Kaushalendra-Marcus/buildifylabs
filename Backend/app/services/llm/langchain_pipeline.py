@@ -941,6 +941,24 @@ async def run_pipeline(
     rows = list(db_data or [])
     thinking: List[str] = []
 
+    async def _rescue_or_fallback(reason: str) -> PipelineOutput:
+        """Prose rescue over real evidence, else the honest generic fallback."""
+        rescued = await _narrate_prose_rescue(
+            user_query, rows, news_context, market_data
+        )
+        if rescued is not None:
+            rescued.thinking = thinking + ["Structured narration failed; prose rescue."]
+            return ensure_visuals(
+                rescued,
+                rows=rows,
+                computed_numbers=computed_numbers,
+                market_data=market_data,
+                web_sources=web_sources,
+                preferred_visual=None,
+                query=user_query,
+            )
+        return fallback_output(reason=reason, confidence=0.0)
+
     try:
         decision = await judge_sufficiency(
             user_query=user_query,
@@ -1062,23 +1080,20 @@ async def run_pipeline(
 
     except ValidationError as ve:
         logger.error(f"Schema validation failed: {ve}")
-        return fallback_output(
-            reason="Sorry, I could not process your request properly. Please try again.",
-            confidence=0.0,
+        return await _rescue_or_fallback(
+            reason="Sorry, I could not process your request properly. Please try again."
         )
 
     except ValueError as ve:
         logger.error(f"JSON extraction failed: {ve}")
-        return fallback_output(
-            reason="I had trouble understanding the data. Please rephrase your query.",
-            confidence=0.0,
+        return await _rescue_or_fallback(
+            reason="I had trouble understanding the data. Please rephrase your query."
         )
 
     except Exception as e:
         logger.error(f"Pipeline failed: {e}")
-        return fallback_output(
-            reason="Something went wrong. Please try again.",
-            confidence=0.0,
+        return await _rescue_or_fallback(
+            reason="Something went wrong. Please try again."
         )
 
 
@@ -1136,6 +1151,71 @@ async def _narrate(
     parsed = normalize_pipeline_payload(extract_json(raw_output))
 
     return PipelineOutput(**parsed)
+
+
+PROSE_RESCUE_SYSTEM_PROMPT = """Answer the user's question directly in plain sentences (no JSON, no markdown
+headings). Use ONLY the evidence given below; never invent figures. Keep it
+under 150 words. Cite web claims with their [n] numbers."""
+
+
+async def _narrate_prose_rescue(
+    user_query: str,
+    rows: Sequence[dict],
+    news_context: list,
+    market_data: list,
+) -> Optional[PipelineOutput]:
+    """Last resort when structured narration fails: one plain-text call over
+    the real evidence. Returns None when there is no evidence to speak from
+    (then the honest generic fallback stands) or when the rescue also fails."""
+    rows = list(rows or [])
+    news_context = list(news_context or [])
+    market_data = list(market_data or [])
+    if not rows and not news_context and not market_data:
+        return None
+    evidence_parts = []
+    if rows:
+        evidence_parts.append(
+            "Rows:\n"
+            + "\n".join(json.dumps(row, default=str) for row in rows[:8])
+        )
+    if news_context:
+        evidence_parts.append(
+            "Web snippets:\n"
+            + "\n".join(
+                f"[{index}] {snippet}"
+                for index, snippet in enumerate(news_context[:8], start=1)
+            )
+        )
+    if market_data:
+        evidence_parts.append(
+            "Market series:\n"
+            + "\n".join(
+                f"{item.get('entity', 'series')}: "
+                f"{list(item.get('values') or [])[-8:]}"
+                for item in market_data[:4]
+            )
+        )
+    try:
+        result = await generate_response(
+            prompt=(
+                f"Question:\n{user_query}\n\nEvidence:\n" + "\n\n".join(evidence_parts)
+            ),
+            system_prompt=PROSE_RESCUE_SYSTEM_PROMPT,
+            temperature=0.3,
+            max_tokens=600,
+        )
+        text = (result.get("content") or "").strip()
+        if not text:
+            return None
+        if text.startswith("{") or text.startswith("["):
+            # Not prose (a JSON blob or fragment) - refusing to present it
+            # as an answer keeps the honest generic fallback.
+            logger.warning("Prose rescue returned JSON, not prose; discarding.")
+            return None
+        return fallback_output(reason=text, confidence=0.35)
+    except Exception as exc:
+        logger.warning(f"Prose rescue failed: {exc}")
+        return None
 
 
 def _evidence_inventory(

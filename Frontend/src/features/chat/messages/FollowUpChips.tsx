@@ -6,12 +6,12 @@
  * send flow; kept local so neither component owns the other). Renders nothing
  * when the answer carries no follow-ups.
  */
-import { sendQuery } from '../../api/chat';
+import { sendQuery } from '../../../api/chat';
 import { useChatStore } from '../chat-store';
 import { useQuotaStore, WINDOW_MS } from '../quota-store';
 import { useScopeStore } from '../scope-store';
-import { getErrorMessage } from '../../lib/errors';
-import { isQuotaError } from '../../lib/http';
+import { getErrorMessage } from '../../../lib/errors';
+import { isQuotaError } from '../../../lib/http';
 
 export function FollowUpChips({ followups }: { followups: string[] }) {
   const addUserMessage = useChatStore((state) => state.addUserMessage);

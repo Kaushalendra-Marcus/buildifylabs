@@ -16,6 +16,8 @@ import type { PipelineOutput } from '../../../types/chat';
 import { getErrorMessage } from '../../../lib/errors';
 import { isQuotaError } from '../../../lib/http';
 import { AssistantIdentity } from './AssistantIdentity';
+import { renderInlineMarkdown } from './inline-markdown';
+import { stripPriorOptionAnswer } from './clarification-thread';
 
 export function ClarificationMessage({ output }: { output: PipelineOutput }) {
   const messages = useChatStore((state) => state.messages);
@@ -35,9 +37,22 @@ export function ClarificationMessage({ output }: { output: PipelineOutput }) {
     .reverse()
     .find((msg) => msg.role === 'user')?.content || '';
 
+  // Options offered by EARLIER clarifications (not this one): the last user
+  // message may already end with " - <picked option>" from a previous round.
+  // Stripping it keeps follow-ups as "base query - new answer" instead of
+  // accumulating "base - old pick - new pick".
+  const priorOptions = messages.flatMap((msg) =>
+    msg.role === 'assistant' &&
+    msg.output.clarification &&
+    msg.output.clarification.question !== clarification.question
+      ? msg.output.clarification.options
+      : [],
+  );
+
   const sendFollowUp = async (answer: string) => {
     // Combine the original query with the clarification response
-    const followUp = `${originalUserMessage} - ${answer}`;
+    const base = stripPriorOptionAnswer(originalUserMessage, priorOptions);
+    const followUp = base ? `${base} - ${answer}` : answer;
     addUserMessage(followUp);
     setPending('thinking');
 
@@ -81,7 +96,7 @@ export function ClarificationMessage({ output }: { output: PipelineOutput }) {
     <div className="message message--clarification">
       <AssistantIdentity />
       <p className="message__clarification-eyebrow">Clarification needed</p>
-      <p className="message__clarification-question">{clarification.question}</p>
+      <p className="message__clarification-question">{renderInlineMarkdown(clarification.question, 'clarify-q')}</p>
       {clarification.options.length > 0 && (
         <div className="message__clarification-options">
           {clarification.options.map((option) => (

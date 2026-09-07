@@ -67,6 +67,11 @@ the frontend can render without further parsing or guessing.
   machine-written thinking trace (`thinking: list[str]`, additive/optional for clients); an
   explicitly requested output shape (bar/line/pie/area/table/metric) is honored end-to-end from
   query text through synthesis. Empty model completions retry once before degrading.
+- **FR12 (new): Structured calls use JSON mode; answers carry follow-ups.** Judge, narration, and
+  query-framing calls set Groq's `response_format: json_object` (the HF fallback has no such flag
+  and is unaffected, so parsing stays defensive). Normal answers include 2–3 tap-to-ask
+  `followups` (capped/cleaned in code; `[]` when none fit). Model copy may use inline markdown
+  (`**bold**`, `*italic*`, `` `code` ``) — the frontend renders it; citations still parse first.
 
 ## 3. API Contracts (internal — no HTTP surface yet)
 

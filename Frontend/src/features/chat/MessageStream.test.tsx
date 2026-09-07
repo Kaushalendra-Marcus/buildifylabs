@@ -10,6 +10,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MessageStream } from './MessageStream'
 import { useChatStore } from './chat-store'
+import { stripPriorOptionAnswer } from './messages/clarification-thread'
 import type { PipelineOutput } from '../../types/chat'
 import { flagAnswer, sendQuery } from '../../api/chat'
 import { sendContact } from '../../api/contact'
@@ -470,6 +471,120 @@ describe('MessageStream — intelligence styling', () => {
     expect(userMsg.role).toBe('user')
     if (userMsg.role === 'user') {
       expect(userMsg.content).toContain('My own sector pick')
+    }
+  })
+
+  it('renders **bold** model markers as strong, not literally', () => {
+    useChatStore.getState().addAssistantMessage(
+      makeOutput({ answer: 'top harness is **Claude Code** today' }),
+    )
+
+    render(<MessageStream />)
+
+    const bold = screen.getByText('Claude Code')
+    expect(bold.tagName).toBe('STRONG')
+    expect(screen.queryByText('**Claude Code**')).not.toBeInTheDocument()
+  })
+
+  it('renders follow-up chips that send as new questions', async () => {
+    const user = userEvent.setup()
+    vi.mocked(sendQuery).mockResolvedValue(
+      makeOutput({ answer: 'Follow-up response' })
+    )
+
+    useChatStore.getState().addAssistantMessage(
+      makeOutput({
+        answer: 'Revenue held steady.',
+        followups: ['Break it down by region?'],
+      }),
+    )
+
+    render(<MessageStream />)
+
+    await user.click(
+      screen.getByRole('button', { name: 'Break it down by region?' }),
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    expect(vi.mocked(sendQuery)).toHaveBeenCalledWith(
+      expect.objectContaining({ query: 'Break it down by region?' }),
+    )
+    const messages = useChatStore.getState().messages
+    const userMsg = messages[messages.length - 2]
+    expect(userMsg.role).toBe('user')
+    if (userMsg.role === 'user') {
+      expect(userMsg.content).toBe('Break it down by region?')
+    }
+  })
+
+  it('renders nothing extra when an answer has no follow-ups', () => {
+    useChatStore.getState().addAssistantMessage(makeOutput())
+
+    render(<MessageStream />)
+
+    expect(
+      screen.queryByLabelText('Suggested follow-up questions'),
+    ).not.toBeInTheDocument()
+  })
+})
+
+describe('stripPriorOptionAnswer', () => {
+  it('strips a trailing previously-picked option', () => {
+    expect(stripPriorOptionAnswer('base query - Old pick', ['Old pick'])).toBe(
+      'base query',
+    )
+  })
+
+  it('keeps free-typed answers that match no prior option', () => {
+    expect(stripPriorOptionAnswer('base query - my own words', ['Old pick'])).toBe(
+      'base query - my own words',
+    )
+  })
+
+  it('leaves content without any prior suffix untouched', () => {
+    expect(stripPriorOptionAnswer('fresh question?', ['Old pick'])).toBe(
+      'fresh question?',
+    )
+  })
+
+  it('chained rounds send base-plus-new-pick, never double-appended', async () => {
+    const user = userEvent.setup()
+    vi.mocked(sendQuery).mockResolvedValue(
+      makeOutput({ answer: 'Chained response' })
+    )
+
+    useChatStore.getState().addUserMessage('startup ideas - AI sector')
+    useChatStore.getState().addAssistantMessage(
+      makeOutput({
+        answer: '',
+        visuals: [],
+        clarification: { question: 'Which sector?', options: ['AI sector'] },
+        sql_query: null,
+        data_preview: null,
+      }),
+    )
+    useChatStore.getState().addAssistantMessage(
+      makeOutput({
+        answer: '',
+        visuals: [],
+        clarification: { question: 'Which metric?', options: ['Revenue ways'] },
+        sql_query: null,
+        data_preview: null,
+      }),
+    )
+
+    render(<MessageStream />)
+
+    await user.click(screen.getByRole('button', { name: 'Revenue ways' }))
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    const messages = useChatStore.getState().messages
+    const userMsg = messages[messages.length - 2]
+    expect(userMsg.role).toBe('user')
+    if (userMsg.role === 'user') {
+      expect(userMsg.content).toBe('startup ideas - Revenue ways')
     }
   })
 })

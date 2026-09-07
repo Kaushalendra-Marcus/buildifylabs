@@ -428,6 +428,8 @@ class TestGracefulFallbacks:
         assert body["thinking"]
         assert any("Judged" in step for step in body["thinking"])
         assert len(body["web_sources"]) == 2
+        # No followups requested by the mock narration -> empty, not null.
+        assert body["followups"] == []
 
 
 class TestFlagEndpoint:

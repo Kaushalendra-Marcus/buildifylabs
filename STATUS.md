@@ -27,8 +27,8 @@ question in-session) and the core loop has real-user evidence.
   graph — values only from real rows/stats/series). The route's hardcoded "One-month stock"
   chart hack is deleted. No contract change — frontend untouched.
 
-- **Pipeline live-hardening round 2** — done, test-verified (backend **178 tests**, 177 green + the same
-  1 pre-existing env failure; frontend build/lint/`npm test` all green — **93 tests**): (1) LLM query
+- **Pipeline live-hardening round 2** — done, test-verified (backend **183 tests**, 182 green + the same
+  1 pre-existing env failure; frontend build/lint/`npm test` all green — **105 tests**): (1) LLM query
   framing — live scopes rewrite the message (merging appended clarification answers) into 1–3 clean
   queries with a community-discussion variant when opinions are sought, fanned out with dedupe, and
   any entity resolves to a market symbol generically (was a 5-name hardcoded list); raw user text
@@ -38,7 +38,10 @@ question in-session) and the core loop has real-user evidence.
   trace on every run (additive field). (6) Sources-table guarantee for web-only answers.
   (7) Clarifications accept free-text replies as well as pills (frontend); empty options are
   backfilled from the judge's evidence-grounded suggestions so both always render together.
-  Specs/06 FR10–FR11.
+  (8) Groq JSON mode for judge/narration/rewriter (HF fallback unaffected) — the live empty-completion
+  failures. (9) Tap-to-ask `followups` on answers (additive field + chips). (10) Inline markdown
+  (`**bold**` etc.) renders in prose and clarification questions instead of literally.
+  Specs/06 FR10–FR12.
 
 - **F6 — Remaining states** — done, test-verified (`npm run build`, `npm run lint`, `npm test`
   all green — **65 tests**, up from 56; dev server boots on 5173):

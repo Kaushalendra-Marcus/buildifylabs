@@ -210,7 +210,11 @@ class TestRunPipeline:
         assert output.answer == ""
 
     def test_malformed_json_falls_back_with_zero_confidence(self, monkeypatch):
+        # Garbage narration AND an empty rescue reply: nothing honest to say,
+        # so the generic fallback stands (confidence 0.0, no visuals).
         async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512, **kwargs):
+            if "plain sentences" in system_prompt:
+                return {"content": "   ", "source": "groq", "usage": None}
             return {"content": "not json at all", "source": "groq", "usage": None}
 
         monkeypatch.setattr(pipeline_mod, "generate_response", fake_generate)
@@ -753,3 +757,84 @@ class TestRobustnessLoop:
         output = asyncio.run(run_pipeline(user_query="help me", db_data=[]))
         assert output.clarification is not None
         assert output.clarification.options == []
+
+
+class TestFollowups:
+    def test_followups_capped_cleaned(self):
+        from app.services.llm.langchain_pipeline import normalize_pipeline_payload
+
+        payload = normalize_pipeline_payload(
+            {"followups": ["  drill down? ", "", 42, "compare regions?"]}
+        )
+        assert payload["followups"] == ["drill down?", "42", "compare regions?"][:3]
+
+    def test_followups_non_list_becomes_empty(self):
+        from app.services.llm.langchain_pipeline import normalize_pipeline_payload
+
+        assert normalize_pipeline_payload({"followups": None})["followups"] == []
+        assert normalize_pipeline_payload({})["followups"] == []
+
+    def test_run_pipeline_carries_model_followups(self, monkeypatch):
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(),
+                _pipeline_json(
+                    visuals=[],
+                    confidence=0.7,
+                    followups=["Break it down by region?", "Compare to last month?"],
+                ),
+            ),
+        )
+
+        output = asyncio.run(run_pipeline(user_query="how is revenue?", db_data=ROWS))
+        assert output.followups == [
+            "Break it down by region?",
+            "Compare to last month?",
+        ]
+
+    def test_prose_rescue_answers_from_evidence(self, monkeypatch):
+        # Structured narration fails but rows exist: plain-text rescue over
+        # the real evidence instead of a dead-end fallback.
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(),
+                "not json at all",
+                "Revenue held steady across the three days.",
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(user_query="how is revenue?", db_data=ROWS)
+        )
+        assert output.answer == "Revenue held steady across the three days."
+        assert output.confidence == 0.35
+        assert output.clarification is None
+        assert any("rescue" in step for step in output.thinking)
+
+    def test_prose_rescue_refuses_json_blob(self, monkeypatch):
+        # A rescue reply that is itself JSON must not be presented as prose.
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(),
+                "not json at all",
+                '{"answer": "sneaky"}',
+            ),
+        )
+
+        output = asyncio.run(run_pipeline(user_query="q", db_data=ROWS))
+        assert output.confidence == 0.0
+        assert output.answer != '{"answer": "sneaky"}'
+
+    def test_prose_rescue_none_without_evidence(self, monkeypatch):
+        from app.services.llm.langchain_pipeline import _narrate_prose_rescue
+
+        async def scenario():
+            return await _narrate_prose_rescue("q", [], [], [])
+
+        assert asyncio.run(scenario()) is None

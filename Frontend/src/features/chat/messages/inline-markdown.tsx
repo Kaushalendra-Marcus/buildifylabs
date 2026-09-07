@@ -10,7 +10,8 @@
 import { Fragment } from 'react';
 import type { ReactNode } from 'react';
 
-const INLINE_PATTERN = /(`[^`\n]+`|\*\*[^*\n]+\*\*|~~[^~\n]+~~|\*[^*\n]+\*)/g;
+const INLINE_PATTERN =
+  /(`[^`\n]+`|\*\*[^*\n]+\*\*|~~[^~\n]+~~|\*([^* \n][^*\n]*[^* \n]|[^* \n])\*)/g;
 
 function renderToken(token: string, key: string): ReactNode {
   if (token.startsWith('`') && token.endsWith('`') && token.length >= 2) {
