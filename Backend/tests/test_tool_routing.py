@@ -119,18 +119,24 @@ class TestPlannedDispatch:
         monkeypatch.setattr(web_search_mod.get_settings(), "FRED_API_KEY", None)
 
     def test_plan_limits_to_wikipedia_only(self, monkeypatch):
-        """Market-intent query + entity, but the plan says wikipedia: no
-        symbol resolution, no market fetch - the plan wins over the regex."""
+        """A wikipedia-only plan for a stock-price question keeps the LLM's
+        wikipedia request but the canonical plan restores the
+        deterministically required market tool: the planner may ADD tools,
+        never silently REMOVE required ones (Phase 2 contract)."""
         calls: list = []
         self._base_monkeypatch(monkeypatch, ["q1"], ["Tesla"])
 
-        async def boom_symbol(client, entity):
+        async def fake_symbol(client, entity):
             calls.append(("symbol", entity))
             return "TSLA"
 
-        async def boom_market(client, entity, symbol):
+        async def fake_market(client, entity, symbol):
             calls.append(("market", entity))
-            raise AssertionError("market must not run under a wikipedia-only plan")
+            return (
+                "Tesla (TSLA) one-month market data.",
+                {"entity": entity, "symbol": symbol, "values": [1.0, 2.0]},
+                {"title": "t", "url": "u", "provider": "Yahoo Finance"},
+            )
 
         async def fake_wiki(client, entity):
             calls.append(("wiki", entity))
@@ -139,15 +145,31 @@ class TestPlannedDispatch:
                 {"title": "Wikipedia: Tesla", "url": "https://en.wikipedia.org/wiki/Tesla", "provider": "Wikipedia"},
             )
 
-        monkeypatch.setattr(web_search_mod, "_resolve_symbol", boom_symbol)
-        monkeypatch.setattr(web_search_mod, "_fetch_market_series", boom_market)
+        monkeypatch.setattr(web_search_mod, "_resolve_symbol", fake_symbol)
+        monkeypatch.setattr(web_search_mod, "_fetch_market_series", fake_market)
         monkeypatch.setattr(web_search_mod, "_fetch_wikipedia", fake_wiki)
         result = asyncio.run(
             search_web("Tesla stock price?", planned_tools=["wikipedia"])
         )
         assert ("wiki", "Tesla") in calls
-        assert not [c for c in calls if c[0] in ("symbol", "market")]
-        assert result.context[0].startswith("Tesla:")
+        # Canonical plan restored the required market tool alongside wiki.
+        assert ("market", "Tesla") in calls
+        assert any(text.startswith("Tesla:") for text in result.context)
+
+    def test_planner_cannot_drop_required_financial_history(self, monkeypatch):
+        """Canonical regression for the Phase 2 example: an LLM plan of only
+        ["market_history"] for a multi-metric historical comparison must gain
+        financial_history deterministically."""
+        from app.services.data.comparison import resolve_tool_plan
+
+        query = (
+            "Compare NVIDIA and AMD over the last 3 years. Compare revenue "
+            "growth, profitability, and stock performance."
+        )
+        resolved = resolve_tool_plan(["market_history"], query)
+        assert "market_history" in resolved
+        assert "financial_history" in resolved
+        assert "snippets" in resolved
 
     def test_empty_plan_falls_back_to_predicates(self, monkeypatch):
         """planned=[] is planner-abstain: deterministic dispatch runs."""

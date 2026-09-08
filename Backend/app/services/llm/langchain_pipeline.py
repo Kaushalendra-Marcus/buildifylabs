@@ -20,7 +20,7 @@ import difflib
 import json
 import logging
 import re
-from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Sequence
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
@@ -34,6 +34,9 @@ try:
         METRIC_REVENUE,
         METRIC_STOCK,
         build_research_plan,
+        build_trace,
+        check_entity_completeness,
+        check_research_completeness,
         clarification_asks_for_researchable_data,
         comparison_confidence,
         compute_comparison_stats,
@@ -41,11 +44,23 @@ try:
         compute_pct_change,
         compute_yearly_stats,
         decompose_comparison_query,
+        evidence_currency,
+        evidence_driven_confidence,
         figures_share_metric,
         figure_entity_label,
         figure_metric_label,
+        format_runtime_trace,
         insufficient_reason,
+        is_comparison_query,
+        is_figure_comparison_eligible,
         is_researchable_comparison,
+        must_not_clarify,
+        normalize_currency,
+        parse_time_range,
+        reconcile_judge_tools,
+        required_tools_for_query,
+        resolve_tool_plan,
+        validate_calculation_inputs,
         validate_comparison,
         validate_historical_coverage,
     )
@@ -62,11 +77,25 @@ except Exception:  # pragma: no cover - import-time safety, never blocks pipelin
     compute_pct_change = None  # type: ignore
     compute_yearly_stats = None  # type: ignore
     decompose_comparison_query = None  # type: ignore
+    evidence_currency = None  # type: ignore
+    evidence_driven_confidence = None  # type: ignore
     figures_share_metric = None  # type: ignore
     figure_entity_label = None  # type: ignore
     figure_metric_label = None  # type: ignore
     insufficient_reason = None  # type: ignore
-    is_researchable_comparison = None  # type: ignore
+    is_comparison_query = None  # type: ignore
+    must_not_clarify = None  # type: ignore
+    normalize_currency = None  # type: ignore
+    parse_time_range = None  # type: ignore
+    build_trace = None  # type: ignore
+    check_entity_completeness = None  # type: ignore
+    check_research_completeness = None  # type: ignore
+    format_runtime_trace = None  # type: ignore
+    is_figure_comparison_eligible = None  # type: ignore
+    reconcile_judge_tools = None  # type: ignore
+    required_tools_for_query = None  # type: ignore
+    resolve_tool_plan = None  # type: ignore
+    validate_calculation_inputs = None  # type: ignore
     validate_comparison = None  # type: ignore
     validate_historical_coverage = None  # type: ignore
 
@@ -95,6 +124,15 @@ class VisualOutput(BaseModel):
     # source of truth) for the authoritative per-type prop schema.
     props: Dict
     title: str
+    # Visual provenance contract (first-class pipeline stage): every visual
+    # carries requested intent, entities, metric, units, timeframe,
+    # frequency, evidence/source IDs, underlying data points, and
+    # computation IDs where applicable. Validated before rendering; a
+    # visual whose entity/metric/timeframe/units/source/values cannot be
+    # traced to validated evidence/computation is rejected (fail closed).
+    provenance: Optional[Dict] = Field(default=None)
+
+    model_config = {"extra": "allow"}
 
 
 class ClarificationRequest(BaseModel):
@@ -199,6 +237,11 @@ class PipelineOutput(BaseModel):
     # Suggested follow-up questions the user can tap to continue. Genuine
     # next questions about this answer, never repeats of it.
     followups: List[str] = Field(default_factory=list)
+    # Compact structured research state (Phase 18): the canonical plan,
+    # validated evidence summary, and source refs persisted per turn so
+    # follow-ups retain entities/metrics/period instead of reverting to
+    # incomplete evidence. Bounded and JSON-safe by construction.
+    research_state: Optional[Dict[str, Any]] = None
 
 
 SYSTEM_PROMPT = """You are a business intelligence analyst for a non-technical business owner.
@@ -295,6 +338,8 @@ STRICT RULES:
 - COMPARISON RULE: for explicit "X vs Y" / "compare" questions, prefer a
     comparison visual (groups for each side, values from the snippets only)
     over a generic bar chart, and never invent a missing side's number.
+    Only figures whose meaning is bound (entity AND metric known) may enter
+    a comparison visual; untyped figures stay cited prose, never chart data.
 - HISTORICAL COMPARISON RULE: when a Comparison Gate section is present,
   OBEY it. BLOCKED means: state what historical data is missing for ALL
   compared companies (which metric, which window, which companies), set
@@ -644,12 +689,23 @@ def detect_preferred_visual(query: str) -> Optional[str]:
 
 def sanitize_citations(answer: str, source_count: int) -> str:
     """Drop citation markers that point at no listed source ([0], [99] when
-    only 3 snippets exist). Valid markers pass through untouched."""
+    only 3 snippets exist). Valid markers pass through untouched. Year
+    brackets ([2024]) are never citations and are always preserved."""
+    try:
+        from app.services.data.canonical import sanitize_citations_safe
+
+        return sanitize_citations_safe(answer, source_count)
+    except Exception:
+        pass
     if source_count <= 0:
-        return re.sub(r"\[\d+\]", "", answer)
+        # Preserve 4-digit years even with zero sources.
+        return re.sub(r"\[(?!(?:19|20)\d{2}\])\d+\]", "", answer)
 
     def _keep(match: "re.Match[str]") -> str:
-        number = int(match.group(1))
+        raw = match.group(1)
+        if len(raw) >= 4:
+            return match.group(0)
+        number = int(raw)
         return match.group(0) if 1 <= number <= source_count else ""
 
     return re.sub(r"\[(\d+)\]", _keep, answer)
@@ -728,18 +784,39 @@ def build_prompt(
     elif source_scope == "own_data":
         news_section = "User asked for their own data only - no live web context."
     else:
-        news_section = "User is asking for general knowledge (live web) - use your knowledge to provide direct answers, do not ask for clarifications."
+        # Fail-closed no-evidence mode (P1#26): never instruct the model to
+        # use its own knowledge for statistics. Without web evidence the
+        # honest response is an insufficiency report, not hallucinated data.
+        news_section = (
+            "No usable live-web evidence was retrieved for this query. "
+            "Do NOT use your own knowledge for figures, statistics, or "
+            "comparisons. State clearly that evidence is insufficient, "
+            "describe what is missing, set confidence 0.0, and return NO "
+            "numeric graph/comparison visual."
+        )
 
     company_section = company_name or "Not provided"
 
+    # Separate channels (P0#15): market_data and macro_data are NEVER merged.
+    # A market chart must never contain CPI/GDP/unemployment series.
     market_section = (
         "\n".join(
             f"- {item.get('entity', 'series')}: "
             f"{len(item.get('values', []) or [])} points "
             f"({', '.join(str(label) for label in (item.get('labels', []) or [])[:3])}...)"
-            for item in (list(market_data) + list(macro_data))[:6]
+            for item in list(market_data)[:6]
         )
-        if (market_data or macro_data)
+        if market_data
+        else "none"
+    )
+    macro_section = (
+        "\n".join(
+            f"- {item.get('entity', 'series')}: "
+            f"{len(item.get('values', []) or [])} points "
+            f"({', '.join(str(label) for label in (item.get('labels', []) or [])[:3])}...)"
+            for item in list(macro_data)[:6]
+        )
+        if macro_data
         else "none"
     )
 
@@ -795,6 +872,7 @@ def build_prompt(
         )
 
     gate_section = "No historical comparison gate evaluated."
+    validated_section = "None -- no deterministically validated comparison evidence."
     if comparison_gate.get("applies"):
         if comparison_gate.get("blocked"):
             gate_section = (
@@ -803,6 +881,11 @@ def build_prompt(
                 "Do NOT present a comparison chart or winners. State what data "
                 "is missing, keep confidence at 0, and do not invent figures."
             )
+            validated_section = (
+                "None -- the comparison gate BLOCKED, so NOTHING below counts "
+                "as validated comparison evidence. Every number in Web Search "
+                "Results / Fundamentals / Market Series is UNVALIDATED CONTEXT."
+            )
         else:
             gate_section = (
                 "HISTORICAL COMPARISON GATE: PASSED -- validated multi-year "
@@ -810,6 +893,13 @@ def build_prompt(
                 f"{comparison_gate.get('years')}Y. Quote the Computed "
                 "Statistics comparison_stats exactly (winners + pct changes + "
                 "formula/assumptions) and cite sources for explanatory claims."
+            )
+            validated_section = (
+                "The Computed Statistics comparison_stats block below. ONLY "
+                "this block may support numerical claims, winners, and "
+                "charts. Everything else (snippets, snapshots, series) is "
+                "UNVALIDATED CONTEXT: usable for hedged qualitative reasons "
+                "with [n] citations, never for quantitative comparisons."
             )
 
     decision_section = (
@@ -879,14 +969,20 @@ Business Data (rows returned by the executed SQL):
 Computed Statistics (already calculated by code - narrate these, never re-compute):
 {computed_section}
 
-Market Series (SHORT-TERM one-month values only - NEVER use for "last N years"):
-{market_section}
-
-Price/Financial History (multi-year validated evidence - use for historical asks):
-{history_section}
+VALIDATED EVIDENCE (only this may support numerical claims, winners, charts):
+{validated_section}
 
 Comparison Gate (must obey: BLOCKED means no chart, no winners, state missing data):
 {gate_section}
+
+Market Series (SHORT-TERM one-month values only - NEVER use for "last N years"):
+{market_section}
+
+Macro Series (economy-wide FRED indicators - NEVER chart as company market data):
+{macro_section}
+
+Price/Financial History (multi-year validated evidence - use for historical asks):
+{history_section}
 
 Fundamentals (CURRENT snapshot values - quote these, never re-derive, never use for historical growth):
 {fundamentals_section}
@@ -921,6 +1017,16 @@ def _truncate_rows(
 
 
 def extract_json(text: str) -> dict:
+    """Robust JSON extraction: whole/fenced parse, balanced-brace scan with
+    string awareness (prose braces never confuse it), legacy fallback."""
+    try:
+        from app.services.data.canonical import extract_json_robust
+
+        return extract_json_robust(text)
+    except ValueError:
+        raise
+    except Exception:
+        pass
     text = text.replace("```json", "").replace("```", "").strip()
 
     try:
@@ -959,6 +1065,7 @@ def normalize_pipeline_payload(payload: dict) -> dict:
         "query_log_id": None,
         "thinking": [],
         "followups": [],
+        "research_state": None,
     }
     normalized = {**defaults, **payload}
     for field in (
@@ -1036,6 +1143,34 @@ _SYNTH_TABLE_MAX_COLS = 6
 _SYNTH_SERIES_MAX_POINTS = 30
 _SYNTH_SOURCES_MAX_ROWS = 8
 _SYNTH_FIGURES_MAX = 8
+# Financial tables must never silently drop a whole company to a row cap
+# (the live Toyota omission): budget holds 4 companies x 6 annual points.
+_SYNTH_FINANCIAL_MAX_ROWS = 24
+
+
+def _interleave_entities(rows: list[list], max_rows: int) -> list[list]:
+    """Round-robin interleave table rows by entity (first column) so a row
+    cap degrades to fewer years per company, never to a missing company.
+    Deterministic: entities alphabetical, rows stable within entity."""
+    by_entity: Dict[str, list] = {}
+    for row in rows:
+        by_entity.setdefault(str(row[0]) if row else "", []).append(row)
+    ordered_entities = sorted(by_entity)
+    out: list[list] = []
+    index = 0
+    while len(out) < max_rows:
+        progressed = False
+        for entity in ordered_entities:
+            bucket = by_entity[entity]
+            if index < len(bucket):
+                out.append(bucket[index])
+                progressed = True
+                if len(out) >= max_rows:
+                    break
+        if not progressed:
+            break
+        index += 1
+    return out
 
 # Verbatim figures with explicit units only (money or percent). Bare numbers
 # ("30 ideas", "8 months", years like "2024") never qualify, so dates and
@@ -1051,38 +1186,66 @@ _FIGURE_SCALE = {
 }
 
 
-def _figures_from_snippets(snippets: Optional[list]) -> list:
+def _figures_from_snippets(
+    snippets: Optional[list], query: Optional[str] = None
+) -> list:
     """Extract cited money/percent figures verbatim from web snippets.
 
     Each figure keeps its exact text, a normalized value for bar heights, a
-    unit class (money vs percent, never mixed on one chart), the snippet it
-    came from, and the citation number. No NLP, no invention: regex only.
+    unit class (money vs percent, never mixed on one chart), the FULL
+    snippet scope for semantic binding (H3: never truncated before
+    WHO/WHAT/WHEN/UNIT/CURRENCY/DEFINITION resolution), the snippet it
+    came from, and the citation number. Semantic binding (entity / metric
+    / period / currency / frequency / definition / scale) is attached
+    deterministically against the query's entities when `query` is given;
+    a figure is comparison_eligible ONLY under the strict H2 contract
+    (entity + specific metric + explicit ISO currency for money + ...).
+    Untyped "$202B" (no known meaning) stays citable in the figures table
+    but must never enter numerical comparison. No NLP, no invention.
     """
     figures: list = []
     seen: set[str] = set()
+    queried_entities: list = []
+    try:
+        if decompose_comparison_query is not None and query:
+            queried_entities = (
+                decompose_comparison_query(query) or {}
+            ).get("entities", []) or []
+    except Exception:
+        queried_entities = []
     for index, snippet in enumerate(snippets or [], start=1):
         text = str(snippet)
         for match in _FIGURE_MONEY_RE.finditer(text):
             amount = float(match.group(2).replace(",", ""))
             scale = _FIGURE_SCALE.get(match.group(3) or "", 1)
             figures.append(
-                {
-                    "text": match.group(0).strip(),
-                    "value": amount * scale,
-                    "unit": "money",
-                    "context": text[:70],
-                    "ref": index,
-                }
+                _bind_figure(
+                    text=text,
+                    match_text=match.group(0).strip(),
+                    value=amount * scale,
+                    unit="money",
+                    symbol=match.group(1) or "",
+                    match_start=match.start(),
+                    match_end=match.end(),
+                    ref=index,
+                    queried_entities=queried_entities,
+                    scale=scale,
+                )
             )
         for match in _FIGURE_PERCENT_RE.finditer(text):
             figures.append(
-                {
-                    "text": match.group(0).strip(),
-                    "value": float(match.group(1).replace(",", "")),
-                    "unit": "percent",
-                    "context": text[:70],
-                    "ref": index,
-                }
+                _bind_figure(
+                    text=text,
+                    match_text=match.group(0).strip(),
+                    value=float(match.group(1).replace(",", "")),
+                    unit="percent",
+                    symbol="",
+                    match_start=match.start(),
+                    match_end=match.end(),
+                    ref=index,
+                    queried_entities=queried_entities,
+                    scale=1.0,
+                )
             )
     ordered: list = []
     for figure in figures:
@@ -1090,6 +1253,167 @@ def _figures_from_snippets(snippets: Optional[list]) -> list:
             seen.add(figure["text"])
             ordered.append(figure)
     return ordered[:_SYNTH_FIGURES_MAX]
+
+
+# Semantic-binding patterns for snippet figures (all generic, topic-free).
+_FIGURE_CONTEXT_CHARS = 200
+_FIGURE_FREQUENCY_RE = re.compile(
+    r"\b(annual\w*|yearly|quarterly|monthly|weekly|daily|"
+    r"per\s+(year|quarter|month|week|day))\b",
+    re.IGNORECASE,
+)
+_FIGURE_YEAR_RE = re.compile(
+    r"\b((?:F\.?\s*Y\.?\s*)?20\d{2}|fiscal\s+(?:year\s+)?20\d{2})\b",
+    re.IGNORECASE,
+)
+_FIGURE_CURRENCY_WORD_RE = re.compile(
+    r"\b(USD|US\s*dollars?|CNY|RMB|yuan|JPY|yen|EUR|euros?|INR|rupees?|"
+    r"GBP|pounds?|dollars?)\b",
+    re.IGNORECASE,
+)
+_FIGURE_SUBJECT_RE = re.compile(r"^\s*([A-Z][\w&.\-]*(?:\s+[A-Z][\w&.\-]*){0,2})")
+
+
+def _fallback_subject(window: str) -> Optional[str]:
+    """Leading capitalized subject of a snippet window ("Acme raised ..." ->
+    "Acme"). Used ONLY when the query names no known entities; otherwise an
+    unattributed figure stays unattributed (strict path)."""
+    match = _FIGURE_SUBJECT_RE.search(window or "")
+    if not match:
+        return None
+    candidate = " ".join(match.group(1).split())
+    if len(candidate) < 2:
+        return None
+    return candidate
+
+
+def _bind_figure(
+    *,
+    text: str,
+    match_text: str,
+    value: float,
+    unit: str,
+    symbol: str,
+    match_start: int,
+    match_end: int,
+    ref: int,
+    queried_entities: list,
+    scale: Optional[float] = None,
+) -> dict:
+    """Attach semantic binding to one raw figure (Phase 4/5, hardened H2/H3).
+
+    Contract:
+    - Display `context` stays a short 200-char window around the match.
+    - Semantic binding (WHO/WHAT/WHEN/UNIT/CURRENCY/DEFINITION) NEVER uses
+      that truncated window: entity/metric/currency/period/frequency are
+      resolved against the FULL snippet text (plus a wide ±1000-char
+      fallback), so a metric cue 300 chars away still binds correctly.
+    - Every figure records WHO/WHAT/WHEN/UNIT/CURRENCY/DEFINITION with
+      explicit fields; comparison_eligible follows the strict H2 contract
+      (entity + specific metric + numeric value + unit + explicit ISO
+      currency for money + definition + source_type). Raw figures are
+      always preserved -- ineligible means prose-only, never dropped.
+    """
+    # Display window (short, human-readable citation context).
+    before = max(0, match_start - 120)
+    after = min(len(text), match_end + 80)
+    window = " ".join(text[before:after].split())
+    if len(window) > _FIGURE_CONTEXT_CHARS:
+        window = window[:_FIGURE_CONTEXT_CHARS]
+    # Binding scope: the FULL snippet text (never truncated before binding).
+    # A wide local window is checked first for precision, then the full
+    # text as recall backstop so distant cues still bind.
+    wide_before = max(0, match_start - 1000)
+    wide_after = min(len(text), match_end + 1000)
+    wide_scope = " ".join(text[wide_before:wide_after].split())
+    full_scope = " ".join(str(text or "").split())
+    entity: Optional[str] = None
+    try:
+        if figure_entity_label is not None:
+            entity = figure_entity_label(wide_scope, queried_entities or [])
+            if entity is None:
+                entity = figure_entity_label(full_scope, queried_entities or [])
+    except Exception:
+        entity = None
+    if entity is None and not queried_entities:
+        # No known entities in play: fall back to the window's own subject
+        # so "Acme raised $X" vs "Globex sold for $Y" stay attributable.
+        entity = _fallback_subject(window) or _fallback_subject(wide_scope)
+    metric: Optional[str] = None
+    try:
+        if figure_metric_label is not None:
+            metric = figure_metric_label(wide_scope) or figure_metric_label(full_scope)
+    except Exception:
+        metric = None
+    currency: Optional[str] = None
+    if unit == "money":
+        try:
+            word_match = _FIGURE_CURRENCY_WORD_RE.search(wide_scope) or _FIGURE_CURRENCY_WORD_RE.search(full_scope)
+            if normalize_currency is not None:
+                currency = normalize_currency(
+                    symbol or None,
+                    word_match.group(1) if word_match else None,
+                )
+        except Exception:
+            currency = None
+    period_start: Optional[str] = None
+    period_end: Optional[str] = None
+    try:
+        years = [match.group(1) for match in _FIGURE_YEAR_RE.finditer(wide_scope)]
+        if not years:
+            years = [match.group(1) for match in _FIGURE_YEAR_RE.finditer(full_scope)]
+        if years:
+            period_start = years[0]
+            period_end = years[-1]
+    except Exception:
+        pass
+    frequency: Optional[str] = None
+    try:
+        freq_match = _FIGURE_FREQUENCY_RE.search(wide_scope) or _FIGURE_FREQUENCY_RE.search(full_scope)
+        if freq_match:
+            frequency = freq_match.group(1).lower()
+    except Exception:
+        pass
+    # Definition: the specific metric cue IS the definition when no
+    # separate definition phrase exists (funding vs startup_cost vs
+    # revenue vs cost are different definitions and must never equate).
+    definition: Optional[str] = str(metric) if metric else None
+    resolved_scale: Optional[float] = None
+    try:
+        resolved_scale = float(scale) if scale is not None else 1.0
+    except (TypeError, ValueError):
+        resolved_scale = 1.0
+    candidate = {
+        "text": match_text,
+        "value": value,
+        "unit": unit,
+        "context": window,
+        "full_context": full_scope[:2000],
+        "ref": ref,
+        "entity": entity,
+        "metric": metric,
+        "currency": currency,
+        "scale": resolved_scale,
+        "period_start": period_start,
+        "period_end": period_end,
+        "frequency": frequency,
+        "definition": definition,
+        "source_type": "snippet",
+        "comparison_eligible": False,
+    }
+    # Strict H2 eligibility (never just entity+metric): money needs an
+    # explicit ISO currency; generic metric labels fail.
+    try:
+        if is_figure_comparison_eligible is not None:
+            eligible, _ = is_figure_comparison_eligible(candidate)
+        else:
+            eligible = bool(entity and metric) and not (
+                unit == "money" and not currency
+            ) and str(metric or "").lower() not in ("money", "currency", "unknown", "")
+        candidate["comparison_eligible"] = bool(eligible)
+    except Exception:
+        candidate["comparison_eligible"] = False
+    return candidate
 
 
 def _figures_table_visual(figures: list) -> Optional[VisualOutput]:
@@ -1108,16 +1432,88 @@ def _figures_table_visual(figures: list) -> Optional[VisualOutput]:
     )
 
 
-def _figures_bar_visual(figures: list) -> Optional[VisualOutput]:
+def _figures_bar_visual(
+    figures: list, query: Optional[str] = None
+) -> Optional[VisualOutput]:
     """Bar chart over same-class figures (money with money, percent with
-    percent) using normalized values; labels carry citation numbers."""
+    percent) using normalized values; labels carry citation numbers.
+
+    Contract (Phase 6/13, hardened H2/H3): on an explicit comparison query
+    ONLY strictly eligible figures (H2 contract) may chart -- untyped
+    figures cannot become comparison evidence -- AND figures with
+    EXPLICITLY different metric cues (funding vs startup_cost, revenue vs
+    cost) never share one bar (the 504999900% root cause). Qualitative
+    (non-comparison) queries keep the legacy leniency (same unit, no
+    explicit metric conflict), since that bar is a cited-amounts
+    illustration, not a like-for-like claim.
+    """
+    pool = list(figures or [])
+    try:
+        if query and is_comparison_query is not None and is_comparison_query(query):
+            eligible = [fig for fig in pool if fig.get("comparison_eligible")]
+            if len(eligible) < 2:
+                logger.info(
+                    "Figures bar blocked: fewer than 2 semantically bound "
+                    "figures for a comparison query."
+                )
+                return None
+            pool = eligible
+            # H3: metric agreement is mandatory for comparison bars, not
+            # just for comparison cards. funding vs startup_cost must not
+            # bar-chart together even when both are eligible on their own.
+            if figures_share_metric is not None:
+                try:
+                    shares, detail = figures_share_metric(pool)
+                except Exception:
+                    shares, detail = True, ""
+                if not shares:
+                    logger.info("Figures bar blocked: %s.", detail)
+                    return None
+            # H5: money bars in KNOWN different currencies never compare.
+            try:
+                known = {
+                    str(fig.get("currency", "") or "").strip().upper()
+                    for fig in pool if fig.get("unit") == "money"
+                }
+                known.discard("")
+                if len(known) > 1:
+                    logger.info(
+                        "Figures bar blocked: mixed currencies %s.", sorted(known)
+                    )
+                    return None
+            except Exception as exc:
+                # Fail-closed: currency check unavailable -> block the bar.
+                logger.warning("Figure currency check failed, blocking bar: %s", exc)
+                return None
+    except Exception as exc:
+        # Fail-closed: eligibility check unavailable -> no comparison bar.
+        logger.warning("Figure eligibility check failed, blocking bar: %s", exc)
+        return None
     by_unit: Dict[str, list] = {}
-    for figure in figures:
+    for figure in pool:
         by_unit.setdefault(figure["unit"], []).append(figure)
     candidates = [group for group in by_unit.values() if len(group) >= 2]
     if not candidates:
         return None
-    group = max(candidates, key=len)
+    # Prefer the largest same-unit group whose metrics agree; a group with
+    # conflicting cues is skipped rather than charted (H3).
+    ordered = sorted(candidates, key=len, reverse=True)
+    group: Optional[list] = None
+    if figures_share_metric is not None:
+        for candidate in ordered:
+            try:
+                shares, _ = figures_share_metric(candidate)
+            except Exception:
+                shares = True
+            if shares:
+                group = candidate
+                break
+        if group is None:
+            logger.info("Figures bar blocked: no metric-agreeing group.")
+            return None
+    else:
+        group = ordered[0]
+    assert group is not None
     unit_word = "amount" if group[0]["unit"] == "money" else "percent"
     return VisualOutput(
         visual_type="graph",
@@ -1199,8 +1595,36 @@ def _comparison_from_figures(
     """
     if not COMPARISON_INTENT_RE.search(query or ""):
         return None
+    # Phase 4/5 contract: raw untyped figures never enter numerical
+    # comparison. Only semantically bound figures (entity AND metric known)
+    # are eligible; the rest stay citable prose in the figures table.
+    pool = [fig for fig in (figures or []) if fig.get("comparison_eligible")]
+    if len(pool) < 2:
+        if figures:
+            logger.info(
+                "Comparison blocked: fewer than 2 semantically bound figures "
+                "(untyped figures cannot become comparison evidence)."
+            )
+        return None
+    # Phase 11: money figures in KNOWN different currencies never compare.
+    try:
+        known_currencies = {
+            str(fig.get("currency", "") or "").strip().upper() for fig in pool
+            if fig.get("unit") == "money"
+        }
+        known_currencies.discard("")
+        if len(known_currencies) > 1:
+            logger.info(
+                "Comparison blocked: mixed figure currencies %s.",
+                sorted(known_currencies),
+            )
+            return None
+    except Exception as exc:
+        # Fail-closed: currency check unavailable -> block comparison.
+        logger.warning("Figure currency check failed, blocking comparison: %s", exc)
+        return None
     by_unit: Dict[str, list] = {}
-    for figure in figures or []:
+    for figure in pool:
         by_unit.setdefault(figure.get("unit"), []).append(figure)
     candidates = [group for group in by_unit.values() if len(group) >= 2]
     if not candidates:
@@ -1214,7 +1638,9 @@ def _comparison_from_figures(
             try:
                 shares, _ = figures_share_metric(candidate)
             except Exception:
-                shares = True
+                # Fail-closed: metric-agreement check unavailable -> skip group.
+                logger.warning("Metric-agreement check failed, skipping group.")
+                continue
             if shares:
                 group = candidate[:6]
                 break
@@ -1251,7 +1677,9 @@ def _comparison_from_figures(
                 return None
             group = attributed[:6]
     except Exception as exc:
-        logger.warning("Figure-entity attribution check failed, keeping group: %s", exc)
+        # Fail-closed: attribution check unavailable -> block comparison.
+        logger.warning("Figure-entity attribution check failed, blocking: %s", exc)
+        return None
     return VisualOutput(
         visual_type="comparison",
         title="Comparison",
@@ -1325,13 +1753,34 @@ def _fundamentals_comparison_visual(
                 )
                 return None
     except Exception as exc:
-        logger.warning("Historical gate check failed, keeping comparison: %s", exc)
+        # Fail-closed: historical gate unavailable -> block snapshot comparison.
+        logger.warning("Historical gate check failed, blocking comparison: %s", exc)
+        return None
     caps = [
         item
         for item in (fundamentals or [])
         if isinstance(item, dict) and isinstance(item.get("market_cap"), (int, float))
     ]
     if len(caps) < 2:
+        return None
+    # Phase 11: market caps in KNOWN different currencies must not compare
+    # as absolutes (CNY 100B next to USD 100B). Unknown currency on any side
+    # passes with the code shown in the label when known.
+    try:
+        known = {
+            str(item.get("currency", "") or "").strip().upper()
+            for item in caps
+        }
+        known.discard("")
+        if len(known) > 1:
+            logger.info(
+                "Snapshot fundamentals comparison blocked: mixed currencies %s.",
+                sorted(known),
+            )
+            return None
+    except Exception as exc:
+        # Fail-closed: currency check unavailable -> block absolutes comparison.
+        logger.warning("Currency check failed, blocking comparison: %s", exc)
         return None
     caps = caps[:6]
     return VisualOutput(
@@ -1446,10 +1895,97 @@ def _visual_numbers_grounded(visual: VisualOutput, snippets: list) -> bool:
     return True
 
 
+def _evidence_numbers(
+    snippets: Optional[list] = None,
+    rows: Optional[Sequence[dict]] = None,
+    price_history: Optional[list] = None,
+    financial_history: Optional[list] = None,
+    market_data: Optional[list] = None,
+    computed_numbers: Optional[dict] = None,
+) -> list[float]:
+    """Every validated numeric value across all evidence channels (P0#13).
+
+    Uniform grounding pool: a displayed number is traceable when it matches
+    any validated evidence value or deterministic computation output --
+    regardless of visual type or channel. Row presence never disables this.
+    """
+    pool: list[float] = []
+    try:
+        for snippet in snippets or []:
+            pool.extend(_parse_scaled_number(str(snippet)))
+    except Exception:
+        pass
+    try:
+        for row in list(rows or [])[:500]:
+            if not isinstance(row, dict):
+                continue
+            for value in row.values():
+                if _is_number(value):
+                    pool.append(float(value))
+                elif isinstance(value, str):
+                    pool.extend(_parse_scaled_number(value))
+    except Exception:
+        pass
+    try:
+        for lst in (list(price_history or []) + list(market_data or [])):
+            if isinstance(lst, dict):
+                for value in list(lst.get("values") or [])[:500]:
+                    if _is_number(value):
+                        pool.append(float(value))
+        for item in list(financial_history or []):
+            if not isinstance(item, dict):
+                continue
+            for block_key in ("revenue", "net_income"):
+                block = (item.get(block_key, {}) or {})
+                if isinstance(block, dict):
+                    for value in list(block.get("values") or [])[:500]:
+                        if _is_number(value):
+                            pool.append(float(value))
+    except Exception:
+        pass
+    try:
+        stack = [computed_numbers or {}]
+        while stack:
+            node = stack.pop()
+            if _is_number(node):
+                pool.append(float(node))
+            elif isinstance(node, dict):
+                stack.extend(node.values())
+            elif isinstance(node, (list, tuple)):
+                stack.extend(node)
+    except Exception:
+        pass
+    return pool
+
+
+def _visual_numbers_grounded_in_pool(visual: VisualOutput, pool: list[float]) -> bool:
+    """True when every number in the visual appears in the evidence pool."""
+    numbers = _iter_visual_numbers(visual.props)
+    if not numbers:
+        return True  # qualitative cards need no grounding
+    if not pool:
+        return False
+    for value in numbers:
+        grounded = any(
+            abs(candidate - value)
+            <= max(1e-6, abs(value) * 0.01, abs(candidate) * 0.01)
+            for candidate in pool
+        )
+        if not grounded:
+            return False
+    return True
+
+
 def drop_ungrounded_visuals(
     visuals: list, snippets: list
 ) -> tuple[list, int]:
-    """Split LLM-proposed visuals into (kept, dropped_count)."""
+    """Split LLM-proposed visuals into (kept, dropped_count).
+
+    Uniform grounding (P0#13): applies to EVERY visual type with numbers --
+    no row-based exemption. Callers with structured evidence should prefer
+    drop_ungrounded_visuals_evidence (full pool); this snippet variant is
+    kept for web-only paths.
+    """
     kept: list = []
     dropped = 0
     for visual in visuals or []:
@@ -1464,8 +2000,50 @@ def drop_ungrounded_visuals(
                     getattr(visual, "title", "")[:60],
                 )
         except Exception as exc:
-            logger.warning("Grounding check failed, keeping visual: %s", exc)
-            kept.append(visual)
+            # Fail-closed: a grounding check that itself throws must drop
+            # the visual, never keep an unverified number.
+            logger.warning("Grounding check failed, dropping visual: %s", exc)
+            dropped += 1
+    return kept, dropped
+
+
+def drop_ungrounded_visuals_evidence(
+    visuals: list,
+    *,
+    snippets: Optional[list] = None,
+    rows: Optional[Sequence[dict]] = None,
+    price_history: Optional[list] = None,
+    financial_history: Optional[list] = None,
+    market_data: Optional[list] = None,
+    computed_numbers: Optional[dict] = None,
+) -> tuple[list, int]:
+    """Uniform grounding across all channels and visual types (P0#13/P0#14).
+
+    No exemptions for row-derived, table, or financial-history visuals: any
+    displayed numeric value must be traceable to validated evidence or a
+    deterministic computation. Fail-closed on checker exceptions.
+    """
+    pool = _evidence_numbers(
+        snippets=snippets, rows=rows, price_history=price_history,
+        financial_history=financial_history, market_data=market_data,
+        computed_numbers=computed_numbers,
+    )
+    kept: list = []
+    dropped = 0
+    for visual in visuals or []:
+        try:
+            if _visual_numbers_grounded_in_pool(visual, pool):
+                kept.append(visual)
+            else:
+                dropped += 1
+                logger.info(
+                    "Dropped ungrounded %s visual '%s' (evidence pool).",
+                    getattr(visual, "visual_type", "?"),
+                    getattr(visual, "title", "")[:60],
+                )
+        except Exception as exc:
+            logger.warning("Grounding check failed, dropping visual: %s", exc)
+            dropped += 1
     return kept, dropped
 
 
@@ -1499,7 +2077,11 @@ def _column_roles(rows: Sequence[dict]) -> Dict[str, Any]:
         present = [value for value in values if value is not None]
         if not present:
             continue
-        if all(_is_number(value) for value in present):
+        numeric_count = sum(1 for value in present if _is_number(value))
+        # A column stays numeric when numbers dominate: isolated
+        # missing/non-numeric cells ("n/a") are skipped downstream, never
+        # 0-filled, and must not demote the whole column to text.
+        if numeric_count >= 2 and numeric_count >= len(present) / 2:
             roles.setdefault("numeric", []).append(column)
         elif sum(1 for value in present if _looks_like_date(value)) >= max(
             2, int(0.6 * len(present))
@@ -1532,35 +2114,67 @@ def _visuals_from_rows(
 
     if roles.get("date") and numeric and len(sample) >= 3:
         date_col = roles["date"]
-        labels = [str(row.get(date_col)) for row in sample]
-        values = [
-            row.get(numeric) if _is_number(row.get(numeric)) else 0 for row in sample
-        ]
-        parts["graph"] = {
-            "visual_type": "graph",
-            "title": f"{numeric} over time",
-            "props": {
-                "chart_type": "line",
-                "labels": labels,
-                "datasets": [{"name": numeric, "values": values}],
-            },
-        }
-        graph_basis = "date"
+        # Missing/non-numeric points are OMITTED (label and value together),
+        # never coerced to literal 0: zero and missing are semantically
+        # different, and a 0 invents a data point the evidence never had.
+        labels: list = []
+        values: list = []
+        for row in sample:
+            cell = row.get(numeric)
+            if not _is_number(cell):
+                continue
+            labels.append(str(row.get(date_col)))
+            values.append(cell)
+        if len(labels) >= 3:
+            parts["graph"] = {
+                "visual_type": "graph",
+                "title": f"{numeric} over time",
+                "props": {
+                    "chart_type": "line",
+                    "labels": labels,
+                    "datasets": [{"name": numeric, "values": values}],
+                },
+            }
+            graph_basis = "date"
     elif roles.get("category") and numeric:
         category_col = roles["category"]
-        buckets: Dict[str, float] = {}
+        # Metric-aware aggregation (P0#17): non-additive metrics (price,
+        # margin, average, median, rate, percent, ratio) must never be
+        # summed. SUM only for additive totals; otherwise AVG (mean of the
+        # bucket), recorded explicitly in the title.
+        _NON_ADDITIVE_RE = re.compile(
+            r"(price|margin|average|avg|median|rate|percent|pct|ratio|"
+            r"pe_ratio|p\/e|score|index)",
+            re.IGNORECASE,
+        )
+        _agg = "AVG" if _NON_ADDITIVE_RE.search(str(numeric)) else "SUM"
+        _bucket_vals: Dict[str, list] = {}
         for row in sample:
             key = str(row.get(category_col))
             value = row.get(numeric)
-            buckets[key] = buckets.get(key, 0) + (value if _is_number(value) else 0)
+            # Non-numeric cells contribute nothing (never +0): a missing
+            # value must not fabricate a zero-height bar or inflate totals.
+            if not _is_number(value):
+                continue
+            _bucket_vals.setdefault(key, []).append(float(value))
+        buckets: Dict[str, float] = {}
+        for key, vals in _bucket_vals.items():
+            if not vals:
+                continue
+            buckets[key] = (
+                round(sum(vals) / len(vals), 2) if _agg == "AVG" else vals[0] + sum(vals[1:])
+            )
         if 2 <= len(buckets) <= 12:
+            _title = f"{numeric} by {category_col}"
+            if _agg == "AVG":
+                _title += " [avg]"
             parts["graph"] = {
                 "visual_type": "graph",
-                "title": f"{numeric} by {category_col}",
+                "title": _title,
                 "props": {
                     "chart_type": "bar",
                     "labels": list(buckets.keys()),
-                    "datasets": [{"name": numeric, "values": list(buckets.values())}],
+                    "datasets": [{"name": f"{numeric} ({_agg})", "values": list(buckets.values())}],
                 },
             }
             graph_basis = "category"
@@ -1624,6 +2238,100 @@ def _visuals_from_rows(
     return [VisualOutput(**visual) for visual in ordered[:3]]
 
 
+def _align_series(
+    series: list, max_points: int = _SYNTH_SERIES_MAX_POINTS
+) -> tuple[list, list]:
+    """Align multi-series timestamps before rendering (Phase 15 contract).
+
+    Never assumes the first series' labels apply to every series: builds the
+    sorted union of all timestamps, maps each series onto it (explicit None
+    for missing observations -- never a neighbor's value, never 0), then
+    downsamples the ALIGNED axis so labels and every dataset stay in lockstep.
+    Returns (labels, datasets). Timestamps normalize to ISO day strings when
+    parseable so "2024-01-01" and "Jan 01" style mixes still align; otherwise
+    raw label text is the key.
+
+    Semantic-channel guard (P0#15/#16): series with different stated
+    metric/definition/frequency/unit/channel are NOT aligned together --
+    the caller must filter first. As defense in depth, an explicit
+    channel marker mismatch (macro vs market) raises instead of unioning.
+    """
+    from datetime import datetime as _datetime
+
+    def _key(label: Any) -> str:
+        text = str(label)
+        for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%b %d", "%b %d, %Y", "%Y/%m/%d"):
+            try:
+                parsed = _datetime.strptime(
+                    text[: len(fmt)] if fmt.startswith("%b") else text[:10], fmt
+                )
+                if fmt == "%b %d":
+                    return f"--{parsed.month:02d}-{parsed.day:02d}"
+                return parsed.date().isoformat()
+            except (ValueError, OverflowError):
+                continue
+        try:
+            return _datetime.fromisoformat(text[:10]).date().isoformat()
+        except (ValueError, TypeError):
+            return text
+
+    # Defense in depth: refuse to union series from different semantic
+    # channels (e.g. FRED macro series mixed into market_data).
+    try:
+        channels = {
+            str((item or {}).get("channel", "") or "").strip().lower()
+            for item in (series or [])
+            if isinstance(item, dict) and str((item or {}).get("channel", "") or "").strip()
+        }
+        if len(channels) > 1:
+            raise ValueError(f"refusing to align semantically different channels {sorted(channels)}")
+        metrics = {
+            str((item or {}).get("metric", "") or "").strip().lower()
+            for item in (series or [])
+            if isinstance(item, dict) and str((item or {}).get("metric", "") or "").strip()
+        }
+        # "close" vs "close" aligns; "close" vs "cpi" never does.
+        _MACRO_METRICS = {"cpi", "inflation", "unemployment", "gdp", "fed_funds", "treasury"}
+        if metrics & _MACRO_METRICS and len(metrics) > 1:
+            raise ValueError(f"refusing to align macro metric with market metric {sorted(metrics)}")
+    except ValueError:
+        raise
+    except Exception:
+        pass
+    union: list[str] = []
+    seen: set[str] = set()
+    display: dict[str, str] = {}
+    per_series: list[dict] = []
+    for item in series:
+        labels_in = list(item.get("labels") or [])
+        values = list(item.get("values") or [])
+        mapping = {_key(label): value for label, value in zip(labels_in, values)}
+        per_series.append(mapping)
+        for label in labels_in:
+            key = _key(label)
+            if key not in seen:
+                seen.add(key)
+                union.append(key)
+                # First-seen original label wins for display, so ISO series
+                # keep ISO labels and month-day series keep month-day labels.
+                display[key] = str(label)
+    union.sort()
+    stride = max(1, len(union) // max_points)
+    keys = union[::stride]
+    labels = [display[key] for key in keys]
+    datasets = []
+    for item, mapping in zip(series, per_series):
+        datasets.append(
+            {
+                "name": str(item.get("entity", item.get("symbol", "series"))),
+                # Explicit None where this series has no observation: the
+                # frontend renders a gap, never a fabricated 0.
+                "values": [mapping.get(key) for key in keys],
+            }
+        )
+    return labels, datasets
+
+
 def _market_graph_visual(market_data: list, query: str) -> Optional[VisualOutput]:
     """Generalized market-series graph (replaces the old one-off hardcoded
     stock chart in the route): any entities, downsampled, neutral title.
@@ -1642,45 +2350,61 @@ def _market_graph_visual(market_data: list, query: str) -> Optional[VisualOutput
             required = decomposed.get("entities", []) or []
             years = decomposed.get("period_years")
             is_comp = decomposed.get("is_comparison", False)
-            # A partial set of series can never chart as the requested
-            # comparison (never a one- or two-company chart for a
-            # three-company ask): every named entity must be present.
+            # Partial-result policy: a validated subset with >=2 entities
+            # may chart (excluded entities stated in prose); only an
+            # insufficient subset (<2) blocks. Never zero-fill the missing.
             if is_comp and len(required) >= 2:
                 have = {
                     str(item.get("entity", "")).strip().lower()
                     for item in entities
                 }
                 want = {str(name).strip().lower() for name in required}
-                if not want.issubset(have):
-                    logger.info(
-                        "Market graph blocked: missing %s for comparison %s.",
-                        sorted(want - have), required,
-                    )
-                    return None
-            # Short-term data cannot satisfy a multi-year request.
+                missing = sorted(want - have)
+                if missing:
+                    if len(have) >= 2:
+                        logger.info(
+                            "Market graph partial: missing %s for %s; "
+                            "charting validated subset.",
+                            missing, required,
+                        )
+                        # Filter to validated subset only (no placeholders).
+                        _have = have
+                        entities = [
+                            item for item in entities
+                            if str(item.get("entity", "")).strip().lower() in _have
+                        ]
+                    else:
+                        logger.info(
+                            "Market graph blocked: missing %s for comparison %s.",
+                            missing, required,
+                        )
+                        return None
+            # Short-term data cannot satisfy a multi-year request. EVERY
+            # series is checked (H9/H14): the first series' span never
+            # stands in for the rest.
             if years and validate_historical_coverage is not None:
-                base_labels = list((entities[0].get("labels") or []))
-                ok, detail = validate_historical_coverage(
-                    labels=base_labels,
-                    period_start=entities[0].get("period_start"),
-                    period_end=entities[0].get("period_end"),
-                    requested_years=years,
-                    values=entities[0].get("values"),
-                )
-                if not ok:
-                    logger.info("Market graph blocked for historical query: %s", detail)
-                    return None
+                for item in entities:
+                    ok, detail = validate_historical_coverage(
+                        labels=list(item.get("labels") or []),
+                        period_start=item.get("period_start"),
+                        period_end=item.get("period_end"),
+                        requested_years=years,
+                        values=item.get("values"),
+                    )
+                    if not ok:
+                        logger.info(
+                            "Market graph blocked for historical query: %s: %s",
+                            item.get("entity"), detail,
+                        )
+                        return None
     except Exception as exc:
-        logger.warning("Market graph gate check failed, keeping graph: %s", exc)
+        # Fail-closed: gate unavailable -> block the graph.
+        logger.warning("Market graph gate check failed, blocking graph: %s", exc)
+        return None
     entities = entities[:4]
     names = [str(item.get("entity", "series")) for item in entities]
-    base_labels = list((entities[0].get("labels") or []))
-    stride = max(1, len(base_labels) // _SYNTH_SERIES_MAX_POINTS)
-    labels = base_labels[::stride]
-    datasets = []
-    for item in entities:
-        values = list(item.get("values") or [])
-        datasets.append({"name": str(item.get("entity", "series")), "values": values[::stride]})
+    # Aligned timestamps: every dataset shares the union axis (Phase 15).
+    labels, datasets = _align_series(entities)
     return VisualOutput(
         visual_type="graph",
         title=f"{', '.join(names)} performance",
@@ -1691,22 +2415,50 @@ def _market_graph_visual(market_data: list, query: str) -> Optional[VisualOutput
 def _price_history_graph_visual(
     price_history: list, query: str, requested_years: Optional[int] = None
 ) -> Optional[VisualOutput]:
-    """Validated multi-year price chart: ALL compared companies, same window.
+    """Validated multi-year price chart over the validated subset.
 
-    Returns None unless at least two entities carry dated multi-year
-    series covering the requested window -- this is the ONLY chart
-    allowed for "last N years" stock performance. Annual data keeps
-    annual points; weekly keeps downsampled weeklies. Never invents.
+    Partial-result policy: charts the validated subset (>=2 entities with
+    dated multi-year coverage) and never zero-fills the missing entity
+    (exclusion stated in prose). Only an insufficient subset (<2) blocks.
+    This is the ONLY chart allowed for "last N years" stock performance.
+    Never invents.
     """
     series = [item for item in (price_history or []) if item.get("values") and item.get("labels")]
     if len(series) < 2:
         return None
     years = requested_years
+    required: list = []
     try:
-        if years is None and decompose_comparison_query is not None:
-            years = (decompose_comparison_query(query or "") or {}).get("period_years")
-    except Exception:
-        pass
+        if decompose_comparison_query is not None:
+            decomposed = decompose_comparison_query(query or "") or {}
+            if years is None:
+                years = decomposed.get("period_years")
+            required = list(decomposed.get("entities", []) or [])
+            # Partial: filter to validated-coverage subset; block only when
+            # fewer than 2 survive. Missing entities are excluded, not filled.
+            if decomposed.get("is_comparison") and len(required) >= 2:
+                have = {
+                    str(item.get("entity", "")).strip().lower() for item in series
+                }
+                want = {str(name).strip().lower() for name in required}
+                missing = sorted(want - have)
+                if missing:
+                    if len(have) >= 2:
+                        logger.info(
+                            "Price-history graph partial: missing %s for %s; "
+                            "charting validated subset.",
+                            missing, required,
+                        )
+                    else:
+                        logger.info(
+                            "Price-history graph blocked: missing %s for %s.",
+                            missing, required,
+                        )
+                        return None
+    except Exception as exc:
+        # Fail-closed: entity check unavailable -> block the chart.
+        logger.warning("Price-history entity check failed, blocking: %s", exc)
+        return None
     if years and validate_historical_coverage is not None:
         for item in series:
             ok, _ = validate_historical_coverage(
@@ -1730,22 +2482,26 @@ def _price_history_graph_visual(
         return None
     series = series[:4]
     names = [str(item.get("entity", item.get("symbol", "series"))) for item in series]
-    base_labels = list(series[0].get("labels") or [])
-    stride = max(1, len(base_labels) // _SYNTH_SERIES_MAX_POINTS)
-    labels = base_labels[::stride]
-    datasets = [
-        {
-            "name": str(item.get("entity", item.get("symbol", "series"))),
-            "values": list(item.get("values") or [])[::stride],
-        }
-        for item in series
-    ]
+    # Aligned timestamps: no series inherits the first series' labels.
+    # Missing observations render as gaps (None), never as a neighbor's
+    # value or 0 (Phase 15).
+    labels, datasets = _align_series(series)
     unit = str(series[0].get("currency", "") or "").strip()
     title = f"{', '.join(names)} stock performance"
     if years:
         title += f" ({years}Y)"
-    if unit:
-        title += f" [{unit}]"
+    try:
+        series_currencies = {
+            str(item.get("currency", "") or "").strip().upper() for item in series
+        }
+        series_currencies.discard("")
+        if len(series_currencies) > 1:
+            title += f" [mixed currencies {sorted(series_currencies)}: compare trends, not levels]"
+        elif unit:
+            title += f" [{unit}]"
+    except Exception:
+        if unit:
+            title += f" [{unit}]"
     return VisualOutput(
         visual_type="graph",
         title=title,
@@ -1754,49 +2510,101 @@ def _price_history_graph_visual(
 
 
 def _financial_history_table_visual(
-    financial_history: list, metric: str = "revenue"
+    financial_history: list, metric: str = "revenue", query: Optional[str] = None,
 ) -> Optional[VisualOutput]:
-    """Annual revenue / net-income table over the validated window.
+    """Annual revenue / net-income table over the validated subset.
 
-    Requires start+end rows for EVERY represented company (never a
-    one- or two-company table for a three-company ask). Values are raw
-    retrieved figures; growth/margin math lives in comparison_stats.
+    Partial-result policy: tables the validated subset (>=2 companies with
+    start+end rows); missing entities are excluded with prose notice, never
+    zero-filled. Values are raw retrieved figures; growth/margin math lives
+    in comparison_stats. Currency shown per row (absolutes in different
+    currencies never like-for-like -- compare deterministic growth %).
     """
     rows: list[list[str]] = []
     by_entity: Dict[str, int] = {}
+    currencies: set[str] = set()
     for item in financial_history or []:
         block = (item or {}).get(metric, {}) if isinstance(item, dict) else None
         if not isinstance(block, dict) or not block.get("values"):
             continue
         entity = str(item.get("entity", item.get("symbol", "entity")))
+        currency = str(
+            block.get("currency", "") or (item or {}).get("currency", "") or ""
+        ).strip().upper()
         labels = list(block.get("labels") or [])
         values = list(block.get("values") or [])
         count = 0
         for label, value in zip(labels, values):
             try:
-                rows.append([entity, str(label)[:10], f"{float(value):,.0f}"])
+                rows.append(
+                    [entity, str(label)[:10], f"{float(value):,.0f}", currency or "?"]
+                )
                 count += 1
             except (TypeError, ValueError):
                 continue
+        if currency:
+            currencies.add(currency)
         by_entity[entity] = by_entity.get(entity, 0) + count
-    # Every company needs start AND end; at least two companies overall.
-    if len(by_entity) < 2 or any(count < 2 for count in by_entity.values()):
+    # Every represented company needs start AND end; at least two overall.
+    # Partial: drop single-point entities, keep the validated subset.
+    by_entity = {k: v for k, v in by_entity.items() if v >= 2}
+    rows = [r for r in rows if r[0] in by_entity]
+    currencies = {r[3] for r in rows if r[3] and r[3] != "?"}
+    if len(by_entity) < 2:
         return None
-    rows = sorted(rows)[:_SYNTH_SOURCES_MAX_ROWS]
-    title = "Annual revenue" if metric == "revenue" else "Annual net income"
+    # Named-comparison partial: validated subset charts; missing named
+    # entities are excluded (prose notice), never zero-filled.
+    if query and decompose_comparison_query is not None:
+        try:
+            required = (decompose_comparison_query(query) or {}).get("entities", []) or []
+            if len(required) >= 2:
+                have = {str(k).strip().lower() for k in by_entity}
+                want = {str(name).strip().lower() for name in required}
+                missing = sorted(want - have)
+                if missing:
+                    if len(have) >= 2:
+                        logger.info(
+                            "Financial table partial: missing %s for %s; "
+                            "tabling validated subset.",
+                            missing, required,
+                        )
+                    else:
+                        logger.info(
+                            "Financial table blocked: missing %s for %s.",
+                            missing, required,
+                        )
+                        return None
+        except Exception as exc:
+            # Fail-closed: entity check unavailable -> block the table.
+            logger.warning("Financial table entity check failed, blocking: %s", exc)
+            return None
+    # Interleaved (never sorted-then-cut): a row cap must cost years, never
+    # a whole company.
+    rows = _interleave_entities(sorted(rows), _SYNTH_FINANCIAL_MAX_ROWS)
+    base = "Annual revenue" if metric == "revenue" else "Annual net income"
+    if len(currencies) == 1:
+        title = f"{base} [{next(iter(currencies))}]"
+    elif len(currencies) > 1:
+        # Mixed currencies: absolutes are NOT comparable -- growth % is.
+        title = (
+            f"{base} [mixed currencies {sorted(currencies)}: compare "
+            "growth %, not absolutes]"
+        )
+    else:
+        title = f"{base} [currency as reported]"
     return VisualOutput(
         visual_type="table",
         title=title,
-        props={"columns": ["Company", "Fiscal year", "Value"], "values": rows},
+        props={"columns": ["Company", "Fiscal year", "Value", "Currency"], "values": rows},
     )
 
 
-def _margin_table_visual(financial_history: list) -> Optional[VisualOutput]:
+def _margin_table_visual(financial_history: list, query: Optional[str] = None) -> Optional[VisualOutput]:
     """Net-profit-margin table (net income / revenue * 100, computed here).
 
-    One comparable profitability metric for every company -- never Tesla
-    margin vs BYD income vs Toyota operating profit. Returns None unless
-    at least two companies have computable margins.
+    One comparable profitability metric for every validated company.
+    Partial: tables the validated subset (>=2 with computable margins);
+    missing entities excluded with prose notice, never zero-filled.
     """
     rows: list[list[str]] = []
     for item in financial_history or []:
@@ -1807,11 +2615,16 @@ def _margin_table_visual(financial_history: list) -> Optional[VisualOutput]:
         inc = (item.get("net_income", {}) or {})
         rev_labels = list(rev.get("labels", []) or [])
         rev_values = list(rev.get("values", []) or [])
+        inc_labels = list(inc.get("labels", []) or [])
         inc_values = list(inc.get("values", []) or [])
         if compute_net_margins is None:
             return None
         try:
-            margins = compute_net_margins(rev_values, inc_values)
+            margins = compute_net_margins(
+                rev_values, inc_values,
+                revenue_labels=rev_labels or None,
+                income_labels=inc_labels or None,
+            )
         except Exception:
             continue
         for label, margin in zip(rev_labels, margins):
@@ -1820,7 +2633,32 @@ def _margin_table_visual(financial_history: list) -> Optional[VisualOutput]:
     entities = {row[0] for row in rows}
     if len(entities) < 2:
         return None
-    rows = sorted(rows)[:_SYNTH_SOURCES_MAX_ROWS]
+    # Named-comparison partial: validated subset tables; missing excluded.
+    if query and decompose_comparison_query is not None:
+        try:
+            required = (decompose_comparison_query(query) or {}).get("entities", []) or []
+            if len(required) >= 2:
+                have = {str(name).strip().lower() for name in entities}
+                want = {str(name).strip().lower() for name in required}
+                missing = sorted(want - have)
+                if missing:
+                    if len(have) >= 2:
+                        logger.info(
+                            "Margin table partial: missing %s for %s; "
+                            "tabling validated subset.",
+                            missing, required,
+                        )
+                    else:
+                        logger.info(
+                            "Margin table blocked: missing %s for %s.",
+                            missing, required,
+                        )
+                        return None
+        except Exception as exc:
+            # Fail-closed: entity check unavailable -> block the table.
+            logger.warning("Margin table entity check failed, blocking: %s", exc)
+            return None
+    rows = _interleave_entities(sorted(rows), _SYNTH_FINANCIAL_MAX_ROWS)
     return VisualOutput(
         visual_type="table",
         title="Net profit margin (net income / revenue)",
@@ -1913,43 +2751,42 @@ def _historical_comparison_gate(
     want = {str(e).strip().lower() for e in entities}
     stats_input: Dict[str, Dict[str, Tuple[Any, Any]]] = {}
     scope_word = f"all {len(entities)}" if len(entities) > 2 else "both"
+    # Partial tracking: per-metric validated subsets (never zero-filled).
+    validated_by_metric: Dict[str, List[str]] = {}
+    excluded_by_metric: Dict[str, List[str]] = {}
 
-    # -- stock performance: multi-year price history for ALL companies --
+    # -- stock performance: multi-year price history (validated subset) --
     if METRIC_STOCK in metrics:
         have = _entities_with_price()
-        if not want.issubset(have):
-            historical_ok = False
+        missing_stock = sorted(want - have)
+        # Coverage-filtered subset: only entities with history + span.
+        covered: List[dict] = []
+        for item in price_history:
+            ok, detail = validate_historical_coverage(
+                labels=list(item.get("labels") or []),
+                period_start=item.get("period_start"),
+                period_end=item.get("period_end"),
+                requested_years=years,
+                values=item.get("values"),
+            )
+            if not ok:
+                details.append(f"{item.get('entity')}: {detail}")
+            else:
+                covered.append(item)
+        if missing_stock:
             details.append(
-                f"stock price history missing for {sorted(want - have)} "
+                f"stock price history missing for {missing_stock} "
                 f"(have {sorted(have)})."
             )
-            comparison_ok = False
-            comp_details.append(f"stock comparison lacks {scope_word} companies.")
-        else:
-            per_entity_ok = True
-            for item in price_history:
-                ok, detail = validate_historical_coverage(
-                    labels=list(item.get("labels") or []),
-                    period_start=item.get("period_start"),
-                    period_end=item.get("period_end"),
-                    requested_years=years,
-                    values=item.get("values"),
-                )
-                if not ok:
-                    per_entity_ok = False
-                    details.append(f"{item.get('entity')}: {detail}")
-            if not per_entity_ok:
-                historical_ok = False
-                comparison_ok = False
-                comp_details.append("stock series lack 3-year coverage.")
-            else:
-                # Like-for-like across price series.
-                ev = []
-                for item in price_history:
-                    vals = list(item.get("values") or [])
-                    labs = list(item.get("labels") or [])
-                    if ComparisonEvidence is None:
-                        continue
+        if len(covered) >= 2:
+            # Like-for-like among the COVERED subset only (not all requested).
+            ev = []
+            for item in covered:
+                vals = list(item.get("values") or [])
+                labs = list(item.get("labels") or [])
+                if ComparisonEvidence is None:
+                    continue
+                try:
                     ev.append(ComparisonEvidence(
                         entity=str(item.get("entity", "")),
                         metric=METRIC_STOCK,
@@ -1963,123 +2800,238 @@ def _historical_comparison_gate(
                         source_url=f"https://finance.yahoo.com/quote/{item.get('symbol', '')}/history/",
                         is_historical=True,
                     ))
-                ok, detail = validate_comparison(ev, expected_entities=entities, expected_metric=METRIC_STOCK)
-                if not ok:
-                    comparison_ok = False
-                    comp_details.append(f"stock: {detail}")
-                else:
-                    for item in price_history:
-                        vals = list(item.get("values") or [])
-                        stats_input.setdefault(str(item.get("entity", "")), {})[METRIC_STOCK] = (vals[0], vals[-1])
+                except (TypeError, ValueError):
+                    continue
+            # Validate subset like-for-like (no expected_entities=all gate).
+            subset_names = [str(item.get("entity", "")) for item in covered]
+            ok, detail = validate_comparison(ev, expected_entities=subset_names, expected_metric=METRIC_STOCK,
+                                             enforce_currency=False) if len(ev) >= 2 else (False, "fewer than 2 stock series")
+            if not ok:
+                comp_details.append(f"stock: {detail}")
+            else:
+                for item in covered:
+                    vals = list(item.get("values") or [])
+                    stats_input.setdefault(str(item.get("entity", "")), {})[METRIC_STOCK] = (vals[0], vals[-1])
+                validated_by_metric[METRIC_STOCK] = [str(i.get("entity", "")) for i in covered]
+        else:
+            comp_details.append(f"stock comparison lacks {scope_word} companies (only {len(covered)} validated).")
+        # Excluded for this metric: requested minus validated.
+        _validated_lower = {str(e).strip().lower() for e in validated_by_metric.get(METRIC_STOCK, [])}
+        excluded_by_metric[METRIC_STOCK] = [e for e in entities if str(e).strip().lower() not in _validated_lower]
 
-    # -- revenue growth: annual revenue history for ALL companies --
+    # -- revenue growth: annual revenue history (validated subset) --
     if METRIC_REVENUE in metrics:
         have = _entities_with_fin("revenue")
-        if not want.issubset(have):
-            historical_ok = False
-            details.append(
-                f"annual revenue history missing for {sorted(want - have)}."
-            )
-            comparison_ok = False
-            comp_details.append(f"revenue comparison lacks {scope_word} companies.")
-        else:
+        missing_rev = sorted(want - have)
+        if missing_rev:
+            details.append(f"annual revenue history missing for {missing_rev}.")
+        # Subset with 2+ annual points.
+        rev_covered = []
+        for item in financial_history:
+            chunk = item.get("revenue", {})
+            vals = list(chunk.get("values") or [])
+            if len(vals) >= 2:
+                rev_covered.append(item)
+            else:
+                details.append(f"{item.get('entity')}: need 2+ annual revenue points.")
+        if len(rev_covered) >= 2:
             ev = []
-            for item in financial_history:
+            for item in rev_covered:
                 chunk = item.get("revenue", {})
                 labs = list(chunk.get("labels") or [])
                 vals = list(chunk.get("values") or [])
-                if len(vals) < 2:
-                    historical_ok = False
-                    details.append(f"{item.get('entity')}: need 2+ annual revenue points.")
-                    comparison_ok = False
-                    continue
                 if ComparisonEvidence is not None:
-                    ev.append(ComparisonEvidence(
-                        entity=str(item.get("entity", "")),
-                        metric=METRIC_REVENUE,
-                        value=float(vals[-1]),
-                        unit="currency",
-                        period_start=str(labs[0]) if labs else None,
-                        period_end=str(labs[-1]) if labs else None,
-                        frequency="annual",
-                        definition=str(chunk.get("metric", "annualTotalRevenue")),
-                        source="Yahoo Finance",
-                        source_url=f"https://finance.yahoo.com/quote/{item.get('symbol', '')}/financials/",
-                        is_historical=True,
-                    ))
-            if ev:
-                ok, detail = validate_comparison(ev, expected_entities=entities, expected_metric=METRIC_REVENUE)
-                if not ok:
-                    comparison_ok = False
-                    comp_details.append(f"revenue: {detail}")
-                else:
-                    for item in financial_history:
-                        vals = list((item.get("revenue", {}) or {}).get("values") or [])
-                        if len(vals) >= 2:
-                            stats_input.setdefault(str(item.get("entity", "")), {})[METRIC_REVENUE] = (vals[0], vals[-1])
+                    _ccy = str(
+                            chunk.get("currency", "") or item.get("currency", "") or ""
+                        ).strip().upper() or None
+                    try:
+                        ev.append(ComparisonEvidence(
+                            entity=str(item.get("entity", "")),
+                            metric=METRIC_REVENUE,
+                            value=float(vals[-1]),
+                            unit=_ccy or "currency",
+                            period_start=str(labs[0]) if labs else None,
+                            period_end=str(labs[-1]) if labs else None,
+                            frequency="annual",
+                            definition=str(chunk.get("metric", "annualTotalRevenue")),
+                            source="Yahoo Finance",
+                            source_url=f"https://finance.yahoo.com/quote/{item.get('symbol', '')}/financials/",
+                            is_historical=True,
+                            currency=_ccy,
+                            source_type="yahoo" if item.get("provenance") != "web_snippets" else "web_snippets",
+                            provenance=str(item.get("provenance", "") or "") or None,
+                        ))
+                    except (TypeError, ValueError):
+                        continue
+            subset_names = [str(item.get("entity", "")) for item in rev_covered]
+            ok, detail = validate_comparison(ev, expected_entities=subset_names, expected_metric=METRIC_REVENUE,
+                                       enforce_currency=False) if len(ev) >= 2 else (False, "fewer than 2 revenue series")
+            if not ok:
+                comp_details.append(f"revenue: {detail}")
+            else:
+                for item in rev_covered:
+                    vals = list((item.get("revenue", {}) or {}).get("values") or [])
+                    if len(vals) >= 2:
+                        stats_input.setdefault(str(item.get("entity", "")), {})[METRIC_REVENUE] = (vals[0], vals[-1])
+                validated_by_metric[METRIC_REVENUE] = [str(i.get("entity", "")) for i in rev_covered]
+        else:
+            comp_details.append(f"revenue comparison lacks {scope_word} companies (only {len(rev_covered)} validated).")
+        _validated_lower = {str(e).strip().lower() for e in validated_by_metric.get(METRIC_REVENUE, [])}
+        excluded_by_metric[METRIC_REVENUE] = [e for e in entities if str(e).strip().lower() not in _validated_lower]
 
-    # -- profitability: ONE shared annual metric for ALL companies --
+    # -- profitability: ONE shared annual metric (validated subset) --
     # (net profit margin = net income / revenue * 100, computed in code).
     if METRIC_PROFIT in metrics:
         have = _entities_with_fin("net_income")
-        if not want.issubset(have):
-            historical_ok = False
-            details.append(
-                f"annual profitability history missing for {sorted(want - have)}."
-            )
-            comparison_ok = False
-            comp_details.append(f"profitability comparison lacks {scope_word} companies.")
-        else:
+        missing_prof = sorted(want - have)
+        if missing_prof:
+            details.append(f"annual profitability history missing for {missing_prof}.")
+        prof_covered = []
+        for item in financial_history:
+            chunk = item.get("net_income", {})
+            vals = list(chunk.get("values") or [])
+            if len(vals) >= 2:
+                prof_covered.append(item)
+            else:
+                details.append(f"{item.get('entity')}: need 2+ annual profit points.")
+        if len(prof_covered) >= 2:
             ev = []
-            for item in financial_history:
+            for item in prof_covered:
                 chunk = item.get("net_income", {})
                 labs = list(chunk.get("labels") or [])
                 vals = list(chunk.get("values") or [])
-                if len(vals) < 2:
-                    historical_ok = False
-                    details.append(f"{item.get('entity')}: need 2+ annual profit points.")
-                    comparison_ok = False
-                    continue
                 if ComparisonEvidence is not None:
-                    ev.append(ComparisonEvidence(
-                        entity=str(item.get("entity", "")),
-                        metric=METRIC_PROFIT,
-                        value=float(vals[-1]),
-                        unit="currency",
-                        period_start=str(labs[0]) if labs else None,
-                        period_end=str(labs[-1]) if labs else None,
-                        frequency="annual",
-                        definition=str(chunk.get("metric", "annualNetIncome")),
-                        source="Yahoo Finance",
-                        source_url=f"https://finance.yahoo.com/quote/{item.get('symbol', '')}/financials/",
-                        is_historical=True,
-                    ))
-            if ev:
-                ok, detail = validate_comparison(ev, expected_entities=entities, expected_metric=METRIC_PROFIT)
-                if not ok:
-                    comparison_ok = False
-                    comp_details.append(f"profitability: {detail}")
-                else:
-                    for item in financial_history:
-                        vals = list((item.get("net_income", {}) or {}).get("values") or [])
-                        if len(vals) >= 2:
-                            stats_input.setdefault(str(item.get("entity", "")), {})[METRIC_PROFIT] = (vals[0], vals[-1])
+                    _ccy2 = str(
+                            chunk.get("currency", "") or item.get("currency", "") or ""
+                        ).strip().upper() or None
+                    try:
+                        ev.append(ComparisonEvidence(
+                            entity=str(item.get("entity", "")),
+                            metric=METRIC_PROFIT,
+                            value=float(vals[-1]),
+                            unit=_ccy2 or "currency",
+                            period_start=str(labs[0]) if labs else None,
+                            period_end=str(labs[-1]) if labs else None,
+                            frequency="annual",
+                            definition=str(chunk.get("metric", "annualNetIncome")),
+                            source="Yahoo Finance",
+                            source_url=f"https://finance.yahoo.com/quote/{item.get('symbol', '')}/financials/",
+                            is_historical=True,
+                            currency=_ccy2,
+                            source_type="yahoo" if item.get("provenance") != "web_snippets" else "web_snippets",
+                            provenance=str(item.get("provenance", "") or "") or None,
+                        ))
+                    except (TypeError, ValueError):
+                        continue
+            subset_names = [str(item.get("entity", "")) for item in prof_covered]
+            ok, detail = validate_comparison(ev, expected_entities=subset_names, expected_metric=METRIC_PROFIT,
+                                       enforce_currency=False) if len(ev) >= 2 else (False, "fewer than 2 profit series")
+            if not ok:
+                comp_details.append(f"profitability: {detail}")
+            else:
+                for item in prof_covered:
+                    vals = list((item.get("net_income", {}) or {}).get("values") or [])
+                    if len(vals) >= 2:
+                        stats_input.setdefault(str(item.get("entity", "")), {})[METRIC_PROFIT] = (vals[0], vals[-1])
+                validated_by_metric[METRIC_PROFIT] = [str(i.get("entity", "")) for i in prof_covered]
+        else:
+            comp_details.append(f"profitability comparison lacks {scope_word} companies (only {len(prof_covered)} validated).")
+        _validated_lower = {str(e).strip().lower() for e in validated_by_metric.get(METRIC_PROFIT, [])}
+        excluded_by_metric[METRIC_PROFIT] = [e for e in entities if str(e).strip().lower() not in _validated_lower]
 
     # A 1-month market_data series present WITHOUT price history is the
     # exact live failure: flag it explicitly, never let it satisfy history.
+    # It invalidates the STOCK metric subset (other metrics may still be
+    # sufficient for a partial answer).
     if not price_history and (market_data or []) and METRIC_STOCK in metrics:
-        historical_ok = False
         details.append(
             "only a short-term (one-month) price series is available; "
             "it cannot satisfy a multi-year request."
         )
-        comparison_ok = False
+        comp_details.append("stock: short-term series cannot satisfy history.")
+        validated_by_metric.pop(METRIC_STOCK, None)
+        excluded_by_metric[METRIC_STOCK] = list(entities)
 
+    # Partial sufficiency: at least one requested metric with >=2 validated
+    # entities whose subset passed like-for-like. Missing entities/metrics
+    # are excluded with reasons, never zero-filled.
+    validated_metrics = sorted(validated_by_metric.keys())
+    validated_entities_union = sorted({
+        e for ents in validated_by_metric.values() for e in ents
+    })
+    sufficient = bool(validated_metrics and len(validated_entities_union) >= 2)
+    # Historical/comparison verdicts describe the VALIDATED SUBSET, not the
+    # full request: True when sufficient, False only when insufficient.
+    historical_ok = bool(sufficient)
+    comparison_ok = bool(sufficient)
+    # Preserve explicit subset failures (e.g. mixed frequencies) as not-ok.
+    # If every validated subset failed validation, validated_by_metric would
+    # be empty and sufficient False -- already covered.
     gate["historical_ok"] = historical_ok
     gate["historical_detail"] = " ".join(details)
     gate["comparison_ok"] = comparison_ok
     gate["comparison_detail"] = " ".join(comp_details)
+    gate["validated_entities"] = validated_entities_union
+    gate["validated_metrics"] = validated_metrics
+    gate["validated_by_metric"] = {k: list(v) for k, v in validated_by_metric.items()}
+    gate["excluded_by_metric"] = {k: list(v) for k, v in excluded_by_metric.items()}
+    # Union excluded entities: requested minus validated union.
+    _val_lower = {str(e).strip().lower() for e in validated_entities_union}
+    gate["excluded_entities"] = [
+        e for e in entities if str(e).strip().lower() not in _val_lower
+    ]
+    _any_metric_excluded = any(
+        bool(v) for v in (excluded_by_metric or {}).values()
+    )
+    gate["partial"] = bool(sufficient and (
+        len(gate["excluded_entities"]) > 0
+        or _any_metric_excluded
+        or len(validated_metrics) < len([m for m in metrics if m in (METRIC_STOCK, METRIC_REVENUE, METRIC_PROFIT)])
+    ))
+    # Currency transparency (Phase 11): growth % and net margins are
+    # currency-invariant (per-entity math), but absolute values in KNOWN
+    # different currencies must never be read as like-for-like. Record the
+    # mix for assumptions/table titles; absolute-value outputs enforce it.
+    currency_sets: Dict[str, set] = {}
+    try:
+        for item in price_history:
+            code = str(item.get("currency", "") or "").strip().upper()
+            if code:
+                currency_sets.setdefault("stock", set()).add(code)
+        for item in financial_history:
+            for block_key in ("revenue", "net_income"):
+                block = (item or {}).get(block_key, {}) or {}
+                code = str(
+                    block.get("currency", "") or item.get("currency", "") or ""
+                ).strip().upper()
+                if code:
+                    currency_sets.setdefault(block_key, set()).add(code)
+    except Exception:
+        pass
+    mixed = {key: sorted(codes) for key, codes in currency_sets.items() if len(codes) > 1}
+    gate["currency_mixed"] = mixed
+    gate["currency_detail"] = (
+        "Reported currencies differ across companies "
+        f"{mixed}: growth % and net margins compare currency-invariant; "
+        "absolute values do not compare without explicit FX conversion."
+        if mixed else ""
+    )
     gate["blocked"] = not (historical_ok and comparison_ok)
+    # Exclusion transparency for partial answers (never silent).
+    try:
+        _excluded_bits: List[str] = []
+        for metric, excluded in (excluded_by_metric or {}).items():
+            if excluded:
+                _excluded_bits.append(f"{metric}: excluded {excluded}")
+        gate["exclusion_note"] = (
+            "Partial evidence: validated "
+            f"{validated_entities_union} for {validated_metrics}; "
+            f"excluded {gate.get('excluded_entities', [])} "
+            f"({'; '.join(_excluded_bits)}).".strip()
+            if gate.get("partial") else ""
+        )
+    except Exception:
+        gate["exclusion_note"] = ""
     if gate["blocked"] and insufficient_reason is not None:
         try:
             gate["blocked_reason"] = insufficient_reason(
@@ -2140,6 +3092,8 @@ def _historical_comparison_gate(
                 + "); growth compares each company's latest vs earliest "
                 "completed annual period in-window."
             )
+            if gate.get("currency_detail"):
+                period_basis += " " + str(gate["currency_detail"])
             gate["comparison_stats"] = compute_comparison_stats(
                 stats_input,
                 latest_margins or None,
@@ -2150,6 +3104,727 @@ def _historical_comparison_gate(
             logger.warning("Comparison stats failed: %s", exc)
             gate["comparison_stats"] = None
     return gate
+
+
+def _fail_closed_gate(query: str, reason: str) -> Dict[str, Any]:
+    """Blocked gate for when correctness validation itself throws.
+
+    Fail-closed: a validator exception must BLOCK comparison/chart, never
+    continue with existing visuals. `applies` is derived from a guarded
+    decomposition so non-comparison queries (own-data rows, sentiment
+    prose) keep their normal path; comparison queries get applies=True,
+    blocked=True with the failure recorded as the blocked reason.
+    """
+    entities: list = []
+    metrics: list = []
+    years: Optional[int] = None
+    applies = False
+    try:
+        if decompose_comparison_query is not None:
+            decomposed = decompose_comparison_query(query or "") or {}
+            entities = list(decomposed.get("entities", []) or [])
+            metrics = list(decomposed.get("metrics", []) or [])
+            years = decomposed.get("period_years")
+            applies = bool(decomposed.get("is_comparison")) and len(entities) >= 2
+    except Exception:
+        applies = False
+    return {
+        "applies": applies,
+        "blocked": True if applies else False,
+        "blocked_reason": str(reason or "")[:500],
+        "entities": entities,
+        "metrics": metrics,
+        "years": years,
+        "historical_ok": False,
+        "historical_detail": str(reason or "")[:300],
+        "comparison_ok": False,
+        "comparison_detail": str(reason or "")[:300],
+        "comparison_stats": None,
+        "validation_failed": True,
+    }
+
+
+def log_runtime_trace(trace: Dict[str, Any]) -> None:
+    """Emit one safe structured runtime-trace line (H15)."
+
+    Never logs payloads, keys, tokens, or rows -- only the trace contract
+    (counts, names, gate verdict, confidence). Safe to leave on in prod.
+    """
+    try:
+        if format_runtime_trace is not None:
+            logger.info("RUNTIME TRACE %s", format_runtime_trace(trace))
+        else:
+            logger.info(
+                "RUNTIME TRACE query=%r gate=%s visuals=%s confidence=%s",
+                str((trace or {}).get("query", ""))[:120],
+                (trace or {}).get("comparison_gate"),
+                (trace or {}).get("visual_decision"),
+                (trace or {}).get("final_confidence"),
+            )
+    except Exception as exc:
+        logger.warning("Runtime trace log failed: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Visual provenance contract + single validated-evidence state + staleness.
+# Every visual carries requested intent, entities, metric, units, timeframe,
+# frequency, evidence/source IDs, data points, computation IDs. Before
+# rendering, the visual's data must match the answer's validated evidence;
+# entity/metric/timeframe/units/source/value mismatches or a different
+# semantic intent reject the visual (fail closed). What-if queries never
+# reuse market-history charts; follow-ups regenerate when entity/metric/
+# period/intent changes.
+# ---------------------------------------------------------------------------
+_WHAT_IF_RE = re.compile(
+    r"\bwhat\s+(?:\w+\s+){0,4}if\b|\bscenario\b|\bassume\b.*\b(grow|drop|rise|fall|increase|decrease)",
+    re.IGNORECASE,
+)
+
+
+def is_what_if_query(query: str) -> bool:
+    """True for what-if / scenario intent (generic, not price-only)."""
+    try:
+        from app.services.data.stats import parse_what_if as _parse_wif
+
+        if _parse_wif(query or "") is not None:
+            return True
+    except Exception:
+        pass
+    return bool(_WHAT_IF_RE.search(query or ""))
+
+
+def _visual_intent(query: str) -> str:
+    """Requested semantic intent: what_if | historical_comparison | comparison | rows | qualitative."""
+    q = query or ""
+    if is_what_if_query(q):
+        return "what_if"
+    try:
+        if decompose_comparison_query is not None:
+            d = decompose_comparison_query(q) or {}
+            if d.get("is_comparison") and d.get("requires_history"):
+                return "historical_comparison"
+            if d.get("is_comparison"):
+                return "comparison"
+    except Exception:
+        pass
+    if re.search(CHART_INTENT_RE, q, re.IGNORECASE):
+        return "chart"
+    return "qualitative"
+
+
+def build_visual_provenance(
+    *,
+    query: str,
+    entities: Sequence[str],
+    metric: Optional[str] = None,
+    units: Optional[str] = None,
+    timeframe: Optional[str] = None,
+    frequency: Optional[str] = None,
+    source_ids: Optional[Sequence[str]] = None,
+    computation_ids: Optional[Sequence[str]] = None,
+    data_points: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Provenance payload attached to every synthesized visual."""
+    try:
+        time_label = timeframe
+        if time_label is None and decompose_comparison_query is not None:
+            d = decompose_comparison_query(query or "") or {}
+            time_label = d.get("period_label")
+    except Exception:
+        time_label = timeframe
+    return {
+        "intent": _visual_intent(query),
+        "entities": list(entities or []),
+        "metric": metric,
+        "units": units,
+        "timeframe": time_label,
+        "frequency": frequency,
+        "source_ids": list(source_ids or []),
+        "computation_ids": list(computation_ids or []),
+        "data_points": data_points,
+    }
+
+
+def attach_provenance(visual: VisualOutput, provenance: Dict[str, Any]) -> VisualOutput:
+    """Attach provenance to a visual (mutates and returns it)."""
+    try:
+        visual.provenance = dict(provenance or {})
+    except Exception:
+        pass
+    return visual
+
+
+def compute_structured_what_if(
+    financial_history: Optional[list], query: str
+) -> Optional[Dict[str, Any]]:
+    """Deterministic what-if scenario from validated financial history.
+
+    Generic across arbitrary entities: extracts a signed percent from the
+    query ("grow 10%", "drop 5%", "increase by 12%") and scales each
+    entity's latest annual revenue by that factor (quantity-unaffected
+    assumption, same as the row-level what-if). Returns a single aggregate
+    scenario (baseline_total / scenario_total / delta + per-entity table)
+    for narration to quote verbatim -- never LLM arithmetic. None when no
+    percent or no revenue history. Pure.
+    """
+    try:
+        text = query or ""
+        pct_match = re.search(r"(\d+(?:\.\d+)?)\s?%", text)
+        if not pct_match:
+            return None
+        try:
+            pct = float(pct_match.group(1))
+        except (TypeError, ValueError):
+            return None
+        # Direction from surrounding words; bare "change 10%" defaults up.
+        span = text[max(0, pct_match.start() - 60):pct_match.end() + 20]
+        down = bool(re.search(
+            r"\b(lower|drop\w*|decreas\w*|down|cut\w*|reduc\w*|less|fewer|fall\w*|declin\w*)\b",
+            span, re.IGNORECASE,
+        ))
+        up = bool(re.search(
+            r"\b(rais\w*|ris\w*|rose|increas\w*|up|higher|hik\w*|more|grow\w*|gain\w*)\b",
+            span, re.IGNORECASE,
+        ))
+        if down and not up:
+            pct = -pct
+        if pct == 0:
+            return None
+        factor = 1.0 + pct / 100.0
+        if factor <= 0:
+            return None
+        per_entity: Dict[str, Dict[str, float]] = {}
+        baseline_total = 0.0
+        for item in (financial_history or []):
+            if not isinstance(item, dict):
+                continue
+            entity = str(item.get("entity", item.get("symbol", "")) or "").strip()
+            if not entity:
+                continue
+            chunk = (item.get("revenue", {}) or {})
+            vals = list(chunk.get("values") or [])
+            if not vals:
+                continue
+            try:
+                latest = float(vals[-1])
+            except (TypeError, ValueError):
+                continue
+            scenario = latest * factor
+            per_entity[entity] = {
+                "baseline": round(latest, 2),
+                "scenario": round(scenario, 2),
+                "delta": round(scenario - latest, 2),
+            }
+            baseline_total += latest
+        if not per_entity:
+            return None
+        scenario_total = round(baseline_total * factor, 2)
+        baseline_total = round(baseline_total, 2)
+        return {
+            "target": "revenue",
+            "pct_change": pct,
+            "factor": round(factor, 4),
+            "baseline_total": baseline_total,
+            "scenario_total": scenario_total,
+            "delta": round(scenario_total - baseline_total, 2),
+            "per_entity": per_entity,
+            "basis": "latest annual revenue per entity scaled by the scenario factor",
+            "assumption": (
+                "Assumes quantity/mix unaffected by the change "
+                "(no elasticity modeled)."
+            ),
+        }
+    except Exception as exc:
+        logger.warning("Structured what-if failed: %s", exc)
+        return None
+
+
+def _visual_entities(visual: VisualOutput) -> List[str]:
+    """Entities a visual claims (datasets/groups/labels), lowercased."""
+    out: List[str] = []
+    try:
+        props = visual.props or {}
+        for ds in (props.get("datasets") or []):
+            name = str((ds or {}).get("name", "") or "").strip()
+            if name and name.lower() not in ("amount", "percent", "value", "series"):
+                out.append(name)
+        for grp in (props.get("groups") or []):
+            label = str((grp or {}).get("label", "") or "").strip()
+            # Group labels carry citations ("Acme ... [1]"); take head token.
+            head = re.split(r"[\s\[\(,;]+", label)[0] if label else ""
+            if head:
+                out.append(label)
+        # Table first-column entities: only explicit entity columns
+        # ("Company"/"Entity") claim entities. Figure/source listings carry
+        # verbatim cited text, not entity claims (their entities live in
+        # provenance, not in the display column).
+        if visual.visual_type == "table":
+            cols = list(props.get("columns") or [])
+            vals = list(props.get("values") or [])
+            if cols and vals and cols[0].lower() in ("company", "entity"):
+                for row in vals[:8]:
+                    if row:
+                        out.append(str(row[0])[:60])
+    except Exception:
+        pass
+    return out
+
+
+def validate_visual_provenance(
+    visual: VisualOutput,
+    *,
+    query: str,
+    validated_entities: Sequence[str],
+    validated_metrics: Sequence[str],
+    expected_timeframe: Optional[str] = None,
+    allowed_intents: Optional[Sequence[str]] = None,
+) -> Tuple[bool, str]:
+    """Validate one visual against the answer's validated evidence.
+
+    Rejects when entity/metric/timeframe/units/source untraceable, values
+    cannot be traced, or semantic intent differs. Fail-closed: any check
+    exception rejects. Pure.
+    """
+    try:
+        prov = getattr(visual, "provenance", None) or {}
+        intent = str(prov.get("intent", "") or _visual_intent(query))
+        expected_intent = _visual_intent(query)
+        # What-if never reuses market-history intent and vice versa.
+        if expected_intent == "what_if" and intent == "historical_comparison":
+            return False, "stale intent: market-history chart for what-if query"
+        if expected_intent == "historical_comparison" and intent == "what_if":
+            return False, "stale intent: what-if visual for historical query"
+        if allowed_intents and intent not in list(allowed_intents):
+            return False, f"intent mismatch: {intent} not in {list(allowed_intents)}"
+        # Entity must be within validated set (subset allowed for partial).
+        try:
+            want = {str(e).strip().lower() for e in (validated_entities or []) if str(e).strip()}
+            if want:
+                claimed = _visual_entities(visual)
+                # Only enforce when the visual names concrete entities.
+                named = [c for c in claimed if c and len(c) >= 2]
+                if named:
+                    for claim in named:
+                        cl = claim.lower()
+                        # A claim matches when it mentions a validated entity
+                        # (labels carry citations/context, not bare names).
+                        if not any(v in cl or cl in v for v in want):
+                            # Explicit sources-only policy (P0#14): ONLY the
+                            # sources/timeline/outlook qualitative tables are
+                            # provenance-exempt (they list citations, not
+                            # comparison entities). Data tables (figures,
+                            # financial, results) obey the same entity
+                            # contract as charts.
+                            title = str(getattr(visual, "title", "") or "").lower()
+                            if visual.visual_type == "table" and any(
+                                k in title for k in ("source", "timeline", "outlook")
+                            ):
+                                continue
+                            return False, f"entity mismatch: {claim!r} not in validated {sorted(want)}"
+        except Exception as exc:
+            return False, f"entity check unavailable ({exc})"
+        # Metric must be within validated set when both state one.
+        try:
+            prov_metric = str(prov.get("metric", "") or "").strip().lower()
+            want_m = {str(m).strip().lower() for m in (validated_metrics or []) if str(m).strip()}
+            if prov_metric and want_m and prov_metric not in want_m:
+                return False, f"metric mismatch: {prov_metric} not in {sorted(want_m)}"
+        except Exception as exc:
+            return False, f"metric check unavailable ({exc})"
+        # Timeframe must match when both state one.
+        try:
+            prov_time = str(prov.get("timeframe", "") or "").strip().lower()
+            exp_time = str(expected_timeframe or "").strip().lower()
+            if prov_time and exp_time and prov_time != exp_time:
+                return False, f"timeframe mismatch: {prov_time} vs {exp_time}"
+        except Exception as exc:
+            return False, f"timeframe check unavailable ({exc})"
+        # Provenance must name a traceable source/computation. Tables obey
+        # the same contract as charts (P0#14); only the explicit
+        # qualitative allowlist (sources/timeline/outlook) is exempt.
+        try:
+            has_source = bool((prov.get("source_ids") or []))
+            has_comp = bool((prov.get("computation_ids") or []))
+            has_data = prov.get("data_points") is not None
+            _title = str(getattr(visual, "title", "") or "").lower()
+            _qualitative = visual.visual_type == "table" and any(
+                k in _title for k in ("source", "timeline", "outlook")
+            )
+            if visual.visual_type in ("graph", "comparison", "table") and not _qualitative:
+                if not (has_source or has_comp or has_data):
+                    return False, "source untraceable: no source/computation IDs"
+        except Exception as exc:
+            return False, f"source check unavailable ({exc})"
+        return True, "visual provenance valid"
+    except Exception as exc:
+        return False, f"provenance validation failed ({exc})"
+
+
+def is_visual_stale_for_query(
+    visual: VisualOutput,
+    current_query: str,
+    prior_query: Optional[str] = None,
+) -> Tuple[bool, str]:
+    """True when a visual from a prior query must not be reused.
+
+    Stale when entity, metric, or period changed, or when what-if intent
+    changed (different computation). A pure presentation change to a chart
+    follow-up ("chart that") is NOT stale: visuals regenerate from prior
+    rows. Generic across arbitrary entities/metrics/periods. Pure.
+    """
+    try:
+        if not prior_query or not current_query:
+            return False, ""
+        if decompose_comparison_query is None:
+            return False, ""
+        cur = decompose_comparison_query(current_query or "") or {}
+        prev = decompose_comparison_query(prior_query or "") or {}
+        cur_e = {str(e).strip().lower() for e in (cur.get("entities", []) or [])}
+        prev_e = {str(e).strip().lower() for e in (prev.get("entities", []) or [])}
+        if cur_e and prev_e and cur_e != prev_e:
+            return True, f"entity changed {sorted(prev_e)} -> {sorted(cur_e)}"
+        cur_m = {str(m).strip().lower() for m in (cur.get("metrics", []) or [])}
+        prev_m = {str(m).strip().lower() for m in (prev.get("metrics", []) or [])}
+        if cur_m and prev_m and cur_m != prev_m:
+            return True, f"metric changed {sorted(prev_m)} -> {sorted(cur_m)}"
+        if (cur.get("period_label") or "") != (prev.get("period_label") or ""):
+            if cur.get("period_label") or prev.get("period_label"):
+                return True, f"period changed {prev.get('period_label')} -> {cur.get('period_label')}"
+        cur_intent = _visual_intent(current_query)
+        prev_intent = _visual_intent(prior_query)
+        if (cur_intent == "what_if") != (prev_intent == "what_if"):
+            return True, "what-if intent changed"
+        # Chart presentation follow-ups regenerate from prior rows (not stale).
+        if cur_intent != prev_intent:
+            if re.search(CHART_INTENT_RE, current_query or "", re.IGNORECASE):
+                return False, ""
+            return True, "intent changed"
+        return False, ""
+    except Exception as exc:
+        # Fail-closed: staleness check unavailable -> treat as stale.
+        return True, f"staleness check unavailable ({exc})"
+
+
+def _attach_history_provenance(
+    visual: VisualOutput, query: str, evidence: list, years: Optional[int], metric: Optional[str]
+) -> VisualOutput:
+    """Attach validated-history provenance to a synthesized visual."""
+    try:
+        entities = [str(item.get("entity", item.get("symbol", ""))) for item in (evidence or []) if isinstance(item, dict)]
+        entities = [e for e in entities if e][:4]
+        units: Optional[str] = None
+        freq: Optional[str] = None
+        try:
+            first = next((i for i in (evidence or []) if isinstance(i, dict)), {})
+            units = str(first.get("currency", "") or "").strip() or None
+            freq = str(first.get("frequency", "") or "").strip() or None
+        except Exception:
+            pass
+        source_ids = [f"yahoo:{e}" for e in entities]
+        attach_provenance(visual, build_visual_provenance(
+            query=query, entities=entities, metric=metric, units=units,
+            timeframe=f"{years}Y" if years else None, frequency=freq,
+            source_ids=source_ids, computation_ids=["comparison_stats"] if metric else [],
+            data_points={"entities": entities, "metric": metric},
+        ))
+    except Exception as exc:
+        logger.warning("Provenance attach failed: %s", exc)
+    return visual
+
+
+def _provenance_filter_final(
+    visuals: list, query: str, gate: Dict[str, Any]
+) -> list:
+    """Final provenance gate for synthesized visuals (fail closed)."""
+    out: list = []
+    try:
+        val_ents = list(gate.get("validated_entities", []) or gate.get("entities", []) or [])
+        val_mets = list(gate.get("validated_metrics", []) or gate.get("metrics", []) or [])
+        years = gate.get("years")
+        time_label = f"{years}Y" if years else None
+        # When the gate did not apply, fall back to plan entities ONLY for
+        # comparison queries. Own-data row visuals (metric-based, no entities)
+        # must not be entity-gated, or every row chart would be rejected.
+        if not val_ents and not gate.get("applies"):
+            try:
+                if build_research_plan is not None:
+                    pd = dict(build_research_plan(query) or {})
+                    if pd.get("is_comparison") and len(pd.get("entities", []) or []) >= 2:
+                        val_ents = list(pd.get("entities", []) or [])
+                        val_mets = list(pd.get("metrics", []) or [])
+                        time_label = pd.get("period_label") or time_label
+            except Exception:
+                pass
+        for visual in visuals or []:
+            vtype = getattr(visual, "visual_type", "")
+            _vtitle = str(getattr(visual, "title", "") or "").lower()
+            _qualitative_table = vtype == "table" and any(
+                k in _vtitle for k in ("source", "timeline", "outlook")
+            )
+            if vtype not in ("graph", "comparison", "table") or _qualitative_table:
+                out.append(visual)
+                continue
+            try:
+                ok, why = validate_visual_provenance(
+                    visual, query=query,
+                    validated_entities=val_ents,
+                    validated_metrics=val_mets,
+                    expected_timeframe=time_label,
+                )
+            except Exception as exc:
+                ok, why = False, f"provenance check failed ({exc})"
+            if ok:
+                out.append(visual)
+            else:
+                logger.info("Rejected synthesized visual: %s.", why)
+    except Exception as exc:
+        logger.warning("Final provenance filter failed, stripping charts: %s", exc)
+        out = [v for v in (visuals or []) if getattr(v, "visual_type", "") not in ("graph", "comparison")]
+    return out
+
+
+def build_validated_evidence_state(
+    *,
+    query: str,
+    plan: Optional[Dict[str, Any]] = None,
+    gate: Optional[Dict[str, Any]] = None,
+    completeness: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Single canonical validated-evidence state for answer scope, stats,
+    confidence, visual planner, visual validator, and narration.
+
+    Merges plan (requested), gate (validated subset + stats), and
+    completeness (per-entity coverage) into one dict. Components must read
+    this instead of independently deciding whether evidence exists.
+    """
+    plan = dict(plan or {})
+    gate = dict(gate or {})
+    completeness = dict(completeness or {})
+    entities = list(plan.get("entities", []) or gate.get("entities", []) or [])
+    metrics = list(plan.get("metrics", []) or gate.get("metrics", []) or [])
+    validated_entities = list(
+        gate.get("validated_entities", []) or completeness.get("validated_entities", []) or []
+    )
+    validated_metrics = list(
+        gate.get("validated_metrics", []) or completeness.get("validated_metrics", []) or []
+    )
+    # Fallback: completeness per_entity matrix.
+    if not validated_entities and isinstance(completeness.get("per_entity"), dict):
+        for entity, row in (completeness.get("per_entity") or {}).items():
+            if isinstance(row, dict) and any(row.values()):
+                validated_entities.append(entity)
+    if not validated_metrics and isinstance(completeness.get("per_entity"), dict):
+        seen: set[str] = set()
+        for row in (completeness.get("per_entity") or {}).values():
+            if isinstance(row, dict):
+                for metric, ok in row.items():
+                    if ok and metric not in seen:
+                        seen.add(metric)
+                        validated_metrics.append(metric)
+    excluded_entities = list(
+        gate.get("excluded_entities", []) or completeness.get("excluded_entities", []) or []
+    )
+    if not excluded_entities and entities:
+        _val = {str(e).strip().lower() for e in validated_entities}
+        excluded_entities = [e for e in entities if str(e).strip().lower() not in _val]
+    sufficient = bool(gate.get("comparison_stats")) or bool(
+        len(validated_entities) >= 2 and len(validated_metrics) >= 1
+    )
+    # Gate blocked overrides sufficiency (insufficient subset).
+    if gate.get("applies") and gate.get("blocked"):
+        sufficient = False
+    complete = bool(
+        entities and metrics
+        and not excluded_entities
+        and not (completeness.get("missing") or [])
+        and not gate.get("blocked")
+    )
+    return {
+        "query": query,
+        "entities_requested": entities,
+        "metrics_requested": metrics,
+        # Canonical aliases (single state, two key styles during migration;
+        # both always agree -- never two interpretations).
+        "requested_entities": entities,
+        "requested_metrics": metrics,
+        "validated_entities": validated_entities,
+        "validated_metrics": validated_metrics,
+        "excluded_entities": excluded_entities,
+        "excluded_metrics": list(completeness.get("excluded_metrics", []) or []),
+        "sufficient": sufficient,
+        "partial": bool(sufficient and (excluded_entities or gate.get("partial"))),
+        "complete": complete,
+        "blocked": bool(gate.get("blocked")),
+        "comparison_stats": gate.get("comparison_stats"),
+        "exclusion_note": str(
+            gate.get("exclusion_note", "")
+            or completeness.get("exclusion_note", "")
+            or ""
+        ),
+    }
+
+
+def plan_visuals_from_evidence(
+    *,
+    query: str,
+    validated_state: Optional[Dict[str, Any]] = None,
+    has_rows: bool = False,
+    has_history: bool = False,
+    has_market: bool = False,
+    has_snippets: bool = False,
+) -> List[str]:
+    """Deterministic visual planner (P0#18): the ONE authoritative plan.
+
+    Consumes user intent + canonical validated evidence + visual
+    eligibility -- never arbitrary LLM suggestions. The judge's visual_plan
+    stays advisory (reconciled + logged by the caller); this wins.
+    """
+    try:
+        intent = _visual_intent(query or "")
+        state = validated_state or {}
+        blocked = bool(state.get("blocked"))
+        sufficient = bool(state.get("sufficient"))
+        if intent == "what_if":
+            return ["comparison"] if not blocked else []
+        if blocked:
+            return []
+        if state.get("comparison_stats") or (sufficient and has_history):
+            # Metric-aware (P0#33): a price graph needs validated stock
+            # evidence, tables need validated financial evidence -- never a
+            # visual for an unvalidated metric.
+            val_mets = {str(m).strip().lower() for m in (state.get("validated_metrics", []) or [])}
+            kinds: List[str] = []
+            if not val_mets or "stock_performance" in val_mets:
+                kinds.append("graph")
+            if not val_mets or val_mets & {"revenue_growth", "profitability"}:
+                kinds.append("table")
+            if state.get("comparison_stats"):
+                kinds.append("comparison")
+            return kinds
+        if has_rows:
+            return ["graph", "table", "metric"]
+        if has_market:
+            return ["graph"]
+        if has_snippets:
+            if intent == "comparison":
+                return ["comparison", "table"]
+            return ["table", "insight"]
+        return []
+    except Exception:
+        return []
+
+
+def apply_narration_contract(
+    output: PipelineOutput,
+    *,
+    validated_state: Optional[Dict[str, Any]] = None,
+    computed_numbers: Optional[dict] = None,
+    gate: Optional[Dict[str, Any]] = None,
+    thinking: Optional[list] = None,
+) -> PipelineOutput:
+    """Code-enforced narration + final validation + followup grounding.
+
+    - Collects every validated number (evidence + deterministic computation)
+      as the grounding pool; flags ungrounded numeric claims.
+    - Winners must come from validated comparison stats; otherwise winner
+      language is hedged (not silently replaced with a guess).
+    - Excluded entities/metrics flagged when presented as included.
+    - What-if assumption string must appear verbatim in the answer.
+    - Follow-ups dropped when they resurrect excluded entities/metrics.
+    - Final consistency actions applied (confidence caps, visual drops).
+    Never raises; violations are logged and surfaced via thinking.
+    """
+    try:
+        from app.services.data.canonical import (
+            final_response_validation as _final,
+            ground_followups as _ground_f,
+            validate_narration as _validate,
+        )
+    except Exception:
+        return output
+    state = validated_state or {}
+    computed_numbers = computed_numbers or {}
+    gate = gate or {}
+    try:
+        pool = _evidence_numbers(
+            snippets=None, rows=None,
+            price_history=None, financial_history=None,
+            market_data=None, computed_numbers=computed_numbers,
+        )
+        # Winners from the single validated source.
+        stats = (computed_numbers.get("comparison_stats", {}) or {})
+        if not stats:
+            stats = (state.get("deterministic_statistics", {}) or {})
+        _gate_stats = gate.get("comparison_stats") or {}
+        winners = dict(
+            stats.get("winners", {}) or _gate_stats.get("winners", {}) or {}
+        )
+        verdict = _validate(
+            output.answer or "", validated_state=state,
+            known_numbers=pool, winners=winners,
+        )
+        for violation in verdict.get("violations", []):
+            logger.info("Narration contract violation: %s", violation[:200])
+            if thinking is not None and "ungrounded number" in violation:
+                thinking.append("Narration used a number outside validated evidence.")
+            if thinking is not None and "winner" in violation:
+                thinking.append("Winner claim lacks validated comparison support.")
+        # What-if assumption verbatim check (P0#10): the code validates the
+        # narrated assumption matches computation state (not just prompting).
+        try:
+            what_if = computed_numbers.get("what_if") or {}
+            assumption = str(what_if.get("assumption", "") or "").strip()
+            if assumption and output.clarification is None:
+                norm_answer = " ".join((output.answer or "").lower().split())
+                norm_assump = " ".join(assumption.lower().split())
+                # Key content words of the assumption must appear verbatim
+                # (elasticity disclaimer); otherwise append it structurally.
+                if "elasticity" in norm_assump and "elasticity" not in norm_answer:
+                    output.answer = str(output.answer or "").rstrip() + "\n\n" + assumption
+                    if thinking is not None:
+                        thinking.append("What-if assumption appended verbatim (was missing).")
+        except Exception:
+            pass
+        # Final consistency validation (P0#23): apply safe actions only
+        # (drop visuals, cap confidence) -- never guess replacements.
+        try:
+            final = _final(
+                answer=output.answer or "",
+                visuals=list(output.visuals or []),
+                confidence=output.confidence,
+                validated_state=state,
+                known_numbers=pool,
+                winners=winners,
+            )
+            for action in final.get("actions", []):
+                if action == "set_confidence_zero":
+                    output.confidence = 0.0
+                    output.visuals = [
+                        v for v in (output.visuals or [])
+                        if getattr(v, "visual_type", "") not in ("graph", "comparison")
+                    ]
+                elif action == "cap_confidence_065":
+                    output.confidence = min(float(output.confidence or 0.0), 0.65)
+                elif action in ("drop_visual_with_excluded_entity", "drop_unvalidated_visual"):
+                    # Drop only the offending visuals is ideal; conservatively
+                    # provenance-filter all charts (fail closed, no guessing).
+                    output.visuals = _provenance_filter_final(
+                        list(output.visuals or []), state.get("query", ""), gate,
+                    )
+            for violation in final.get("violations", []):
+                if thinking is not None:
+                    thinking.append(f"Final validation: {violation[:140]}")
+        except Exception:
+            pass
+        # Grounded follow-ups (P1#30).
+        try:
+            if output.followups:
+                output.followups = _ground_f(list(output.followups or []), state)
+        except Exception:
+            pass
+    except Exception as exc:
+        logger.warning("Narration contract application failed: %s", exc)
+    return output
 
 
 def ensure_visuals(
@@ -2174,23 +3849,18 @@ def ensure_visuals(
     comparable, timeline when dated, outlook status for sentiment) plus the
     sources table, so even qualitative answers carry multiple cards.
 
+    Final invariant (H10, enforced in CODE): a comparison visualization
+    requires comparison_complete == True AND comparison_gate == PASSED AND
+    confidence > 0 AND every number originating from validated evidence.
     Historical gating: when the query is a multi-entity historical
     comparison, NO graph/comparison visual is synthesized unless the
-    historical gate validates (both companies, same metric/unit/period).
+    historical gate validates (ALL companies, same metric/unit/period).
     A 0-confidence answer never gains a chart here -- insufficient
     evidence blocks visualization by design.
+    Fail-closed: if gate/completeness validation itself throws, comparison
+    visuals are BLOCKED (existing graph/comparison cards are stripped and
+    only honest sources remain) instead of shipping unverified charts.
     """
-    if output.clarification is not None or output.visuals:
-        return output
-    # Zero-confidence answers must stay chartless: synthesizing a visual
-    # at 0% was the exact live failure (chart rendered, confidence 0%).
-    try:
-        if float(output.confidence or 0.0) <= 0.0:
-            # Still allow the honest sources table below (not a chart), but
-            # never a graph/comparison/metric built from thin air.
-            pass
-    except (TypeError, ValueError):
-        pass
     rows = list(rows or [])
     market_data = list(market_data or [])
     web_sources = list(web_sources or [])
@@ -2199,14 +3869,25 @@ def ensure_visuals(
     macro_data = list(macro_data or [])
     price_history = list(price_history or [])
     financial_history = list(financial_history or [])
-    combined_series = list(market_data) + list(macro_data)
+    # P0#15: channels stay separate. combined_series is NOT market+macro;
+    # the market path charts market_data only, macro never enters it.
+    combined_series = list(market_data)
     synthesized: list = []
 
     def _sources_only() -> list:
         table = _sources_table_visual(web_sources)
         return [table] if table is not None else []
 
-    # Historical comparison gate runs BEFORE any synthesis.
+    def _strip_comparison_visuals(visuals: list) -> tuple[list, int]:
+        kept = [
+            visual for visual in (visuals or [])
+            if getattr(visual, "visual_type", "") not in ("graph", "comparison")
+        ]
+        return kept, len(list(visuals or [])) - len(kept)
+
+    # Historical comparison gate runs BEFORE any synthesis -- and before
+    # honoring pre-existing visuals, so a validator exception can never
+    # ship an unverified chart.
     gate: Dict[str, Any] = {}
     try:
         gate = _historical_comparison_gate(
@@ -2217,53 +3898,348 @@ def ensure_visuals(
             fundamentals=fundamentals,
         )
     except Exception as exc:
-        logger.warning("Historical gate failed open: %s", exc)
-        gate = {}
+        logger.warning("Historical gate failed: blocking comparison visuals: %s", exc)
+        gate = _fail_closed_gate(query, f"historical validation unavailable ({exc})")
+    # Completeness is authoritative alongside the gate, with partial-result
+    # policy: a validated subset (>=2 entities, >=1 common metric) is
+    # sufficient for partial visuals with exclusions; only an insufficient
+    # subset blocks. Context gaps (fundamentals/snippets) never block alone.
+    if gate.get("applies") and check_research_completeness is not None:
+        try:
+            _plan_for_completeness: Dict[str, Any] = {}
+            if build_research_plan is not None:
+                try:
+                    _plan_for_completeness = dict(build_research_plan(query) or {})
+                except Exception:
+                    _plan_for_completeness = {
+                        "entities": list(gate.get("entities", []) or []),
+                        "metrics": list(gate.get("metrics", []) or []),
+                        "period_years": gate.get("years"),
+                        "requires_history": True,
+                        "required_entities": list(gate.get("entities", []) or []),
+                        "required_metrics": list(gate.get("metrics", []) or []),
+                        "required_tools": [],
+                    }
+            _completeness = check_research_completeness(
+                _plan_for_completeness,
+                {
+                    "price_history": price_history,
+                    "financial_history": financial_history,
+                    "market_data": market_data,
+                    "fundamentals": fundamentals,
+                    "snippets": news_context,
+                },
+            )
+            # Non-blocking context gaps (fundamentals/snippets) are visible
+            # in the trace but must not flip a validated gate to BLOCKED:
+            # only core history/entity/metric/period failures block here.
+            _core_missing = [
+                m for m in (_completeness.get("missing") or [])
+                if not str(m).startswith("context tool")
+            ]
+            # Partial: sufficient subset passes even when strict completeness
+            # is False; insufficient subset blocks.
+            _sufficient = bool(_completeness.get("sufficient_for_partial")) or bool(
+                gate.get("validated_entities") and len(gate.get("validated_entities", [])) >= 2
+            )
+            if not _completeness.get("comparison_complete") and _core_missing and not _sufficient:
+                logger.info(
+                    "Completeness blocked visualization: missing=%s",
+                    (_completeness.get("missing") or [])[:4],
+                )
+                gate = {
+                    **gate,
+                    "blocked": True,
+                    "blocked_reason": (
+                        str(gate.get("blocked_reason", "") or "")
+                        + " Completeness: "
+                        + "; ".join((_completeness.get("missing") or [])[:4])
+                    ).strip(),
+                }
+            elif _sufficient and gate.get("blocked"):
+                # Gate blocked but completeness finds a sufficient validated
+                # subset (e.g. gate predates partial): unblock as partial.
+                # The gate's own partial path already handles this; this is
+                # defense in depth for code paths that skipped it.
+                pass
+        except Exception as exc:
+            # Fail-closed: an unavailable completeness verdict must BLOCK,
+            # never let a possibly-partial comparison through.
+            logger.warning("Completeness check failed: blocking visuals: %s", exc)
+            if gate.get("applies"):
+                gate = {
+                    **gate,
+                    "blocked": True,
+                    "blocked_reason": (
+                        str(gate.get("blocked_reason", "") or "")
+                        + f" Completeness unavailable ({exc}); comparison blocked."
+                    ).strip(),
+                    "comparison_ok": False,
+                }
+    if output.clarification is not None:
+        return output
+    # What-if intent never reuses market-history visuals (no inheritance).
+    _is_what_if = is_what_if_query(query)
+    if output.visuals:
+        # Pre-existing (usually LLM-proposed) visuals: fail-closed filter.
+        # BLOCKED gate, zero confidence, stale intent, what-if reuse, or
+        # provenance mismatch strips graph/comparison cards; tables/sources
+        # prose visuals survive. Every surviving chart is provenance-checked.
+        try:
+            needs_strip = bool(gate.get("applies") and gate.get("blocked"))
+        except Exception:
+            needs_strip = True
+        try:
+            zero_conf = float(output.confidence or 0.0) <= 0.0
+        except (TypeError, ValueError):
+            zero_conf = True
+        if needs_strip or zero_conf:
+            output.visuals, stripped = _strip_comparison_visuals(output.visuals)
+            if stripped:
+                logger.info(
+                    "Stripped %d comparison visual(s) from existing visuals "
+                    "(blocked=%s, zero_conf=%s).",
+                    stripped, needs_strip, zero_conf,
+                )
+        # What-if: strip any market-history-flavoured chart (stale intent).
+        if _is_what_if and output.visuals:
+            kept: list = []
+            dropped = 0
+            for visual in output.visuals:
+                try:
+                    prov = getattr(visual, "provenance", None) or {}
+                    intent = str(prov.get("intent", "") or "").lower()
+                    title = str(getattr(visual, "title", "") or "").lower()
+                    if getattr(visual, "visual_type", "") in ("graph", "comparison") and (
+                        intent == "historical_comparison"
+                        or "stock performance" in title
+                        or "market" in title
+                    ):
+                        dropped += 1
+                        continue
+                except Exception:
+                    dropped += 1
+                    continue
+                kept.append(visual)
+            if dropped:
+                logger.info("Stripped %d market-history visual(s) for what-if query.", dropped)
+            output.visuals = kept
+        # Provenance validation for surviving charts (fail closed).
+        # Own-data row visuals skip entity gating (metric-based, no entities).
+        if output.visuals:
+            try:
+                _val_ents = list(gate.get("validated_entities", []) or [])
+                _val_mets = list(gate.get("validated_metrics", []) or [])
+                _time = gate.get("years")
+                _time_label = f"{_time}Y" if _time else None
+                # Fall back to plan entities ONLY for comparisons; row visuals
+                # must not be entity-gated.
+                if not _val_ents and not gate.get("applies") and not rows:
+                    try:
+                        if build_research_plan is not None:
+                            _pd = dict(build_research_plan(query) or {})
+                            if _pd.get("is_comparison") and len(_pd.get("entities", []) or []) >= 2:
+                                _val_ents = list(_pd.get("entities", []) or [])
+                                _val_mets = list(_pd.get("metrics", []) or [])
+                                _time_label = (_pd.get("period_label") or _time_label)
+                    except Exception:
+                        pass
+                filtered: list = []
+                for visual in output.visuals:
+                    _vt = getattr(visual, "visual_type", "")
+                    _vt_title = str(getattr(visual, "title", "") or "").lower()
+                    _qual = _vt == "table" and any(
+                        k in _vt_title for k in ("source", "timeline", "outlook")
+                    )
+                    if _vt not in ("graph", "comparison", "table") or _qual:
+                        filtered.append(visual)
+                        continue
+                    try:
+                        ok, why = validate_visual_provenance(
+                            visual, query=query,
+                            validated_entities=_val_ents,
+                            validated_metrics=_val_mets,
+                            expected_timeframe=_time_label,
+                        )
+                    except Exception as exc:
+                        ok, why = False, f"provenance check failed ({exc})"
+                    # Uniform grounding (P0#13): EVERY visual with numbers
+                    # must trace to validated evidence/computation -- no
+                    # row-presence exemption.
+                    try:
+                        if ok:
+                            kept_grounded, _ = drop_ungrounded_visuals_evidence(
+                                [visual], snippets=news_context, rows=rows,
+                                price_history=price_history,
+                                financial_history=financial_history,
+                                market_data=market_data,
+                                computed_numbers=computed_numbers,
+                            )
+                            if not kept_grounded:
+                                ok, why = False, "values untraceable to evidence"
+                    except Exception as exc:
+                        ok, why = False, f"grounding check failed ({exc})"
+                    if ok:
+                        filtered.append(visual)
+                    else:
+                        logger.info("Rejected pre-existing visual: %s.", why)
+                output.visuals = filtered
+            except Exception as exc:
+                # Fail-closed: validation unavailable -> strip charts.
+                logger.warning("Provenance validation failed, stripping charts: %s", exc)
+                output.visuals, _ = _strip_comparison_visuals(output.visuals)
+        return output
     if gate.get("applies") and gate.get("blocked"):
         logger.info("Historical comparison blocked: %s", gate.get("blocked_reason", "")[:160])
         # Blocked comparisons get sources only (honest, not a chart).
-        # A 0-confidence output keeps that single table; callers that need
-        # strictly no visuals can drop it, but a chart/comparison is never
-        # synthesized here.
+        # Fail-closed: any pre-existing graph/comparison is stripped first.
+        output.visuals, _ = _strip_comparison_visuals(output.visuals)
         synthesized = _sources_only()
         if synthesized:
             output.visuals = list(output.visuals) + synthesized[:3]
         return output
+    # What-if queries never synthesize market-history charts (no inheritance
+    # across incompatible intents). They get deterministic scenario visuals
+    # from computed what-if numbers plus honest sources only.
+    if _is_what_if:
+        what_if = (computed_numbers or {}).get("what_if")
+        if isinstance(what_if, dict) and what_if:
+            try:
+                baseline = float(what_if.get("baseline_total", 0) or 0)
+                scenario = float(what_if.get("scenario_total", 0) or 0)
+                what_visual = VisualOutput(
+                    visual_type="comparison",
+                    title="What-if scenario",
+                    props={
+                        "value": scenario, "baseline": baseline,
+                        "groups": [
+                            {"label": "Baseline", "value": baseline},
+                            {"label": "Scenario", "value": scenario},
+                        ],
+                    },
+                )
+                attach_provenance(what_visual, build_visual_provenance(
+                    query=query, entities=[],
+                    metric=str(what_if.get("target", "price")),
+                    units=None, timeframe=None, frequency=None,
+                    source_ids=["computed:what_if"],
+                    computation_ids=["what_if"],
+                    data_points={"baseline_total": baseline, "scenario_total": scenario},
+                ))
+                try:
+                    if float(output.confidence or 0.0) > 0.0:
+                        synthesized.append(what_visual)
+                except (TypeError, ValueError):
+                    synthesized.append(what_visual)
+            except Exception as exc:
+                logger.warning("What-if visual failed: %s", exc)
+        sources = _sources_table_visual(web_sources)
+        if sources is not None:
+            synthesized.append(sources)
+        # Tables of raw rows may still help; never market-history graphs.
+        if rows:
+            try:
+                row_visuals = _visuals_from_rows(rows, computed_numbers, preferred_visual)
+                for visual in row_visuals:
+                    if getattr(visual, "visual_type", "") == "graph":
+                        continue
+                    try:
+                        if getattr(visual, "provenance", None) is None:
+                            attach_provenance(visual, build_visual_provenance(
+                                query=query, entities=[],
+                                metric=None, units=None, timeframe=None, frequency=None,
+                                source_ids=["rows"],
+                                computation_ids=sorted((computed_numbers or {}).keys()),
+                                data_points={"row_count": len(rows)},
+                            ))
+                    except Exception:
+                        pass
+                    synthesized.append(visual)
+            except Exception as exc:
+                logger.warning("What-if row visuals failed: %s", exc)
+        if synthesized:
+            output.visuals = list(output.visuals) + synthesized[:3]
+        # Provenance-validate before returning (fail closed).
+        output.visuals = _provenance_filter_final(output.visuals, query, gate)
+        return output
     if gate.get("applies") and not gate.get("blocked"):
-        # Validated history: chart the real multi-year series (both
-        # companies, correct window, legend), plus annual tables.
+        # Validated history: chart the validated subset (partial allowed),
+        # plus annual tables. Every visual carries provenance.
         years = gate.get("years")
         graph = _price_history_graph_visual(price_history, query, years)
         if graph is not None:
             # At 0 confidence even a validated series stays uncharted.
             try:
                 if float(output.confidence or 0.0) > 0.0:
+                    _attach_history_provenance(graph, query, price_history, years, METRIC_STOCK)
                     synthesized.append(graph)
             except (TypeError, ValueError):
+                _attach_history_provenance(graph, query, price_history, years, METRIC_STOCK)
                 synthesized.append(graph)
         for metric_key in ("revenue", "net_income"):
-            table = _financial_history_table_visual(financial_history, metric_key)
+            table = _financial_history_table_visual(financial_history, metric_key, query)
             if table is not None:
+                _attach_history_provenance(
+                    table, query, financial_history, years,
+                    METRIC_REVENUE if metric_key == "revenue" else METRIC_PROFIT,
+                )
                 synthesized.append(table)
-        margin_table = _margin_table_visual(financial_history)
+        margin_table = _margin_table_visual(financial_history, query)
         if margin_table is not None:
+            _attach_history_provenance(margin_table, query, financial_history, years, METRIC_PROFIT)
             synthesized.append(margin_table)
         sources = _sources_table_visual(web_sources)
         if sources is not None:
             synthesized.append(sources)
         if synthesized:
             logger.info(f"Visual guarantee synthesized {len(synthesized)} validated visual(s).")
-            output.visuals = list(output.visuals) + synthesized[:3]
+            # Validated multi-year evidence earns the full set (graph +
+            # annual tables + margin table + sources): capping at 3 here
+            # silently dropped the single comparable profitability view.
+            output.visuals = list(output.visuals) + synthesized[:5]
+        output.visuals = _provenance_filter_final(output.visuals, query, gate)
         return output
 
     if rows:
         chart_requested = bool(re.search(CHART_INTENT_RE, query, re.IGNORECASE))
         synthesized = _visuals_from_rows(rows, computed_numbers, preferred_visual)
+        # Provenance for row visuals (own-data evidence, first-class stage).
+        for visual in synthesized:
+            try:
+                if getattr(visual, "provenance", None) is None:
+                    attach_provenance(visual, build_visual_provenance(
+                        query=query, entities=[],
+                        metric=None, units=None, timeframe=None, frequency=None,
+                        source_ids=["rows"],
+                        computation_ids=sorted((computed_numbers or {}).keys()),
+                        data_points={"row_count": len(rows)},
+                    ))
+            except Exception:
+                pass
+        # Fail-closed: 0% confidence never ships a chart (graph/comparison);
+        # honest row tables survive. Never 0% + visual chart.
+        try:
+            _zero = float(output.confidence or 0.0) <= 0.0
+        except (TypeError, ValueError):
+            _zero = True
+        if _zero:
+            synthesized = [v for v in synthesized if getattr(v, "visual_type", "") not in ("graph", "comparison")]
         if chart_requested:
             logger.info("Chart intent detected; synthesized visuals lead with a chart.")
     elif combined_series:
         graph = _market_graph_visual(combined_series, query)
         if graph is not None:
+            try:
+                if getattr(graph, "provenance", None) is None:
+                    _ents = [str(i.get("entity", "")) for i in combined_series if isinstance(i, dict)]
+                    attach_provenance(graph, build_visual_provenance(
+                        query=query, entities=_ents[:4], metric=None,
+                        units=None, timeframe=None, frequency=None,
+                        source_ids=[f"market:{e}" for e in _ents[:4]],
+                        computation_ids=[], data_points={"series": len(_ents)},
+                    ))
+            except Exception:
+                pass
             try:
                 if float(output.confidence or 0.0) > 0.0:
                     synthesized = [graph]
@@ -2274,6 +4250,17 @@ def ensure_visuals(
         fundamentals_comparison = _fundamentals_comparison_visual(fundamentals, query)
         if fundamentals_comparison is not None:
             try:
+                if getattr(fundamentals_comparison, "provenance", None) is None:
+                    _ents = [str(i.get("entity", "")) for i in (fundamentals or []) if isinstance(i, dict)]
+                    attach_provenance(fundamentals_comparison, build_visual_provenance(
+                        query=query, entities=_ents[:4], metric="market_cap",
+                        units=None, timeframe=None, frequency=None,
+                        source_ids=[f"fundamentals:{e}" for e in _ents[:4]],
+                        computation_ids=[], data_points={"entities": _ents[:4]},
+                    ))
+            except Exception:
+                pass
+            try:
                 if float(output.confidence or 0.0) > 0.0:
                     synthesized.append(fundamentals_comparison)
             except (TypeError, ValueError):
@@ -2283,10 +4270,23 @@ def ensure_visuals(
             # fall through to honest sources only, never an empty naked answer.
             synthesized = _sources_only()
     else:
-        figures = _figures_from_snippets(news_context)
+        figures = _figures_from_snippets(news_context, query)
         # Explicit X-vs-Y steers to a comparison card first (never invented).
         comparison = _comparison_from_figures(figures, query)
         if comparison is not None:
+            try:
+                if getattr(comparison, "provenance", None) is None:
+                    _fig_ents = sorted({str(f.get("entity", "")) for f in figures if f.get("entity")})[:4]
+                    attach_provenance(comparison, build_visual_provenance(
+                        query=query, entities=_fig_ents,
+                        metric=str((figures[0].get("metric") if figures else "") or ""),
+                        units=str((figures[0].get("unit") if figures else "") or ""),
+                        timeframe=None, frequency=None,
+                        source_ids=[f"snippet:{f.get('ref')}" for f in figures[:4]],
+                        computation_ids=[], data_points={"figures": len(figures)},
+                    ))
+            except Exception:
+                pass
             try:
                 if float(output.confidence or 0.0) > 0.0:
                     synthesized.append(comparison)
@@ -2294,15 +4294,30 @@ def ensure_visuals(
                 synthesized.append(comparison)
         # A figures bar over mismatched metrics (funding vs cost) is the
         # same false-comparison bug: only chart when cues agree.
+        # Fail-closed: metric check unavailable blocks the bar.
         bar_ok = True
         try:
             if figures_share_metric is not None and len(figures) >= 2:
                 bar_ok, _ = figures_share_metric(figures)
-        except Exception:
-            bar_ok = True
+        except Exception as exc:
+            logger.warning("Figures metric check failed, blocking bar: %s", exc)
+            bar_ok = False
         if bar_ok:
-            bar = _figures_bar_visual(figures)
+            bar = _figures_bar_visual(figures, query)
             if bar is not None:
+                try:
+                    if getattr(bar, "provenance", None) is None:
+                        _fig_ents = sorted({str(f.get("entity", "")) for f in figures if f.get("entity")})[:4]
+                        attach_provenance(bar, build_visual_provenance(
+                            query=query, entities=_fig_ents,
+                            metric=str((figures[0].get("metric") if figures else "") or ""),
+                            units=str((figures[0].get("unit") if figures else "") or ""),
+                            timeframe=None, frequency=None,
+                            source_ids=[f"snippet:{f.get('ref')}" for f in figures[:4]],
+                            computation_ids=[], data_points={"figures": len(figures)},
+                        ))
+                except Exception:
+                    pass
                 try:
                     if float(output.confidence or 0.0) > 0.0:
                         synthesized.append(bar)
@@ -2310,6 +4325,20 @@ def ensure_visuals(
                     synthesized.append(bar)
         table = _figures_table_visual(figures)
         if table is not None:
+            # Data tables carry provenance like charts (P0#14).
+            try:
+                if getattr(table, "provenance", None) is None:
+                    _fig_ents = sorted({str(f.get("entity", "")) for f in figures if f.get("entity")})[:4]
+                    attach_provenance(table, build_visual_provenance(
+                        query=query, entities=_fig_ents,
+                        metric=str((figures[0].get("metric") if figures else "") or "") or None,
+                        units=str((figures[0].get("unit") if figures else "") or "") or None,
+                        timeframe=None, frequency=None,
+                        source_ids=[f"snippet:{f.get('ref')}" for f in figures[:4]],
+                        computation_ids=[], data_points={"figures": len(figures)},
+                    ))
+            except Exception:
+                pass
             synthesized.append(table)
         timeline = _timeline_visual(news_context, web_sources)
         if timeline is not None:
@@ -2317,6 +4346,17 @@ def ensure_visuals(
         # Structured fundamentals comparison needs no snippet figures.
         fundamentals_comparison = _fundamentals_comparison_visual(fundamentals, query)
         if fundamentals_comparison is not None:
+            try:
+                if getattr(fundamentals_comparison, "provenance", None) is None:
+                    _fents = [str(i.get("entity", "")) for i in (fundamentals or []) if isinstance(i, dict)]
+                    attach_provenance(fundamentals_comparison, build_visual_provenance(
+                        query=query, entities=_fents[:4], metric="market_cap",
+                        units=None, timeframe=None, frequency=None,
+                        source_ids=[f"fundamentals:{e}" for e in _fents[:4]],
+                        computation_ids=[], data_points={"entities": _fents[:4]},
+                    ))
+            except Exception:
+                pass
             try:
                 if float(output.confidence or 0.0) > 0.0:
                     synthesized.append(fundamentals_comparison)
@@ -2331,6 +4371,12 @@ def ensure_visuals(
     if synthesized:
         logger.info(f"Visual guarantee synthesized {len(synthesized)} visual(s).")
         output.visuals = list(output.visuals) + synthesized[:3]
+    # Final provenance gate for all synthesized paths (fail closed).
+    try:
+        output.visuals = _provenance_filter_final(output.visuals, query, gate)
+    except Exception as exc:
+        logger.warning("Final provenance filter failed: %s", exc)
+        output.visuals = [v for v in (output.visuals or []) if getattr(v, "visual_type", "") not in ("graph", "comparison")]
     return output
 
 
@@ -2351,6 +4397,8 @@ async def run_pipeline(
     price_history: Optional[list] = None,
     financial_history: Optional[list] = None,
     research_notes: Optional[list] = None,
+    prior_research_state: Optional[Dict[str, Any]] = None,
+    plan_query: Optional[str] = None,
 ) -> PipelineOutput:
     """Decision-driven pipeline: judge -> narrate -> ground -> guarantee (specs/06).
 
@@ -2393,6 +4441,40 @@ async def run_pipeline(
 
     rows = list(db_data or [])
     thinking: List[str] = []
+    # Deterministic what-if (generic): structured-history scenario first,
+    # then the row-level price scenario for own-data queries. Both compute
+    # in code; narration quotes verbatim (never LLM arithmetic).
+    try:
+        if is_what_if_query(plan_query or user_query) and not (computed_numbers or {}).get("what_if"):
+            _structured = compute_structured_what_if(
+                financial_history, plan_query or user_query
+            )
+            if _structured is not None:
+                computed_numbers = {**(computed_numbers or {}), "what_if": _structured}
+                thinking.append(
+                    f"Deterministic what-if computed: {str(_structured.get('pct_change'))}% "
+                    f"(factor {str(_structured.get('factor'))})."
+                )
+            elif rows:
+                try:
+                    from app.services.data.stats import (
+                        apply_what_if as _apply_wif,
+                        parse_what_if as _parse_wif,
+                    )
+
+                    _scenario = _parse_wif(plan_query or user_query)
+                    if _scenario is not None:
+                        _row_wif = _apply_wif(rows, *_scenario)
+                        if _row_wif is not None:
+                            computed_numbers = {**(computed_numbers or {}), "what_if": _row_wif}
+                            thinking.append(
+                                f"Deterministic row what-if computed: "
+                                f"{str(_row_wif.get('pct_change'))}%."
+                            )
+                except Exception as _exc:
+                    logger.warning("Row what-if skipped: %s", _exc)
+    except Exception as exc:
+        logger.warning("Structured what-if skipped: %s", exc)
     for note in research_notes:
         thinking.append(f"Research: {str(note)[:200]}")
 
@@ -2426,33 +4508,85 @@ async def run_pipeline(
             )
         return fallback_output(reason=reason, confidence=0.0)
 
+    # The canonical ResearchPlan is the single source of truth for this
+    # request (Phase 1): decomposition -> entities/metrics/time-range ->
+    # required tools. Every downstream stage (judge evidence, gate,
+    # confidence, visuals, research_state) reads from it -- never from a
+    # competing ad-hoc decomposition. plan_query carries the ORIGINAL
+    # research intent when this turn answers a clarification (Phase 3);
+    # narration still uses the user's literal message.
+    plan_dict: Dict[str, Any] = {}
+    plan_text = plan_query or user_query
+    try:
+        if build_research_plan is not None:
+            plan_dict = dict(build_research_plan(plan_text, source_scope=source_scope) or {})
+    except Exception as exc:
+        logger.warning("Canonical research plan failed: %s", exc)
+        plan_dict = {}
+    # Prior research reuse is explicit + validated (P0#20): when the caller
+    # passes the previous turn's structured state, compare its canonical
+    # structure with the current plan. A structural match records reuse;
+    # any entity/metric/timeframe change records non-reuse (fresh evidence
+    # only). Research is still recomputed from current retrieval -- this
+    # never injects stale rows, it only documents continuity honestly.
+    try:
+        if isinstance(prior_research_state, dict):
+            _prior_plan = (prior_research_state.get("plan") or {})
+            _prior_ents = {str(e).strip().lower() for e in (_prior_plan.get("entities", []) or [])}
+            _cur_ents = {str(e).strip().lower() for e in (plan_dict.get("entities", []) or [])}
+            _prior_mets = {str(m).strip().lower() for m in (_prior_plan.get("metrics", []) or [])}
+            _cur_mets = {str(m).strip().lower() for m in (plan_dict.get("metrics", []) or [])}
+            _prior_tf = str((_prior_plan.get("time_range", {}) or {}).get("label", "") or "")
+            _cur_tf = str((plan_dict.get("time_range", {}) or {}).get("label", "") or "")
+            if _prior_ents == _cur_ents and _prior_mets == _cur_mets and _prior_tf == _cur_tf:
+                thinking.append("Prior research structure matches; continuity validated.")
+            else:
+                thinking.append("Prior research structure differs; using fresh evidence only.")
+    except Exception as exc:
+        logger.warning("Prior-research reuse check failed: %s", exc)
+    entities_found: list = []
+
     # Deterministic historical gate + stats BEFORE the LLM narrates, so the
     # model can only narrate validated numbers (specs/11 S2) and the prompt
     # carries an explicit BLOCKED/PASSED verdict.
     gate: Dict[str, Any] = {}
     try:
         gate = _historical_comparison_gate(
-            user_query,
+            plan_text,
             market_data=market_data,
             price_history=price_history,
             financial_history=financial_history,
             fundamentals=fundamentals,
         )
     except Exception as exc:
-        logger.warning("Historical gate failed open: %s", exc)
-        gate = {}
-    if gate.get("comparison_stats"):
+        # Fail-closed: gate unavailable -> BLOCK comparison/chart.
+        logger.warning("Historical gate failed: blocking comparison: %s", exc)
+        gate = _fail_closed_gate(plan_text, f"historical validation unavailable ({exc})")
+        thinking.append("Historical validation unavailable; comparison blocked.")
+    # What-if intent never consumes market-history stats (no inheritance):
+    # scenario math comes from deterministic what-if computation only.
+    if gate.get("comparison_stats") and not is_what_if_query(plan_text):
         computed_numbers = {
             **(computed_numbers or {}),
             "comparison_stats": gate["comparison_stats"],
         }
+    elif gate.get("comparison_stats") and is_what_if_query(plan_text):
+        thinking.append("What-if query: historical stats withheld (scenario math only).")
     if gate.get("applies") and gate.get("blocked"):
         thinking.append(f"Historical gate BLOCKED: {(gate.get('blocked_reason', '') or '')[:160]}")
+    if gate.get("partial"):
+        thinking.append(f"Partial evidence: {gate.get('exclusion_note', '')[:160]}")
 
+    # Canonical query semantics: plan_text (the merged clarification-aware
+    # research intent) is the single source of truth for research AND
+    # narration. The fragmentary user_query is kept only for display/trace.
+    # Using the fragment for narration while the gate used the merged plan
+    # let period/metric diverge (e.g. gate PASSED 3Y while the prompt asked
+    # 1Y). Every stage below reads plan_text.
     try:
         await emit("judging")
         decision = await judge_sufficiency(
-            user_query=user_query,
+            user_query=plan_text,
             source_scope=source_scope,
             evidence=_evidence_inventory(
                 rows,
@@ -2467,10 +4601,66 @@ async def run_pipeline(
             prior_clarification=prior_clarification,
             prior_data=prior_data,
         )
-        # An explicitly requested shape in the query wins over the judge's.
-        detected = detect_preferred_visual(user_query)
+        # An explicitly requested shape in the canonical query wins over the judge's.
+        detected = detect_preferred_visual(plan_text)
         if detected is not None:
             decision.preferred_visual = detected
+        # Phase 3 contract: publicly researchable information must never
+        # require the user to supply it. When the query is a researchable
+        # comparison (arbitrary entities + metrics detected), clarification
+        # is DETERMINISTICALLY forbidden -- the judge's "clarify" is
+        # overridden here in code, not by prompt compliance. Genuine
+        # ambiguity (no entities/metrics) may still clarify. Generic
+        # discipline: never ask for already-supplied or safely defaultable
+        # info (timeframes, geographies, currencies, source prefs).
+        try:
+            if decision.decision == "clarify" and must_not_clarify is not None:
+                if must_not_clarify(plan_text):
+                    logger.warning(
+                        "Deterministic clarification ban: researchable "
+                        "comparison must be answered from evidence, not asked."
+                    )
+                    thinking.append(
+                        "Clarification forbidden by deterministic rule "
+                        "(researchable public-company comparison); "
+                        "answering from researched evidence."
+                    )
+                    decision = Decision(
+                        decision="answer",
+                        missing="",
+                        chart_from_prior=decision.chart_from_prior,
+                        visual_plan=decision.visual_plan,
+                        suggested_options=[],
+                        preferred_visual=decision.preferred_visual,
+                        tools_needed=decision.tools_needed,
+                    )
+                elif decision.missing:
+                    try:
+                        from app.services.data.comparison import (
+                            clarification_is_redundant as _redundant,
+                        )
+
+                        redundant, why = _redundant(decision.missing, plan_text)
+                    except Exception:
+                        redundant, why = False, ""
+                    if redundant:
+                        logger.warning(
+                            "Redundant clarification suppressed (%s); answering.", why
+                        )
+                        thinking.append(
+                            f"Redundant clarification suppressed ({why}); answering."
+                        )
+                        decision = Decision(
+                            decision="answer",
+                            missing="",
+                            chart_from_prior=decision.chart_from_prior,
+                            visual_plan=decision.visual_plan,
+                            suggested_options=[],
+                            preferred_visual=decision.preferred_visual,
+                            tools_needed=decision.tools_needed,
+                        )
+        except Exception as exc:
+            logger.warning("Clarification-ban check failed: %s", exc)
         logger.info(
             f"Pipeline decision: {decision.decision} "
             f"(chart_from_prior={decision.chart_from_prior}, "
@@ -2486,21 +4676,54 @@ async def run_pipeline(
         )
 
         narrate_rows = rows
+        # Follow-up staleness: prior rows are reused ONLY when the current
+        # request matches the prior entities/metrics/period. A changed
+        # entity/metric/period or a what-if query regenerates from current
+        # evidence, never stale data. A pure presentation change
+        # (qualitative -> chart, "chart that") explicitly reuses prior rows
+        # and regenerates visuals -- intent change alone is not stale there.
+        _prior_query = str((prior_data or {}).get("from_query", "") or "")
+        try:
+            # Canonical staleness (P0#19): the single is_visual_stale_for_query
+            # verdict drives prior-data reuse -- no divergent inline copy.
+            # It covers entity/metric/period/what-if/intent; frequency/unit/
+            # currency/source-identity changes additionally force staleness
+            # below via validated-state comparison where available.
+            _stale, _why = is_visual_stale_for_query(
+                VisualOutput(visual_type="status", props={}, title="stale-probe"),
+                plan_text, _prior_query,
+            ) if _prior_query else (False, "")
+            # is_visual_stale_for_query treats a pure chart presentation
+            # follow-up ("chart that") as NOT stale -- honor that here.
+            # Its probe visual carries no entities so only structural
+            # query comparison applies (exactly what prior reuse needs).
+        except Exception:
+            _stale, _why = False, ""
+        _what_if_now = is_what_if_query(plan_text)
         if decision.chart_from_prior and prior_data and not rows:
             # Follow-up on the previous answer ("chart that"): narrate from
-            # the prior rows so the request resolves instead of clarifying.
-            narrate_rows = prior_data.get("rows", []) or []
+            # the prior rows so the request resolves instead of clarifying --
+            # unless stale (regenerate) or what-if (never reuse history).
+            if _stale or _what_if_now:
+                logger.info(
+                    "Prior-data reuse blocked (stale=%s, what_if=%s: %s); "
+                    "regenerating from current evidence.", _stale, _what_if_now, _why,
+                )
+                thinking.append("Prior data stale for this follow-up; using current evidence.")
+                narrate_rows = rows
+            else:
+                narrate_rows = prior_data.get("rows", []) or []
         if not narrate_rows and prior_data:
             # Deterministic backstop (no judge needed): an explicit chart
             # request with no fresh rows but a prior answer's rows always
-            # resolves from the prior rows.
-            if re.search(CHART_INTENT_RE, user_query, re.IGNORECASE):
+            # resolves from the prior rows -- unless stale/what-if.
+            if re.search(CHART_INTENT_RE, plan_text, re.IGNORECASE) and not _stale and not _what_if_now:
                 logger.info("Chart follow-up resolved from prior answer rows.")
                 narrate_rows = prior_data.get("rows", []) or []
 
         await emit("narrating")
         output = await _narrate(
-            user_query=user_query,
+            user_query=plan_text,
             db_data=narrate_rows,
             computed_numbers=computed_numbers,
             news_context=news_context,
@@ -2531,7 +4754,7 @@ async def run_pipeline(
             logger.warning("Repeat clarification blocked; answering best-effort.")
             thinking.append("Repeat question blocked; answered best-effort.")
             output = await _narrate(
-                user_query=user_query,
+                user_query=plan_text,
                 db_data=narrate_rows,
                 computed_numbers=computed_numbers,
                 news_context=news_context,
@@ -2557,17 +4780,37 @@ async def run_pipeline(
             # a clarification requesting them is discarded and the pipeline
             # answers from researched evidence (or states what is missing)
             # instead of stalling or restarting on the user's reply.
+            # Widened (Phase 3): ANY clarification on a deterministically
+            # researchable comparison is suppressed, not just ones matching
+            # the ask-for-data pattern -- the narrator must not re-open a
+            # question the deterministic layer already closed.
             try:
                 asks_data = (
                     clarification_asks_for_researchable_data(
-                        output.clarification.question, user_query
+                        output.clarification.question, plan_text
                     )
                     if clarification_asks_for_researchable_data is not None
                     else False
                 )
             except Exception:
                 asks_data = False
-            if asks_data:
+            try:
+                banned = bool(
+                    must_not_clarify is not None and must_not_clarify(plan_text)
+                )
+            except Exception:
+                banned = False
+            try:
+                from app.services.data.comparison import (
+                    clarification_is_redundant as _redundant2,
+                )
+
+                redundant2, _why2 = _redundant2(
+                    output.clarification.question, plan_text
+                )
+            except Exception:
+                redundant2, _why2 = False, ""
+            if asks_data or banned or redundant2:
                 logger.warning(
                     "Researchable-data clarification suppressed; "
                     "answering from researched evidence."
@@ -2577,7 +4820,7 @@ async def run_pipeline(
                     "answered from researched evidence."
                 )
                 output = await _narrate(
-                    user_query=user_query,
+                    user_query=plan_text,
                     db_data=narrate_rows,
                     computed_numbers=computed_numbers,
                     news_context=news_context,
@@ -2614,17 +4857,76 @@ async def run_pipeline(
                 f"Clarifying (one question): {output.clarification.question[:120]}"
             )
         else:
-            # Checked trust: LLM-proposed numeric visuals for web-only evidence
-            # must ground in the cited snippets; ungrounded ones fall back to
-            # the deterministic figures path via ensure_visuals below.
-            if (
-                output.visuals
-                and not narrate_rows
-                and news_context
-                and source_scope in ("live_web", "both")
+            # Phase 13 contract (hard gate, enforced in CODE, never by
+            # prompt): when the historical gate BLOCKED, the narrator must
+            # not ship comparison visuals. Strip any LLM-fabricated graph /
+            # comparison cards here -- grounding alone cannot catch a chart
+            # whose numbers happen to appear in the snippets but whose
+            # comparison the gate rejected.
+            try:
+                if gate.get("applies") and gate.get("blocked") and output.visuals:
+                    before = len(output.visuals)
+                    output.visuals = [
+                        visual for visual in output.visuals
+                        if getattr(visual, "visual_type", "") not in ("graph", "comparison")
+                    ]
+                    stripped = before - len(output.visuals)
+                    if stripped:
+                        logger.info(
+                            "Stripped %d fabricated comparison visual(s): gate BLOCKED.",
+                            stripped,
+                        )
+                        thinking.append(
+                            f"Stripped {stripped} comparison visual(s): "
+                            "historical gate BLOCKED."
+                        )
+                # Fail-closed: zero confidence never ships a chart, even when
+                # the gate passed (e.g. validator threw mid-flight and the
+                # gate defaulted). Tables/sources prose visuals survive.
+                try:
+                    zero_conf = float(output.confidence or 0.0) <= 0.0
+                except (TypeError, ValueError):
+                    zero_conf = True
+                if zero_conf and output.visuals:
+                    before = len(output.visuals)
+                    output.visuals = [
+                        visual for visual in output.visuals
+                        if getattr(visual, "visual_type", "") not in ("graph", "comparison")
+                    ]
+                    stripped = before - len(output.visuals)
+                    if stripped:
+                        logger.info(
+                            "Stripped %d chart visual(s): zero confidence.",
+                            stripped,
+                        )
+                        thinking.append(
+                            f"Stripped {stripped} chart visual(s): zero confidence."
+                        )
+            except Exception as exc:
+                # Fail-closed: stripping itself failed -> drop all chart
+                # visuals rather than risk shipping an unverified one.
+                logger.warning("Visual strip failed, dropping charts: %s", exc)
+                try:
+                    output.visuals = [
+                        visual for visual in (output.visuals or [])
+                        if getattr(visual, "visual_type", "") not in ("graph", "comparison")
+                    ]
+                except Exception:
+                    output.visuals = []
+            # Checked trust (P0#13 uniform): LLM-proposed numeric visuals
+            # must ground in validated evidence/computation for EVERY visual
+            # type and channel -- no row-presence exemption. Ungrounded ones
+            # fall back to the deterministic figures path via ensure_visuals.
+            if output.visuals and (
+                news_context or narrate_rows or price_history
+                or financial_history or market_data or computed_numbers
             ):
-                kept, dropped = drop_ungrounded_visuals(
-                    list(output.visuals), news_context
+                kept, dropped = drop_ungrounded_visuals_evidence(
+                    list(output.visuals), snippets=news_context,
+                    rows=narrate_rows, price_history=price_history,
+                    financial_history=financial_history,
+                    market_data=market_data,
+                    computed_numbers=computed_numbers,
                 )
                 if dropped:
                     thinking.append(
@@ -2632,6 +4934,32 @@ async def run_pipeline(
                         "deterministic fallback applies."
                     )
                     output.visuals = kept
+            # Decision.tools_needed is advisory post-research, but it is no
+            # longer dead: tools the judge asked for with no evidence on hand
+            # cap confidence and are recorded instead of silently ignored.
+            try:
+                if reconcile_judge_tools is not None and decision.tools_needed:
+                    reconciled = reconcile_judge_tools(
+                        decision.tools_needed,
+                        _evidence_inventory(
+                            narrate_rows, computed_numbers, news_context,
+                            market_data, fundamentals=fundamentals,
+                            macro_data=macro_data, price_history=price_history,
+                            financial_history=financial_history,
+                        ),
+                    )
+                    if reconciled.get("missing"):
+                        logger.info(
+                            "Judge-requested tools lacking evidence: %s",
+                            reconciled["missing"],
+                        )
+                        thinking.append(
+                            "Judge-requested tools lacking evidence: "
+                            + ", ".join(reconciled["missing"])
+                        )
+                        output.confidence = min(float(output.confidence or 0.0), 0.65)
+            except Exception as exc:
+                logger.warning("Judge-tools reconcile failed: %s", exc)
             plan = [item.kind for item in decision.visual_plan]
             thinking.append(
                 f"Answered from {len(narrate_rows)} row(s) + "
@@ -2643,17 +4971,164 @@ async def run_pipeline(
                 for source in (web_sources or [])
                 if str(source.get("provider", "")).strip()
             }
-            capped = evidence_confidence_cap(
-                output.confidence,
-                row_count=len(narrate_rows),
-                snippet_count=len(news_context),
-                provider_count=len(providers),
-                has_market=bool(market_data or macro_data or fundamentals),
+            # Single validated-evidence state: answer scope, stats,
+            # confidence, visuals, and narration all read the same canonical
+            # validated subset (never independent existence checks).
+            try:
+                _completeness_for_state = None
+                if check_research_completeness is not None and plan_dict:
+                    try:
+                        _completeness_for_state = check_research_completeness(
+                            plan_dict,
+                            {
+                                "price_history": price_history,
+                                "financial_history": financial_history,
+                                "market_data": market_data,
+                                "fundamentals": fundamentals,
+                                "snippets": news_context,
+                            },
+                        ) or {}
+                    except Exception:
+                        _completeness_for_state = None
+                validated_state = build_validated_evidence_state(
+                    query=plan_text, plan=plan_dict, gate=gate,
+                    completeness=_completeness_for_state,
+                )
+            except Exception as exc:
+                logger.warning("Validated-evidence state failed: %s", exc)
+                validated_state = {
+                    "validated_entities": [], "validated_metrics": [],
+                    "sufficient": False, "partial": False, "blocked": bool(gate.get("blocked")),
+                    "comparison_stats": gate.get("comparison_stats"),
+                    "exclusion_note": str(gate.get("exclusion_note", "") or ""),
+                }
+            # Partial exclusion transparency (P0#5): state excluded
+            # entities/metrics in prose exactly once per response, tracked
+            # structurally (exclusion_disclosed flag), never by fragile
+            # exact-string matching as the source of truth.
+            try:
+                from app.services.data.canonical import (
+                    exclusion_note_for as _excl_for,
+                )
+
+                _excl_note = str(validated_state.get("exclusion_note", "") or "")
+                if not _excl_note and validated_state.get("partial"):
+                    _excl_note = _excl_for(validated_state)
+                # What-if answers are scenario results, not comparisons: a
+                # computed scenario suppresses comparison-metric exclusion
+                # notes (the assumption + projected result are the evidence).
+                try:
+                    if is_what_if_query(plan_text) and (computed_numbers or {}).get("what_if"):
+                        _excl_note = ""
+                except Exception:
+                    pass
+                if _excl_note and output.clarification is None and not validated_state.get(
+                    "exclusion_disclosed"
+                ):
+                    output.answer = str(output.answer or "").rstrip() + "\n\n" + _excl_note
+                    try:
+                        validated_state["exclusion_disclosed"] = True
+                        validated_state["exclusion_note"] = _excl_note
+                    except Exception:
+                        pass
+            except Exception as exc:
+                logger.warning("Exclusion-note append failed: %s", exc)
+            # Explicit evidence requirements (P0#3): entities x metrics x
+            # timeframe x data type, derived BEFORE reading retrieval results;
+            # fulfilled/missing recorded in the trace (never re-requested).
+            try:
+                from app.services.data.canonical import (
+                    derive_evidence_requirements as _derive_reqs,
+                    reconcile_requirements as _reconcile_reqs,
+                )
+
+                _reqs = _derive_reqs(
+                    list(plan_dict.get("entities", []) or []),
+                    list(plan_dict.get("metrics", []) or []),
+                    plan_dict.get("period_label"),
+                )
+                _per_ok: dict = {}
+                try:
+                    _per_ok = (_completeness_for_state or {}).get("per_entity", {}) or {}
+                except Exception:
+                    _per_ok = {}
+                _rec = _reconcile_reqs(_reqs, _per_ok)
+                if _rec.get("missing"):
+                    thinking.append(
+                        "Evidence requirements missing: "
+                        + "; ".join(
+                            f"{m['entity']}/{m['metric']}" for m in _rec["missing"][:6]
+                        )
+                    )
+            except Exception as exc:
+                logger.warning("Requirement reconcile failed: %s", exc)
+            # Source-quality signal (P1#29): provider diversity + structured
+            # provenance tiers recorded (authoritative filings/structured >
+            # snippets). Count alone never decides quality.
+            try:
+                _provs = sorted(providers or [])
+                if _provs:
+                    thinking.append(f"Evidence providers: {', '.join(_provs[:4])}")
+            except Exception:
+                pass
+            # Phase 16 contract: confidence is evidence-driven. The canonical
+            # validated state produces a deterministic cap (BLOCKED -> 0,
+            # insufficient -> 0, partial -> capped low); the LLM's subjective
+            # number survives below it, never above.
+            entities_found = sorted(set(
+                list(validated_state.get("validated_entities", []) or [])
+                or list(gate.get("validated_entities", []) or [])
+            ))
+            # Fall back to raw-found only when no validated subset exists
+            # (non-comparison qualitative answers).
+            if not entities_found and not gate.get("applies"):
+                entities_found = sorted({
+                    str(item.get("entity", "") or item.get("symbol", ""))
+                    for lst in (list(price_history) + list(financial_history) + list(market_data))
+                    for item in [lst if isinstance(lst, dict) else {}]
+                    if isinstance(lst, dict) and (lst.get("values") or (lst.get("revenue", {}) or {}).get("values"))
+                })
+            metrics_found = list(
+                validated_state.get("validated_metrics", [])
+                or gate.get("validated_metrics", [])
+                or (list(plan_dict.get("metrics", []) or []) if gate.get("applies") and not gate.get("blocked") else [])
             )
+            try:
+                if evidence_driven_confidence is not None and (plan_dict.get("is_comparison") or gate.get("applies")):
+                    capped = evidence_driven_confidence(
+                        output.confidence,
+                        plan=plan_dict,
+                        entities_found=entities_found,
+                        metrics_found=metrics_found,
+                        historical_ok=bool(gate.get("historical_ok", True)),
+                        comparison_ok=bool(gate.get("comparison_ok", True)),
+                        row_count=len(narrate_rows),
+                        source_count=len(web_sources or []),
+                        snippet_count=len(news_context),
+                        provider_count=len(providers),
+                        has_structured=bool(market_data or macro_data or fundamentals or price_history or financial_history),
+                    )
+                else:
+                    capped = evidence_confidence_cap(
+                        output.confidence,
+                        row_count=len(narrate_rows),
+                        snippet_count=len(news_context),
+                        provider_count=len(providers),
+                        has_market=bool(market_data or macro_data or fundamentals),
+                    )
+            except Exception as exc:
+                logger.warning("Evidence-driven confidence failed: %s", exc)
+                capped = evidence_confidence_cap(
+                    output.confidence,
+                    row_count=len(narrate_rows),
+                    snippet_count=len(news_context),
+                    provider_count=len(providers),
+                    has_market=bool(market_data or macro_data or fundamentals),
+                )
             # Historical gate overrides the generic cap: BLOCKED means 0.0
-            # (missing multi-year evidence), PASSED keeps the generic cap.
-            # A short-term-only series must never inflate confidence for a
-            # multi-year ask.
+            # (insufficient evidence), PASSED keeps the generic cap. Partial
+            # caps at 0.65 (never full 0.85). A short-term-only series must
+            # never inflate confidence for a multi-year ask.
             if gate.get("applies"):
                 if gate.get("blocked"):
                     if output.confidence != 0.0:
@@ -2664,17 +5139,47 @@ async def run_pipeline(
                         thinking.append("Confidence forced to 0.0: historical evidence insufficient.")
                     output.confidence = 0.0
                     capped = 0.0
-                else:
-                    # Validated history is strong evidence: lift to at least
-                    # 0.65 so a real 3Y comparison never reads "Low 0%".
-                    capped = max(capped, 0.65)
-                    if capped < output.confidence - 0.005:
-                        pass  # generic cap still wins below
-                    elif output.confidence < capped:
+                elif gate.get("partial"):
+                    capped = min(capped, 0.65)
+                    if output.confidence > capped + 0.005:
                         thinking.append(
-                            f"Confidence lifted by validated history: {output.confidence} -> {capped}"
+                            f"Confidence capped by partial evidence: {output.confidence} -> {capped}"
                         )
                         output.confidence = capped
+                else:
+                    # PASSED gate keeps the evidence-driven cap as-is (P0#24):
+                    # confidence represents evidence quality/coverage, and no
+                    # PASSED verdict may lift it regardless of quality. A
+                    # sparse two-point series earns its thin-evidence cap, not
+                    # an automatic >=0.65.
+                    pass
+            # Sparse-series penalty (P0#24/P1#29): a validated gate over thin
+            # observations (2 points for a multi-year ask) or a single
+            # provider caps below full confidence; source count alone never
+            # makes weak evidence look strong.
+            try:
+                _years = gate.get("years") if gate.get("applies") else None
+                if _years and int(_years) >= 3 and not gate.get("blocked"):
+                    _min_obs = 10**9
+                    for _lst in (list(price_history or []) + list(market_data or [])):
+                        if isinstance(_lst, dict) and _lst.get("values"):
+                            _min_obs = min(_min_obs, len(list(_lst.get("values") or [])))
+                    for _item in list(financial_history or []):
+                        if isinstance(_item, dict):
+                            for _bk in ("revenue", "net_income"):
+                                _chunk = (_item.get(_bk, {}) or {})
+                                if isinstance(_chunk, dict) and _chunk.get("values"):
+                                    _min_obs = min(_min_obs, len(list(_chunk.get("values") or [])))
+                    if _min_obs <= 2:
+                        capped = min(capped, 0.45)
+                        thinking.append(
+                            "Confidence capped by sparse observations "
+                            f"(min_obs={_min_obs} for {_years}Y)."
+                        )
+                    if len(providers) <= 1 and not (price_history or financial_history):
+                        capped = min(capped, 0.65)
+            except Exception:
+                pass
             if capped < output.confidence - 0.005:
                 logger.info(
                     f"Confidence capped by evidence: {output.confidence} -> {capped}."
@@ -2693,7 +5198,7 @@ async def run_pipeline(
             web_sources=web_sources,
             news_context=news_context,
             preferred_visual=decision.preferred_visual,
-            query=user_query,
+            query=plan_text,
             fundamentals=fundamentals,
             macro_data=macro_data,
             price_history=price_history,
@@ -2703,6 +5208,141 @@ async def run_pipeline(
             thinking.append(
                 f"Visuals out: {', '.join(v.visual_type for v in output.visuals)}"
             )
+        # Deterministic visual-plan reconciliation (P0#18): the judge's
+        # visual_plan is advisory; the deterministic planner below is
+        # authoritative. Divergence is logged (never silent) and the
+        # deterministic verdict wins -- there is exactly one effective plan.
+        try:
+            _det_plan = plan_visuals_from_evidence(
+                query=plan_text,
+                validated_state=validated_state,
+                has_rows=bool(narrate_rows),
+                has_history=bool(price_history or financial_history),
+                has_market=bool(market_data),
+                has_snippets=bool(news_context),
+            )
+            _judge_plan = [item.kind for item in (decision.visual_plan or [])]
+            if set(_judge_plan) != set(_det_plan):
+                logger.info(
+                    "Visual plan reconciled: judge=%s deterministic=%s.",
+                    _judge_plan, _det_plan,
+                )
+                thinking.append(
+                    f"Visual plan reconciled (deterministic wins): {', '.join(_det_plan) or 'none'}"
+                )
+        except Exception as exc:
+            logger.warning("Visual-plan reconcile failed: %s", exc)
+        # Code-grounded narration + final validation (P0#22/#23): claims
+        # exceeding validated evidence are removed/blocked in code, never by
+        # prompt compliance alone. Follow-ups are grounded (P1#30) and the
+        # what-if assumption is verified verbatim (P0#10).
+        try:
+            output = apply_narration_contract(
+                output,
+                validated_state=validated_state,
+                computed_numbers=computed_numbers,
+                gate=gate,
+                thinking=thinking,
+            )
+        except Exception as exc:
+            logger.warning("Narration contract failed (fail-open prose kept): %s", exc)
+        # Phase 18: compact structured research state for follow-ups (never
+        # raw payloads). Phase 19: structured trace log (no secrets/PII).
+        try:
+            output.research_state = {
+                "query": user_query[:300],
+                "plan": {
+                    "entities": list(plan_dict.get("entities", []) or []),
+                    "metrics": list(plan_dict.get("metrics", []) or []),
+                    "time_range": plan_dict.get("time_range"),
+                    "requires_history": bool(plan_dict.get("requires_history")),
+                    "required_tools": list(plan_dict.get("required_tools", []) or []),
+                },
+                "entities_found": entities_found if output.clarification is None else [],
+                "gate": {
+                    "applies": bool(gate.get("applies")),
+                    "blocked": bool(gate.get("blocked")),
+                    "blocked_reason": str(gate.get("blocked_reason", "") or "")[:300],
+                },
+                "confidence": output.confidence,
+                "sources": [
+                    {
+                        "title": str(source.get("title", ""))[:120],
+                        "url": str(source.get("url", ""))[:300],
+                        "provider": str(source.get("provider", ""))[:60],
+                    }
+                    for source in (web_sources or [])[:12]
+                ],
+            }
+        except Exception as exc:
+            logger.warning("Research-state build failed: %s", exc)
+        try:
+            _executed = [
+                        name for name, lst in (
+                            ("market", market_data), ("macro", macro_data),
+                            ("fundamentals", fundamentals),
+                            ("price_history", price_history),
+                            ("financial_history", financial_history),
+                        ) if lst
+                    ] + (["snippets"] if news_context else [])
+            _completeness: Dict[str, Any] = {}
+            _missing_entities: list = []
+            _missing_metrics: list = []
+            try:
+                if check_research_completeness is not None and plan_dict:
+                    _completeness = check_research_completeness(
+                        plan_dict,
+                        {
+                            "price_history": price_history,
+                            "financial_history": financial_history,
+                            "market_data": market_data,
+                            "fundamentals": fundamentals,
+                            "snippets": news_context,
+                        },
+                    ) or {}
+                    _missing_entities = list(_completeness.get("missing_entities", []) or [])
+                    _missing_metrics = list(_completeness.get("missing_metrics", []) or [])
+            except Exception as exc:
+                logger.warning("Completeness for trace failed: %s", exc)
+            trace = (
+                build_trace(
+                    query=user_query,
+                    plan=plan_dict,
+                    tools_requested=list(plan_dict.get("required_tools", []) or []),
+                    tools_executed=_executed,
+                    planned_tools=list(getattr(decision, "tools_needed", []) or []),
+                    actually_executed_tools=_executed,
+                    tool_results={
+                        "rows": len(narrate_rows),
+                        "snippets": len(news_context),
+                        "market_series": len(market_data or []),
+                        "price_history": len(price_history or []),
+                        "financial_history": len(financial_history or []),
+                    },
+                    missing_entities=_missing_entities,
+                    missing_metrics=_missing_metrics,
+                    completeness={
+                        "comparison_complete": bool(_completeness.get("comparison_complete"))
+                        if _completeness else (not bool(gate.get("blocked")) if gate.get("applies") else True),
+                        "missing": list((_completeness.get("missing") or [])[:6]) if _completeness else [],
+                    },
+                    missing_evidence=(
+                        [gate.get("blocked_reason", "")[:200]]
+                        if gate.get("blocked") else []
+                    ),
+                    comparison_gate=gate,
+                    calculated_stats=bool((computed_numbers or {}).get("comparison_stats")),
+                    visual_decision=[v.visual_type for v in (output.visuals or [])],
+                    final_confidence=output.confidence,
+                    entities=list(plan_dict.get("entities", []) or []),
+                    metrics=list(plan_dict.get("metrics", []) or []),
+                    time_range=plan_dict.get("time_range"),
+                )
+                if build_trace is not None else {}
+            )
+            log_runtime_trace(trace)
+        except Exception as exc:
+            logger.warning("Trace log failed: %s", exc)
         output.thinking = thinking + list(output.thinking or [])
         return output
 

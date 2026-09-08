@@ -78,31 +78,60 @@ DATA_PREVIEW_MAX_ROWS = 50
 PRIOR_DATA_MAX_ROWS = 8
 
 
+def _thread_id_for(request) -> str:
+    """Minimum scoped identifier for thread isolation (P0#20)."""
+    try:
+        thread = getattr(request, "thread_id", None) or getattr(
+            request, "conversation_id", None
+        )
+        thread = str(thread or "default").strip() or "default"
+    except Exception:
+        thread = "default"
+    return thread[:120]
+
+
 async def _load_prior_context(
-    db: AsyncSession, user_id: UUID
-) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
+    db: AsyncSession, user_id: UUID, thread_id: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[Dict[str, Any]], Optional[Dict[str, Any]], str]:
     """Recover the previous turn from the user's latest QueryLogs row.
 
-    Returns (prior_clarification_question, prior_data_digest). Both are None
-    when there is no usable history. Fully defensive: a corrupt or foreign
-    log row degrades to no context, never an error.
+    Returns (prior_clarification_question, prior_data_digest,
+    prior_research_state, prior_query). All Nones/"" when there is no usable
+    history. Fully defensive: a corrupt or foreign log row degrades to no
+    context, never an error.
     """
     try:
+        wanted = str(thread_id or "default").strip() or "default"
         result = await db.execute(
             select(QueryLogs)
             .where(QueryLogs.user_id == user_id)
             .order_by(QueryLogs.created_at.desc())
-            .limit(1)
+            .limit(10)
         )
-        log = result.scalar_one_or_none()
-        if log is None or not log.response:
-            return None, None
-        try:
-            response = json.loads(log.response)
-        except (ValueError, TypeError):
-            return None, None
-        if not isinstance(response, dict):
-            return None, None
+        logs = list(result.scalars().all())
+        log = None
+        response = None
+        for candidate in logs:
+            if candidate is None or not candidate.response:
+                continue
+            try:
+                payload = json.loads(candidate.response)
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            state = payload.get("research_state")
+            row_thread = (
+                str((state or {}).get("thread_id", "") or "").strip()
+                if isinstance(state, dict)
+                else ""
+            ) or "default"
+            if row_thread == wanted:
+                log = candidate
+                response = payload
+                break
+        if log is None or response is None:
+            return None, None, None, ""
 
         prior_clarification = None
         clarification = response.get("clarification")
@@ -111,19 +140,32 @@ async def _load_prior_context(
 
         prior_data = None
         preview = response.get("data_preview")
+        total_rows = None
+        try:
+            _rs = response.get("research_state")
+            if isinstance(_rs, dict) and isinstance(_rs.get("total_rows"), int):
+                total_rows = int(_rs["total_rows"])
+        except Exception:
+            total_rows = None
         if isinstance(preview, list) and preview:
             sample = [row for row in preview[:PRIOR_DATA_MAX_ROWS] if isinstance(row, dict)]
             if sample:
                 prior_data = {
                     "columns": list(sample[0].keys()),
-                    "row_count": len(preview),
+                    "row_count": total_rows if total_rows is not None else len(preview),
                     "rows": sample,
                     "from_query": log.query,
                 }
-        return prior_clarification, prior_data
+        # Compact structured research state (Phase 18): the previous turn's
+        # canonical plan + validated evidence summary, so a follow-up keeps
+        # its entities/metrics/period instead of starting from a fragment.
+        prior_research_state = response.get("research_state")
+        if not isinstance(prior_research_state, dict):
+            prior_research_state = None
+        return prior_clarification, prior_data, prior_research_state, str(log.query or "")
     except Exception as exc:
         logger.warning(f"Prior context unavailable, continuing without it: {exc}")
-        return None, None
+        return None, None, None, ""
 
 
 async def _user_has_data(db: AsyncSession, user_id: UUID) -> bool:
@@ -258,7 +300,25 @@ async def _answer_request(
     rows: list = []
     cleaned_sql = None
     table_name = None
-    prior_clarification, prior_data = await _load_prior_context(db, user.id)
+    thread_id = _thread_id_for(request)
+    prior_clarification, prior_data, prior_research_state, prior_query = (
+        await _load_prior_context(db, user.id, thread_id)
+    )
+
+    # Phase 3: a clarification reply is a fragment of the ORIGINAL research
+    # plan, not a standalone query. Merge it back so decomposition keeps the
+    # original entities/metrics/period (planning/research use the merged
+    # text; narration still answers the user's literal message).
+    plan_query = request.query
+    if prior_clarification and prior_query:
+        try:
+            from app.services.data.comparison import (
+                merge_clarification_context as _merge_ctx,
+            )
+            plan_query = _merge_ctx(prior_query, prior_clarification, request.query)
+        except Exception as exc:
+            logger.warning(f"Clarification merge failed: {exc}")
+            plan_query = request.query
 
     # Judge-directed tool routing starts now so its fast planning call
     # overlaps the SQL-generation LLM call below. plan_tools never raises
@@ -268,7 +328,7 @@ async def _answer_request(
         live_settings = get_settings()
         plan_task = asyncio.create_task(
             plan_tools(
-                request.query,
+                plan_query,
                 source_scope=request.source_scope,
                 company_name=request.company_name,
                 prior_clarification=prior_clarification,
@@ -281,7 +341,10 @@ async def _answer_request(
         table_name = user_data_table_name(user.id)
         columns = await get_table_columns(db, table_name)
         schema = build_data_schema(table_name, columns)
-        sql_prompt = build_sql_prompt(request.query, schema)
+        # Canonical query (P0#1): SQL uses plan_query (clarification-merged
+        # research intent), never the fragmentary request.query, so SQL and
+        # research/visual timeframes cannot diverge.
+        sql_prompt = build_sql_prompt(plan_query, schema)
 
         sql_result = await generate_response(
             prompt=sql_prompt,
@@ -291,22 +354,43 @@ async def _answer_request(
         )
         cleaned_sql = clean_sql_response(sql_result.get("content") or "")
 
+    sql_error: Optional[str] = None
+
     async def _execute_branch():
+        nonlocal sql_error
         try:
             assert table_name is not None and cleaned_sql is not None
             return await execute_sql(cleaned_sql, db, table_name)
         except InvalidQueryError:
+            return _Sentinel
+        except HTTPException as http_exc:
+            # SQL safety/tenant errors (422/403) are logged fallbacks
+            # (P1#27), never unlogged escapes.
+            sql_error = str(http_exc.detail or "query rejected")
+            try:
+                await db.rollback()
+            except Exception:
+                pass
             return _Sentinel
 
     async def _search_branch():
         if request.source_scope not in ("live_web", "both"):
             return None
         planned = await plan_task if plan_task is not None else None
+        try:
+            from app.services.data.comparison import parse_time_range as _ptr2
+
+            _tf = (_ptr2(plan_query or "").label or "") or None
+        except Exception:
+            _tf = None
         return await search_web(
-            request.query,
+            plan_query,
             request.company_name,
             prior_clarification=prior_clarification,
             planned_tools=planned,
+            user_id=str(user.id),
+            thread_id=thread_id,
+            timeframe_label=_tf,
         )
 
     await emit("evidence")
@@ -315,24 +399,48 @@ async def _answer_request(
             _execute_branch() if table_name is not None else asyncio.sleep(0, result=[]),
             _search_branch(),
         )
-    except Exception:
-        # A branch failure outside the sentinel contract must not orphan the
-        # planner task (pending-task noise at shutdown); nothing else changes
-        # - the exception still propagates as before this task existed.
+    except Exception as branch_exc:
+        # Consistent failure contract (P1#27): branch failures outside the
+        # sentinel contract are logged to QueryLogs as fallbacks, never
+        # propagated as 500s and never escaping without a log row.
         if plan_task is not None and not plan_task.done():
             plan_task.cancel()
-        raise
+        logger.error(f"Evidence branch failed in /chat: {branch_exc}")
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        output = fallback_output(
+            reason="I ran into a problem gathering evidence - please try again.",
+            confidence=0.0,
+        )
+        try:
+            _rs = dict(output.research_state or {})
+        except Exception:
+            _rs = {}
+        _rs.update({"canonical_query": plan_query, "thread_id": thread_id})
+        output.research_state = _rs
+        return await _log_and_return(
+            db, user.id, plan_query, output, time.monotonic() - started
+        )
     if exec_result is _Sentinel:
         # specs/05 §5.3 + §6: the sentinel short-circuits to a graceful message,
         # never returned as if it were data; still logged so failures show up.
         output = fallback_output(
             reason=(
-                "I couldn't turn that into a query for your data - try "
+                sql_error
+                or "I couldn't turn that into a query for your data - try "
                 "rephrasing the question."
             )
         )
+        try:
+            _rs0 = dict(output.research_state or {})
+        except Exception:
+            _rs0 = {}
+        _rs0.update({"canonical_query": plan_query, "thread_id": thread_id})
+        output.research_state = _rs0
         return await _log_and_return(
-            db, user.id, request.query, output, time.monotonic() - started
+            db, user.id, plan_query, output, time.monotonic() - started
         )
     rows = exec_result
 
@@ -343,7 +451,7 @@ async def _answer_request(
         # the LLM narrates the precomputed numbers, never its own arithmetic.
         if rows:
             try:
-                scenario = parse_what_if(request.query)
+                scenario = parse_what_if(plan_query)
                 if scenario is not None:
                     what_if = apply_what_if(rows, *scenario)
                     if what_if is not None:
@@ -387,12 +495,18 @@ async def _answer_request(
             research_notes = (
                 getattr(search_result, "research_notes", []) or []
             )
-            # Structured macro series chart like market series downstream.
-            if macro_data:
-                market_data = list(market_data) + list(macro_data)
+            # Channels stay separate (P0#15): macro_data is NEVER merged
+            # into market_data (a market chart must never contain CPI/GDP).
             retrieved_at = datetime.now(timezone.utc).isoformat()
             web_sources = [
-                {**source, "retrieved_at": retrieved_at} for source in web_sources
+                {
+                    # retrieved_at is transport metadata; the source's own
+                    # publication date (published_date/source_published_at)
+                    # is never overwritten (P1#28).
+                    **{k: v for k, v in source.items() if k != "retrieved_at"},
+                    "retrieved_at": retrieved_at,
+                }
+                for source in web_sources
             ]
         output = await run_pipeline(
             user_query=request.query,
@@ -411,6 +525,8 @@ async def _answer_request(
             price_history=price_history,
             financial_history=financial_history,
             research_notes=research_notes,
+            prior_research_state=prior_research_state,
+            plan_query=plan_query,
         )
     except Exception as exc:
         # Never let the pipeline crash the request: fall back per specs/06 FR4.
@@ -424,10 +540,30 @@ async def _answer_request(
             output.sql_query = cleaned_sql
         output.data_preview = rows[:DATA_PREVIEW_MAX_ROWS] if rows else []
         output.web_sources = web_sources
+        try:
+            _rsf = dict(output.research_state or {})
+        except Exception:
+            _rsf = {}
+        _rsf.update({
+            "canonical_query": plan_query,
+            "thread_id": thread_id,
+            "total_rows": len(rows or []),
+        })
+        output.research_state = _rsf
 
-    return await _log_and_return(
-        db, user.id, request.query, output, time.monotonic() - started
-    )
+    # QueryLogs preserve the canonical query (P0#1); DB-logging failure must
+    # not turn a valid response into an unrelated 500 where avoidable.
+    try:
+        return await _log_and_return(
+            db, user.id, plan_query, output, time.monotonic() - started
+        )
+    except Exception as log_exc:
+        logger.error(f"QueryLogs write failed, returning unlogged answer: {log_exc}")
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        return output
 
 
 @router.post("/flag", response_model=FlagResponse)

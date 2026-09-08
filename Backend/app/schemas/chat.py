@@ -15,6 +15,11 @@ class ChatRequest(BaseModel):
     query: str
     source_scope: SourceScope = "own_data"
     company_name: Optional[str] = None
+    # Minimum scoped identifier for thread isolation (P0#20): turns in the
+    # same thread share prior context; different threads never do. Defaults
+    # to "default" so existing clients keep working (single-thread).
+    thread_id: Optional[str] = None
+    conversation_id: Optional[str] = None
 
 
 class FlagRequest(BaseModel):

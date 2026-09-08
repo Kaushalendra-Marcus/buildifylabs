@@ -24,6 +24,7 @@ _REQUIRED_ENV = {
     # AsyncGroq client at import time, which requires an api_key) - dummy values
     # keep the whole import chain testable without a real provider.
     "GROQ_API_KEY": "test-groq-key",
+    "GROQ_MODEL": "test-model",
     "HF_API_KEY": "test-hf-key",
 }
 for _key, _value in _REQUIRED_ENV.items():

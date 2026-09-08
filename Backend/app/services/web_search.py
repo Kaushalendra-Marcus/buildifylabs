@@ -55,6 +55,7 @@ STOCK_ALIASES = {
     "Google": "GOOGL",
     "Meta": "META",
     "Intel": "INTC",
+    "Samsung": "005930.KS",
 }
 
 MAX_SEARCH_QUERIES = 3
@@ -102,11 +103,25 @@ _WORD_NUM_MAP = {
 
 def wants_historical(query_text: str) -> bool:
     """True when the query asks for multi-year history (not a snapshot)."""
-    return bool(HISTORICAL_PERIOD_RE.search(query_text or ""))
+    if HISTORICAL_PERIOD_RE.search(query_text or ""):
+        return True
+    try:
+        from app.services.data.comparison import parse_time_range as _parse
+        years = _parse(query_text or "").years
+        return bool(years and years >= 2)
+    except Exception:
+        return False
 
 
 def requested_history_years(query_text: str) -> Optional[int]:
     """Parse the requested window in years ("last 3 years" -> 3)."""
+    try:
+        from app.services.data.comparison import parse_time_range as _parse
+        years = _parse(query_text or "").years
+        if years:
+            return years
+    except Exception:
+        pass
     match = HISTORICAL_PERIOD_RE.search(query_text or "")
     if not match:
         return None
@@ -793,11 +808,26 @@ async def _fetch_financial_history(
         if len(revenue_pts) < 2 and len(income_pts) < 2:
             return None
         bits: list[str] = []
+        # H5: explicit reporting currency on every financial evidence object.
+        # The timeseries endpoint carries no currency field, so infer from
+        # the Yahoo symbol suffix (documented heuristic: US-listed -> USD,
+        # .NS -> INR, .T -> JPY, ...). Explicit-inferred beats silent-unknown;
+        # callers still treat mixed known codes as incompatible absolutes.
+        try:
+            from app.services.data.comparison import (
+                _infer_currency_for_symbol as _infer_ccy,
+            )
+
+            inferred_ccy = _infer_ccy(symbol)
+        except Exception:
+            inferred_ccy = None
         payload_out: dict[str, Any] = {
             "entity": entity,
             "symbol": symbol,
             "frequency": "annual",
             "is_historical": True,
+            "currency": inferred_ccy,
+            "currency_inferred": True if inferred_ccy else False,
         }
         if len(revenue_pts) >= 2:
             start_rev, end_rev = revenue_pts[0][1], revenue_pts[-1][1]
@@ -808,7 +838,12 @@ async def _fetch_financial_history(
                 "period_start": revenue_pts[0][0],
                 "period_end": revenue_pts[-1][0],
                 "metric": "annualTotalRevenue",
-                "unit": "currency",
+                "definition": "annualTotalRevenue",
+                "unit": inferred_ccy or "currency",
+                "currency": inferred_ccy,
+                "scale": 1.0,
+                "frequency": "annual",
+                "source_type": "yahoo",
             }
             if growth is not None:
                 bits.append(f"revenue {start_rev:,.0f} -> {end_rev:,.0f} ({growth:+.2f}%)")
@@ -819,7 +854,12 @@ async def _fetch_financial_history(
                 "period_start": income_pts[0][0],
                 "period_end": income_pts[-1][0],
                 "metric": "annualNetIncome",
-                "unit": "currency",
+                "definition": "annualNetIncome",
+                "unit": inferred_ccy or "currency",
+                "currency": inferred_ccy,
+                "scale": 1.0,
+                "frequency": "annual",
+                "source_type": "yahoo",
             }
             bits.append(f"net income {income_pts[0][1]:,.0f} -> {income_pts[-1][1]:,.0f}")
         if not bits:
@@ -1131,7 +1171,9 @@ def _normalize_fin_year(raw: str) -> str:
     text = " ".join((raw or "").split())
     year_match = re.search(r"20\d{2}", text)
     year = year_match.group(0) if year_match else text
-    if re.search(r"\bF\.?Y\.?\b|fiscal", text, re.IGNORECASE):
+    # NOTE: no trailing \b after Y -- "FY2023" has no boundary between Y
+    # and the digits, and \bF\.?Y\.?\b would miss it (live bug).
+    if re.search(r"F\.?Y\.?|fiscal", text, re.IGNORECASE):
         return f"FY{year}" if year != text else text
     return year
 
@@ -1187,7 +1229,7 @@ def _extract_financials_from_snippets(
                 if not rev_hits and not inc_hits:
                     continue
                 for money in _FIN_MONEY_RE.finditer(sentence):
-                    digits = (money.group(2) or "").replace(",", "")
+                    digits = (money.group(2) or "").replace(",", "").rstrip(",")
                     try:
                         amount = float(digits)
                     except (TypeError, ValueError):
@@ -1205,8 +1247,15 @@ def _extract_financials_from_snippets(
                     window = sentence[max(0, money.start() - 20):money.start()]
                     if _PRICE_GUARD_RE.search(window):
                         continue
-                    # Nearest cue + nearest year win (a sentence may carry
-                    # revenue AND income, or several years).
+                    # Nearest cue wins (a sentence may carry revenue AND
+                    # income). Year attribution PREFERS the year stated AFTER
+                    # the figure ("$96.8 billion in FY2023"): financial prose
+                    # puts the period after the amount, and pure-nearest
+                    # attribution ties/misattributes ("... in FY2023, up from
+                    # $81.5B in FY2022" bound BOTH figures to FY2023, which
+                    # collapsed 2-year evidence to 1 year and silently killed
+                    # the series). Only when no year follows does the nearest
+                    # preceding year win.
                     pos = money.start()
                     nearest_rev = (
                         min(abs(pos - hit) for hit in rev_hits)
@@ -1221,19 +1270,38 @@ def _extract_financials_from_snippets(
                         if nearest_inc <= nearest_rev
                         else "revenue"
                     )
-                    year_label = min(
-                        year_hits, key=lambda hit: abs(hit[0] - pos)
-                    )[1]
+                    following = [hit for hit in year_hits if hit[0] >= money.end()]
+                    if following:
+                        year_label = min(following, key=lambda hit: hit[0] - pos)[1]
+                    else:
+                        year_label = min(
+                            year_hits, key=lambda hit: abs(hit[0] - pos)
+                        )[1]
+                    try:
+                        from app.services.data.comparison import (
+                            normalize_currency as _normalize_currency,
+                        )
+                        figure_currency = _normalize_currency(symbol, currency_word)
+                    except Exception:
+                        figure_currency = None
                     bucket = collected[cue]
                     # First-seen wins per (metric, year): deterministic, and
                     # the lead snippet is usually the most relevant result.
                     if year_label not in bucket:
-                        bucket[year_label] = (year_label, amount * _FIN_SCALE.get(scale_word, 1), sentence.strip()[:120])
+                        bucket[year_label] = (year_label, amount * _FIN_SCALE.get(scale_word, 1), sentence.strip()[:200], figure_currency)
         # Keep only the trailing window of years (latest completed periods).
         series: dict[str, list[tuple[str, float]]] = {}
+        series_currency: dict[str, Optional[str]] = {}
         for cue, bucket in collected.items():
             ordered = sorted(bucket.values(), key=lambda item: item[0])
-            series[cue] = [(label, value) for label, value, _ctx in ordered][-(years + 1):]
+            windowed = ordered[-(years + 1):]
+            series[cue] = [(label, value) for label, value, _ctx, _cur in windowed]
+            # Explicit currency when every point in-window agrees; else
+            # explicitly unknown (None) -- never a silent default.
+            window_currencies = {cur for _, _, _, cur in windowed if cur}
+            series_currency[cue] = (
+                next(iter(window_currencies)) if len(window_currencies) == 1 else None
+            )
         revenue_pts = series.get("revenue", [])
         income_pts = series.get("net_income", [])
         if len(revenue_pts) < 2 and len(income_pts) < 2:
@@ -1254,6 +1322,12 @@ def _extract_financials_from_snippets(
                 "period_end": revenue_pts[-1][0],
                 "metric": "annualTotalRevenue",
                 "unit": "currency",
+                # Explicit ISO code when every in-window figure agreed on
+                # one; None = explicitly unknown (never a silent default).
+                "currency": series_currency.get("revenue"),
+                "frequency": "annual",
+                "definition": "annualTotalRevenue",
+                "source_type": "web_snippets",
             }
             growth = (
                 (revenue_pts[-1][1] - revenue_pts[0][1]) / abs(revenue_pts[0][1]) * 100
@@ -1272,6 +1346,10 @@ def _extract_financials_from_snippets(
                 "period_end": income_pts[-1][0],
                 "metric": "annualNetIncome",
                 "unit": "currency",
+                "currency": series_currency.get("net_income"),
+                "frequency": "annual",
+                "definition": "annualNetIncome",
+                "source_type": "web_snippets",
             }
             bits.append(
                 f"net income {income_pts[0][1]:,.0f} -> {income_pts[-1][1]:,.0f} "
@@ -1312,6 +1390,77 @@ def _entities_missing_financials(
         entity for entity in required_entities or []
         if str(entity).strip().lower() not in have
     ]
+
+
+def _entities_missing_price_history(
+    required_entities: list[str], price_history: list
+) -> list[str]:
+    """Required entities lacking a usable dated price series (generic)."""
+    have: set[str] = set()
+    for item in price_history or []:
+        if not isinstance(item, dict):
+            continue
+        values = list(item.get("values") or [])
+        labels = list(item.get("labels") or [])
+        if len(values) >= 2 and len(labels) >= 2:
+            name = str(item.get("entity", "")).strip()
+            if name:
+                have.add(name.lower())
+    return [
+        entity for entity in required_entities or []
+        if str(entity).strip().lower() not in have
+    ]
+
+
+def missing_evidence_requirements(
+    entities: list[str],
+    metrics: list[str],
+    price_history: list,
+    financial_history: list,
+) -> list[dict]:
+    """Generic missing-requirement list (entities x metrics x data type).
+
+    Never includes already-validated cells: only genuinely missing
+    requirements are returned for targeted recovery (P0#4).
+    """
+    try:
+        from app.services.data.canonical import derive_evidence_requirements
+    except Exception:
+        return []
+    reqs = derive_evidence_requirements(entities or [], metrics or [], None)
+    price_have = {
+        str(item.get("entity", "")).strip().lower()
+        for item in (price_history or [])
+        if isinstance(item, dict) and len(list(item.get("values") or [])) >= 2
+    }
+    fin_rev_have = set()
+    fin_inc_have = set()
+    for item in financial_history or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("entity", "")).strip().lower()
+        if len(list((item.get("revenue", {}) or {}).get("values", []) or [])) >= 2:
+            fin_rev_have.add(name)
+        if len(list((item.get("net_income", {}) or {}).get("values", []) or [])) >= 2:
+            fin_inc_have.add(name)
+    missing: list[dict] = []
+    for req in reqs:
+        key = req.entity.strip().lower()
+        if req.data_type == "market_history":
+            if key not in price_have:
+                missing.append({"entity": req.entity, "metric": req.metric, "data_type": req.data_type})
+        elif req.data_type == "financial_history":
+            if req.metric == "revenue_growth" and key not in fin_rev_have:
+                missing.append({"entity": req.entity, "metric": req.metric, "data_type": req.data_type})
+            elif req.metric == "profitability" and key not in fin_inc_have:
+                missing.append({"entity": req.entity, "metric": req.metric, "data_type": req.data_type})
+            elif req.metric not in ("revenue_growth", "profitability") and key not in (fin_rev_have & fin_inc_have):
+                missing.append({"entity": req.entity, "metric": req.metric, "data_type": req.data_type})
+        else:
+            # research_figures: snippet recovery handled by the caller via
+            # targeted snippet queries (no structured channel to check).
+            missing.append({"entity": req.entity, "metric": req.metric, "data_type": req.data_type})
+    return missing
 
 
 async def _research_missing_financials(
@@ -1397,6 +1546,12 @@ async def search_web(
     company_name: Optional[str] = None,
     prior_clarification: Optional[str] = None,
     planned_tools: Optional[list[str]] = None,
+    *,
+    user_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
+    timeframe_label: Optional[str] = None,
+    evidence_class: Optional[str] = None,
+    provider_version: Optional[str] = None,
 ) -> WebSearchResult:
     """Return current search snippets for the LLM, never raising to /chat.
 
@@ -1447,11 +1602,35 @@ async def search_web(
             set_cached_result,
         )
 
+        # Timeframe-aware identity: same entities with a different
+        # window (5Y vs 3Y) must never share evidence.
+        _tf_label = timeframe_label
+        if not _tf_label:
+            try:
+                from app.services.data.comparison import parse_time_range as _ptr
+
+                _tf_label = (_ptr(raw_text or "").label or "")
+            except Exception:
+                _tf_label = ""
         cache_key = make_cache_key(
             search_queries, entities, company_name, time_sensitive,
             planned_tools=planned_tools,
+            user_id=user_id, thread_id=thread_id,
+            timeframe_label=_tf_label,
+            evidence_class=evidence_class,
+            provider_version=provider_version,
         )
         cached = await get_cached_result(cache_key)
+        try:
+            from app.services.web_search_cache import (
+                is_cached_payload_valid as _valid,
+            )
+
+            if cached and not _valid(cached):
+                logger.info("Web-search cache entry stale schema; refetching.")
+                cached = None
+        except Exception:
+            pass
         if cached:
             logger.info("Web-search cache hit.")
             return WebSearchResult(
@@ -1487,11 +1666,15 @@ async def search_web(
             financial_history_sources: list[dict] = []
 
             query_text = query if isinstance(query, str) else raw_text
-            # Tool routing: the judge's plan wins when it names valid tools;
-            # anything else (None, empty, unknown names) falls back to the
-            # deterministic intent predicates below. The planner advises,
-            # the predicates guarantee - a planning failure can never take
-            # evidence away.
+            # Tool routing: the canonical ResearchPlan is authoritative.
+            # The judge's plan is advisory: resolve_tool_plan() keeps every
+            # valid LLM recommendation but unions the deterministic
+            # requirements back in, so the LLM may ADD tools but can never
+            # silently REMOVE one (e.g. proposing only ["market_history"]
+            # for a query that also needs financial_history). Planner
+            # abstain/unknown (None) falls back to the deterministic intent
+            # predicates below -- a planning failure can never take evidence
+            # away.
             planned: Optional[list[str]] = None
             if planned_tools:
                 cleaned = [
@@ -1500,11 +1683,40 @@ async def search_web(
                     )
                     if tool in TOOL_CATALOG
                 ]
-                planned = cleaned or None
+                try:
+                    from app.services.data.comparison import (
+                        resolve_tool_plan as _resolve_tool_plan,
+                    )
+                    resolved = _resolve_tool_plan(cleaned, query_text or "")
+                except Exception as exc:
+                    logger.warning("Canonical tool-plan resolve failed: %s", exc)
+                    resolved = cleaned
+                planned = resolved or None
                 if planned is not None:
-                    logger.info("Judge-planned tools: %s", planned)
+                    if set(planned) != set(cleaned):
+                        logger.info(
+                            "Canonical plan enforced tools: LLM=%s resolved=%s",
+                            cleaned, planned,
+                        )
+                    else:
+                        logger.info("Judge-planned tools: %s", planned)
             history_years = requested_history_years(query_text or "") or 3
             is_historical_request = wants_historical(query_text or "")
+            try:
+                # Normalized time range (Phase 7): explicit calendar ranges
+                # ("2022 to 2025") carry no relative marker, so the regexes
+                # above miss them. The structural parse covers both forms
+                # and every downstream stage uses it.
+                from app.services.data.comparison import (
+                    parse_time_range as _parse_time_range,
+                )
+                _time_range = _parse_time_range(query_text or "")
+                if _time_range.years:
+                    history_years = max(1, min(int(_time_range.years), 10))
+                if _time_range.years and _time_range.years >= 2:
+                    is_historical_request = True
+            except Exception as exc:
+                logger.warning("Time-range normalize failed: %s", exc)
             if planned is not None:
                 wants_market = bool(entities and "market" in planned)
                 wants_fundamentals = bool(entities and "fundamentals" in planned)
@@ -1557,14 +1769,59 @@ async def search_web(
                 wants_snippets = True
                 wants_extract = True
                 fred_targets = _detect_fred_series(query_text or "")
+                # Deterministic backstop on the fallback path too: the
+                # canonical plan's required tools can never be off, even
+                # when intent regexes miss (e.g. "profitability" phrasing
+                # variants). History always wins over the snapshot for the
+                # same evidence kind.
+                try:
+                    from app.services.data.comparison import (
+                        required_tools_for_query as _required_tools,
+                    )
+                    for _tool in _required_tools(query_text or ""):
+                        if _tool == "market_history" and entities:
+                            wants_market_history = True
+                            wants_market = False
+                        elif _tool == "financial_history" and entities:
+                            wants_financial_history = True
+                        elif _tool == "market" and entities and not wants_market_history:
+                            wants_market = True
+                        elif _tool == "fundamentals" and entities:
+                            wants_fundamentals = True
+                        elif _tool == "snippets":
+                            wants_snippets = True
+                except Exception as exc:
+                    logger.warning("Required-tools backstop failed: %s", exc)
 
-            if entities and (
+            # Entity typing gate (classification before routing): financial
+            # entities plus UNKNOWN names (symbol search is their ground-truth
+            # typing step; None skips with a reason) enter market adapters.
+            # Known non-financial types (concepts, categories, industries,
+            # products, geographies, private companies) resolve via
+            # snippets/wikipedia/macro only -- never Yahoo.
+            try:
+                from app.services.data.comparison import (
+                    market_candidate_entities as _candidates,
+                )
+
+                _market_entities = _candidates(entities or [])
+                _skipped = [e for e in (entities or []) if e not in _market_entities]
+                if _skipped:
+                    logger.info(
+                        "Entity typing: non-financial entities skip market "
+                        "adapters: %s (financial: %s).",
+                        _skipped, _market_entities,
+                    )
+            except Exception as exc:
+                logger.warning("Entity typing failed, using all entities: %s", exc)
+                _market_entities = list(entities or [])
+            if _market_entities and (
                 wants_market
                 or wants_fundamentals
                 or wants_market_history
                 or wants_financial_history
             ):
-                for entity in entities:
+                for entity in _market_entities:
                     symbol = await _resolve_symbol(client, entity)
                     if not symbol:
                         continue
@@ -1753,6 +2010,43 @@ async def search_web(
                         financial_history_texts.append(text)
                         financial_history.append(payload)
                         financial_history_sources.append(source)
+                    # Generic targeted recovery (P0#4): missing price history
+                    # gets one targeted Yahoo retry per missing entity (never
+                    # a full refetch of validated series); remaining missing
+                    # research-figure requirements get targeted snippet
+                    # queries. Validated evidence is never re-retrieved.
+                    try:
+                        _needs_stock = "stock_performance" in _metrics
+                    except Exception:
+                        _needs_stock = False
+                    if _needs_stock:
+                        _missing_price = _entities_missing_price_history(
+                            entities, price_history
+                        )
+                        for _entity in (_missing_price or [])[:4]:
+                            try:
+                                _symbol = await _resolve_symbol(client, _entity)
+                                if not _symbol:
+                                    continue
+                                _fetched = await _fetch_market_history(
+                                    client, _entity, _symbol, years=history_years
+                                )
+                                if _fetched and isinstance(_fetched[1], dict):
+                                    _text, _payload, _source = _fetched
+                                    price_history_texts.append(_text)
+                                    price_history.append(_payload)
+                                    price_history_sources.append(_source)
+                            except Exception as _exc:
+                                logger.warning(
+                                    "Targeted price-history retry failed for %s: %s",
+                                    _entity, _exc,
+                                )
+                                continue
+                        if _missing_price:
+                            research_notes.append(
+                                f"Targeted price-history recovery attempted for "
+                                f"{_missing_price}."
+                            )
                     still_missing = _entities_missing_financials(
                         entities, financial_history
                     )

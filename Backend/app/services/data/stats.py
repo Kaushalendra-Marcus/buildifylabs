@@ -113,11 +113,25 @@ def _growth_period_over_period(df: pd.DataFrame, numeric: List[str]) -> dict | N
     if len(values) < 2:
         return None
 
-    changes = [
-        round((values[i] - values[i - 1]) / abs(values[i - 1]) * 100, 2)
-        for i in range(1, len(values))
-        if values[i - 1]
-    ]
+    changes = []
+    for i in range(1, len(values)):
+        prior, current = values[i - 1], values[i]
+        # Explicit zero-base handling: 0 prior -> undefined (skipped), never
+        # falsy-dropped valid zeros as current values. None/NaN checked
+        # explicitly, never via truthiness (0.0 is a valid observation).
+        try:
+            import math as _math
+
+            if prior is None or current is None:
+                continue
+            prior_f, cur_f = float(prior), float(current)
+            if not (_math.isfinite(prior_f) and _math.isfinite(cur_f)):
+                continue
+            if prior_f == 0:
+                continue
+            changes.append(round((cur_f - prior_f) / abs(prior_f) * 100, 2))
+        except (TypeError, ValueError):
+            continue
     if not changes:
         return None
 
@@ -132,13 +146,26 @@ def _growth_period_over_period(df: pd.DataFrame, numeric: List[str]) -> dict | N
 
 
 def _pairwise_totals_ratio(df: pd.DataFrame, numeric: List[str]) -> dict | None:
-    """Total-to-total ratio of the first two numeric columns (margin-style)."""
+    """Total-to-total ratio of the first two numeric columns (margin-style).
+
+    Explicit denominator-zero check (0 is meaningful, not just falsy).
+    Ratios assume both columns share the same row grain; callers must not
+    present this as a margin unless the columns are semantically
+    numerator/denominator compatible (documented assumption, not verified).
+    """
     if len(numeric) < 2:
         return None
     numerator, denominator = numeric[0], numeric[1]
-    numerator_total = float(df[numerator].sum())
-    denominator_total = float(df[denominator].sum())
-    if not denominator_total:
+    try:
+        import math as _math
+
+        numerator_total = float(df[numerator].dropna().sum())
+        denominator_total = float(df[denominator].dropna().sum())
+        if not (_math.isfinite(numerator_total) and _math.isfinite(denominator_total)):
+            return None
+    except (TypeError, ValueError):
+        return None
+    if denominator_total == 0:
         return None
     return {
         f"{numerator}_to_{denominator}": round(
@@ -241,16 +268,27 @@ def apply_what_if(
     baseline_prices = df[price_col].dropna()
     if baseline_prices.empty:
         return None
+    # Missing != zero (P0#10 audit): rows with missing price/quantity are
+    # excluded from the baseline (never fillna(0)), and the excluded count
+    # is reported so narration can state it. Only an explicit semantic
+    # "missing means zero" operation may zero-fill (none defined here).
+    excluded_rows = 0
     if qty_col is not None and _is_numeric(df[qty_col]):
-        baseline_total = float((df[price_col].fillna(0) * df[qty_col].fillna(0)).sum())
+        paired = df[[price_col, qty_col]].dropna()
+        excluded_rows = int(len(df) - len(paired))
+        baseline_total = float((paired[price_col] * paired[qty_col]).sum())
         scenario_total = baseline_total * factor
         basis = f"{price_col} x {qty_col}"
     elif revenue_col is not None and _is_numeric(df[revenue_col]):
-        baseline_total = float(df[revenue_col].fillna(0).sum())
+        present = df[revenue_col].dropna()
+        excluded_rows = int(len(df) - len(present))
+        baseline_total = float(present.sum())
         scenario_total = baseline_total * factor
         basis = f"{revenue_col} scaled by the price factor"
     else:
-        baseline_total = float(df[price_col].fillna(0).sum())
+        present = df[price_col].dropna()
+        excluded_rows = int(len(df) - len(present))
+        baseline_total = float(present.sum())
         scenario_total = baseline_total * factor
         basis = f"{price_col} total scaled by the price factor"
     baseline_total = round(baseline_total, 2)
@@ -265,6 +303,11 @@ def apply_what_if(
         "basis": basis,
         "price_column": price_col,
         "quantity_column": qty_col,
+        "excluded_rows_missing": excluded_rows,
+        "computation_id": "what_if",
+        "formula": "scenario_total = baseline_total * (1 + pct/100)",
+        "operation": "price_scenario_scale",
+        "inputs": {"pct_change": pct, "factor": round(factor, 4), "basis": basis},
         "assumption": (
             "Assumes quantity is unaffected by the price change "
             "(no elasticity modeled)."

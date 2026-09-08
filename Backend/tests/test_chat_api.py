@@ -490,6 +490,11 @@ class TestFlagEndpoint:
 
 class TestQuota:
     def test_window_exhausted_returns_429(self, client, seed, monkeypatch):
+        # usage.WINDOW_QUESTIONS_LIMIT is raised for general testing; pin it
+        # back to the spec's small window here so exhaustion is reachable.
+        from app.utils import usage as usage_mod
+
+        monkeypatch.setattr(usage_mod, "WINDOW_QUESTIONS_LIMIT", 4)
         set_active(TEST_ID_QUOTA)
         try:
             quota_sql = (

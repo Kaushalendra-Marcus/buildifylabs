@@ -359,7 +359,7 @@ class TestToolRouting:
         }
         assert any("Second-pass" in note for note in result.research_notes)
 
-    def test_stock_history_alone_never_satisfies_financials(self):
+    def test_stock_history_alone_partial_for_stock_only(self):
         gate = _historical_comparison_gate(
             QUERY,
             price_history=[
@@ -370,7 +370,11 @@ class TestToolRouting:
             financial_history=[],
         )
         assert gate["applies"] is True
-        assert gate["blocked"] is True
+        # Partial-metric policy: stock validates (all three), revenue/profit
+        # excluded -- sufficient for a stock-only partial, not a full block.
+        assert gate["blocked"] is False
+        assert gate.get("partial") is True
+        assert gate.get("validated_metrics") == ["stock_performance"] or "stock_performance" in gate.get("validated_metrics", [])
 
 
 async def _no_wiki(client, entity):
@@ -535,7 +539,7 @@ class TestNoClarificationForResearchableData:
 # Evidence gate: incomplete evidence, entity completeness, visuals
 # ---------------------------------------------------------------------------
 class TestEvidenceGate:
-    def test_two_of_three_blocks(self):
+    def test_two_of_three_partial_with_exclusion(self):
         gate = _historical_comparison_gate(
             QUERY,
             price_history=[
@@ -547,8 +551,10 @@ class TestEvidenceGate:
                 _financial("BYD", "BYDDY", ["2022", "2023"], [424.0, 602.0], [16.0, 30.0]),
             ],
         )
-        assert gate["blocked"] is True
-        assert "Toyota" in gate["blocked_reason"]
+        # Partial-result policy: 2-of-3 validated subset is sufficient.
+        assert gate["blocked"] is False
+        assert gate.get("partial") is True
+        assert "Toyota" in str(gate.get("excluded_by_metric", {}))
 
     def test_partial_market_graph_never_charts_for_three(self):
         graph = _market_graph_visual(
@@ -562,7 +568,7 @@ class TestEvidenceGate:
         )
         assert graph is None
 
-    def test_incomplete_evidence_yields_no_comparison_chart(self, monkeypatch):
+    def test_incomplete_evidence_yields_partial_stock_chart(self, monkeypatch):
         monkeypatch.setattr(
             pipeline_mod,
             "generate_response",
@@ -584,9 +590,26 @@ class TestEvidenceGate:
                 web_sources=_sources("s1"),
             )
         )
-        assert output.confidence == 0.0
-        assert not [v for v in output.visuals if v.visual_type == "graph"]
-        assert not [v for v in output.visuals if v.visual_type == "comparison"]
+        # Partial: stock subset (Tesla/BYD) validates; revenue/profit excluded.
+        assert output.confidence > 0.0
+        assert output.confidence <= 0.65
+        assert "toyota" in (output.answer or "").lower()
+        # No zero-filled Toyota values in any visual.
+        def _walk(node):
+            if isinstance(node, bool):
+                return
+            if isinstance(node, (int, float)):
+                yield float(node)
+            elif isinstance(node, dict):
+                for value in node.values():
+                    yield from _walk(value)
+            elif isinstance(node, (list, tuple)):
+                for value in node:
+                    yield from _walk(value)
+        for visual in (output.visuals or []):
+            if visual.visual_type == "graph":
+                names = [d.get("name", "") for d in visual.props.get("datasets", [])]
+                assert "Toyota" not in names
 
     def test_full_evidence_charts_all_three(self, monkeypatch):
         monkeypatch.setattr(
