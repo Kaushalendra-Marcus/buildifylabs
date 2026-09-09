@@ -4960,6 +4960,22 @@ async def run_pipeline(
                 output.clarification.options = list(decision.suggested_options[:4])
                 logger.info("Backfilled clarification options from judge suggestions.")
 
+        # Always bound, regardless of clarify-vs-answer: the deterministic
+        # visual-plan reconciliation and narration-contract grounding below
+        # (after this if/else) run unconditionally, but the real
+        # build_validated_evidence_state() call only happens in the
+        # "answer" branch below. Without this default, a clarify decision
+        # left validated_state unbound and crashed both of those steps with
+        # UnboundLocalError on every single clarification turn (caught by
+        # their own try/except, so it degraded silently instead of
+        # surfacing) -- same safe shape as the except-fallback further down,
+        # so nothing downstream needs to change.
+        validated_state: Dict[str, Any] = {
+            "validated_entities": [], "validated_metrics": [],
+            "sufficient": False, "partial": False, "blocked": bool(gate.get("blocked")),
+            "comparison_stats": gate.get("comparison_stats"),
+            "exclusion_note": str(gate.get("exclusion_note", "") or ""),
+        }
         if output.clarification is not None:
             thinking.append(
                 f"Clarifying (one question): {output.clarification.question[:120]}"
