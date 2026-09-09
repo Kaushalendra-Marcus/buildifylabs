@@ -204,14 +204,54 @@ def _union_entities(
     """Merge LLM-framed entities with deterministically decomposed ones.
 
     The deterministic pass (known-company matching over the raw query)
-    recovers companies the LLM rewriter drops. Dedupes case-insensitively,
-    preserves first-seen order (LLM first), and never raises.
+    recovers companies the LLM rewriter drops. Both inlets pass the same
+    ghost-entity floor (function words, lonely short tokens, pure topic
+    phrases are never Yahoo lookup candidates). Dedupes
+    case-insensitively, preserves first-seen order (LLM first), and never
+    raises.
     """
+
+    def _floor_ok(name: str) -> bool:
+        try:
+            from app.services.data.comparison import (
+                ENTITY_FUNCTION_STOPWORDS as _stop,
+            )
+            from app.services.data.comparison import (
+                _is_indicator_phrase as _is_ind,
+            )
+        except Exception:
+            return bool(name and len(name) >= 2)
+        key = (name or "").strip().lower()
+        if not key or len(key) < 2 or key in _stop:
+            return False
+        if _is_ind(name):
+            return False
+        if " " not in key and len(key) < 3:
+            try:
+                occurrences = len(
+                    re.findall(
+                        rf"\b{re.escape(name.strip())}\b",
+                        query_text or "",
+                        re.IGNORECASE,
+                    )
+                )
+            except re.error:
+                occurrences = 0
+            if occurrences < 2:
+                return False
+        return True
+
     merged: list[str] = []
     seen: set[str] = set()
     for entity in list(framed_entities or []):
         name = str(entity or "").strip()
-        if name and name.lower() not in seen:
+        # Strip stray leading conjunctions/determiners ("And BigCommerce"
+        # -> "BigCommerce") so the fragment can dedupe against the clean
+        # deterministic candidate instead of doubling it.
+        name = re.sub(
+            r"^(the|a|an|and|or)\s+", "", name, flags=re.IGNORECASE
+        ).strip()
+        if name and name.lower() not in seen and _floor_ok(name):
             seen.add(name.lower())
             merged.append(name)
     try:
@@ -227,7 +267,18 @@ def _union_entities(
                     merged.append(name)
         except Exception as exc:
             logger.warning("Deterministic entity union failed: %s", exc)
-    return merged
+    # Maximal munch across inlets: "Google" doubles "Google DeepMind".
+    lowers = [str(m).lower() for m in merged]
+    deduped: list[str] = []
+    for index, name in enumerate(merged):
+        key = str(name).lower()
+        if any(
+            other != index and lowers[other].startswith(key + " ")
+            for other in range(len(merged))
+        ):
+            continue
+        deduped.append(name)
+    return deduped
 
 
 _CAPITALIZED_PHRASE_RE = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b")
@@ -261,15 +312,45 @@ def _fallback_entities_from_text(text: str) -> list[str]:
                 seen.add(canonical.lower())
             if len(found) >= MAX_MARKET_ENTITIES:
                 return found
+    # Same ghost-entity floor as comparison.detect_entities (single source
+    # of truth lives there): function words, lonely short tokens ("My"/"If"
+    # /"US"), and pure topic phrases ("Projected Results Visually") must
+    # never become Yahoo lookup candidates.
+    try:
+        from app.services.data.comparison import (
+            ENTITY_FUNCTION_STOPWORDS as _FUNC_STOP,
+        )
+        from app.services.data.comparison import (
+            _is_indicator_phrase as _is_indicator,
+        )
+    except Exception:
+        _FUNC_STOP = frozenset()  # type: ignore
+        _is_indicator = lambda candidate: False  # type: ignore
+
+    def _keep_single(candidate: str) -> bool:
+        if " " in candidate.strip():
+            return True
+        if len(candidate) >= 3:
+            return True
+        try:
+            occurrences = len(
+                re.findall(rf"\b{re.escape(candidate)}\b", text or "", re.IGNORECASE)
+            )
+        except re.error:
+            occurrences = 0
+        return occurrences >= 2
+
     # ALL-CAPS pass first so "Compare NVIDIA and AMD" keeps both even
     # though neither matches the Title-case pattern below.
     for match in _ALLCAPS_TOKEN_RE.finditer(text or ""):
         candidate = " ".join(match.group(1).split())
         key = candidate.lower()
-        if key in seen or key in _FALLBACK_ENTITY_STOPWORDS:
+        if key in seen or key in _FALLBACK_ENTITY_STOPWORDS or key in _FUNC_STOP:
             continue
         # Skip single letters / generic shouting; keep plausible tickers/names.
         if len(candidate) < 2:
+            continue
+        if not _keep_single(candidate):
             continue
         seen.add(key)
         found.append(candidate)
@@ -285,7 +366,11 @@ def _fallback_entities_from_text(text: str) -> list[str]:
             continue
         candidate = " ".join(words)
         key = candidate.lower()
-        if key in seen or key in _FALLBACK_ENTITY_STOPWORDS:
+        if key in seen or key in _FALLBACK_ENTITY_STOPWORDS or key in _FUNC_STOP:
+            continue
+        if _is_indicator(candidate):
+            continue
+        if not _keep_single(candidate):
             continue
         seen.add(key)
         found.append(candidate)
@@ -311,6 +396,10 @@ class WebSearchResult:
     # Machine-written research trace (which entities were required, what the
     # second pass did). Shown in logs/thinking, never narrated as fact.
     research_notes: list[str] = field(default_factory=list)
+    # Honest macro-gap disclosure (P4): plain-language status when macro
+    # series were wanted but unfetched (no key / unmapped topic / US-only
+    # coverage). Narrator prompt context, never evidence.
+    macro_note: str = ""
 
 
 class _DuckDuckGoParser(HTMLParser):
@@ -406,16 +495,94 @@ def _normalize_published_date(value: Any) -> Optional[str]:
     return text[:10] or None
 
 
+# Corporate suffixes ignored when comparing a Yahoo quote name to the
+# queried entity ("Tesla, Inc." must match "Tesla"; "AG"/"Inc" must not).
+_SYMBOL_NAME_NOISE = frozenset({
+    "inc", "incorporated", "corp", "corporation", "company", "limited",
+    "ltd", "plc", "group", "holdings", "sa", "ag", "ab", "nv", "se",
+    "co", "llc", "the", "and", "of",
+})
+
+
+def _quote_matches_entity(entity: str, quote: dict) -> bool:
+    """True when a Yahoo symbol-search quote plausibly IS the queried entity.
+
+    Guards against fuzzy-search fabrications ("If" -> Infineon IFX.DE,
+    "OpenAI" -> C3.ai AI): accept on exact symbol equality, on a shared
+    significant name token, or on concatenated-name containment (either
+    direction, min 4 chars). Fund/ETF vehicles additionally require the
+    entity to name a fund vehicle explicitly ("Anthropic" must never
+    resolve to a third-party "Anthropic ... ETF"). Everything else is
+    rejected -- an unrelated first hit is never a valid resolution. Pure.
+    """
+    try:
+        ent = (entity or "").strip().lower()
+        if not ent or not isinstance(quote, dict):
+            return False
+        symbol = str(quote.get("symbol") or "").upper()
+        if ent.upper() == symbol or ent.upper() == symbol.split(".")[0]:
+            return True
+        # Wrapped vehicles (ETF / mutual fund): only when the entity itself
+        # asks for a fund vehicle. Otherwise a thematic third-party fund
+        # ("Anthropic AI Lab Ecosystem ETF") would pass the token-overlap
+        # check below on the shared name word alone.
+        if str(quote.get("quoteType") or "").upper() in ("ETF", "MUTUALFUND"):
+            ent_toks = set(re.findall(r"[a-z0-9]+", ent))
+            if not (
+                ent_toks
+                & {"etf", "etn", "fund", "funds", "mutual", "index", "trust", "trusts"}
+            ):
+                return False
+        ent_tokens = {
+            token for token in re.findall(r"[a-z0-9]+", ent) if len(token) >= 3
+        } - _SYMBOL_NAME_NOISE
+        names = " ".join(
+            [str(quote.get("longname") or ""), str(quote.get("shortname") or "")]
+        ).lower()
+        name_tokens = set(re.findall(r"[a-z0-9]+", names)) - _SYMBOL_NAME_NOISE
+        if ent_tokens & name_tokens:
+            return True
+        ent_nospace = re.sub(r"[^a-z0-9]", "", ent)
+        name_nospace = re.sub(r"[^a-z0-9]", "", names)
+        if len(ent_nospace) >= 4 and (
+            ent_nospace in name_nospace or name_nospace in ent_nospace
+        ):
+            return True
+        return False
+    except Exception:
+        return False
+
+
 async def _resolve_symbol(
     client: httpx.AsyncClient, entity: str
 ) -> Optional[str]:
     """Resolve any entity name to a tradable symbol: alias fast path, then
-    Yahoo's symbol search. None when nothing tradable matches."""
+    Yahoo's symbol search. None when nothing tradable matches.
+
+    Two hard guards (fabricated-ticker fix): known-private companies
+    short-circuit to None ("no public ticker") without touching the
+    network, and a Yahoo hit is accepted only when its returned
+    longname/shortname/symbol meaningfully overlaps the queried entity --
+    never first-hit-wins."""
     for name, symbol in STOCK_ALIASES.items():
         if entity.lower() == name.lower() or re.search(
             rf"\b{name}\b", entity, re.IGNORECASE
         ):
             return symbol
+    try:
+        from app.services.data.comparison import (
+            classify_entity_type as _classify_entity,
+        )
+
+        if _classify_entity(entity) == "PRIVATE_COMPANY":
+            logger.info(
+                "Symbol search skipped for %r: private/unlisted company "
+                "(no public ticker).",
+                entity,
+            )
+            return None
+    except Exception as exc:
+        logger.warning("Entity typing failed for %r: %s", entity, exc)
     try:
         response = await client.get(
             f"https://query2.finance.yahoo.com/v1/finance/search?q={quote_plus(entity)}",
@@ -426,7 +593,13 @@ async def _resolve_symbol(
             if quote.get("quoteType") in ("EQUITY", "ETF", "MUTUALFUND") and quote.get(
                 "symbol"
             ):
-                return str(quote["symbol"])
+                if _quote_matches_entity(entity, quote):
+                    return str(quote["symbol"])
+                logger.info(
+                    "Symbol search rejected %s for %r: name mismatch (%r).",
+                    quote.get("symbol"), entity,
+                    quote.get("longname") or quote.get("shortname"),
+                )
     except (httpx.HTTPError, ValueError, KeyError) as exc:
         logger.warning("Symbol search failed for %s: %s", entity, exc)
     return None
@@ -978,6 +1151,68 @@ def _detect_fred_series(query_text: str) -> list[tuple[str, str]]:
         if pattern.search(query_text or ""):
             found.append((label, series_id))
     return found[:2]
+
+
+# Macro topics with NO structured mapping (FRED covers US CPI,
+# unemployment, Fed funds, GDP only -- never mortgage/house-price).
+_UNMAPPED_MACRO_RE = re.compile(
+    r"\b(mortgage\s*rates?|house\s*prices?|housing|home\s*prices?|"
+    r"\brents?\b|affordability)\b",
+    re.IGNORECASE,
+)
+# Non-US geography cue: structured macro coverage is US-only (FRED).
+_NON_US_MACRO_GEO_RE = re.compile(
+    r"\b(UK|Britain|British|England|Europe|European|\bEU\b|"
+    r"China|Chinese|India|Indian|Japan|Japanese|Germany|German|"
+    r"France|French|Canada|Canadian|Australia|Australian)\b",
+    re.IGNORECASE,
+)
+
+
+def _macro_gap_note(
+    query_text: str,
+    fred_targets: list,
+    macro_data: list,
+    settings,
+) -> str:
+    """Honest structural-gap disclosure for macro questions (P4).
+
+    Returns "" when macro series were fetched or macro was never wanted.
+    Otherwise a plain-language status: missing FRED key, unmapped topics
+    (mortgage/house-price), and/or US-only coverage for non-US asks. This
+    is status metadata for the narrator, never evidence. Pure.
+    """
+    try:
+        if macro_data:
+            return ""
+        wanted = bool(
+            (fred_targets or [])
+            or MACRO_INTENT_RE.search(query_text or "")
+            or _UNMAPPED_MACRO_RE.search(query_text or "")
+        )
+        if not wanted:
+            return ""
+        bits: list[str] = []
+        if fred_targets and not getattr(settings, "FRED_API_KEY", None):
+            labels = ", ".join(str(label) for label, _ in fred_targets)
+            bits.append(
+                f"US macro series requested ({labels}) were not fetched: "
+                "no FRED_API_KEY is configured in this deployment."
+            )
+        if _UNMAPPED_MACRO_RE.search(query_text or ""):
+            bits.append(
+                "No structured macro source is mapped for mortgage rates, "
+                "house prices, or housing affordability (the FRED mapping "
+                "covers US CPI, unemployment, Fed funds, and GDP only)."
+            )
+        if _NON_US_MACRO_GEO_RE.search(query_text or ""):
+            bits.append(
+                "Structured macro coverage is US-only (FRED); no UK/Europe "
+                "macro source is configured."
+            )
+        return " ".join(bits)
+    except Exception:
+        return ""
 
 
 async def _fetch_fred_series(
@@ -1642,6 +1877,7 @@ async def search_web(
                 price_history=list(cached.get("price_history", [])),
                 financial_history=list(cached.get("financial_history", [])),
                 research_notes=list(cached.get("research_notes", [])),
+                macro_note=str(cached.get("macro_note", "") or ""),
             )
     except Exception as exc:
         logger.warning("Web-search cache lookup failed: %s", exc)
@@ -1664,6 +1900,7 @@ async def search_web(
             financial_history: list[dict[str, Any]] = []
             financial_history_texts: list[str] = []
             financial_history_sources: list[dict] = []
+            macro_note = ""
 
             query_text = query if isinstance(query, str) else raw_text
             # Tool routing: the canonical ResearchPlan is authoritative.
@@ -1886,6 +2123,11 @@ async def search_web(
                     macro_data.append(series)
                     macro_sources.append(source)
 
+            # Honest-gap disclosure (P4): macro wanted but nothing fetched.
+            macro_note = _macro_gap_note(
+                query_text or "", fred_targets, macro_data, settings
+            )
+
             snippet_coros = (
                 [
                     _snippets_for_query(client, item, settings, time_sensitive)
@@ -2086,6 +2328,7 @@ async def search_web(
                 price_history,
                 financial_history,
                 research_notes,
+                macro_note,
             )
             if cache_key:
                 try:
@@ -2100,6 +2343,7 @@ async def search_web(
                             "price_history": result.price_history,
                             "financial_history": result.financial_history,
                             "research_notes": result.research_notes,
+                            "macro_note": result.macro_note,
                         },
                     )
                 except Exception as exc:

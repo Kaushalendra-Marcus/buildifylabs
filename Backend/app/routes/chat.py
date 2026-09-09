@@ -463,6 +463,7 @@ async def _answer_request(
         market_data = []
         fundamentals = []
         macro_data = []
+        macro_note = ""
         price_history = []
         financial_history = []
         research_notes = []
@@ -485,6 +486,9 @@ async def _answer_request(
             )
             macro_data = (
                 getattr(search_result, "macro_data", []) or []
+            )
+            macro_note = (
+                getattr(search_result, "macro_note", "") or ""
             )
             price_history = (
                 getattr(search_result, "price_history", []) or []
@@ -522,6 +526,7 @@ async def _answer_request(
             on_stage=on_stage,
             fundamentals=fundamentals,
             macro_data=macro_data,
+            macro_note=macro_note,
             price_history=price_history,
             financial_history=financial_history,
             research_notes=research_notes,

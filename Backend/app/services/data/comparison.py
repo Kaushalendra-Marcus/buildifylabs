@@ -62,6 +62,33 @@ KNOWN_COMPANIES: Dict[str, str] = {
     "samsung": "005930.KS",
 }
 
+# Well-known private/unlisted companies: no public ticker exists, so they
+# must NEVER enter Yahoo symbol search (which would fuzzy-match them onto
+# an unrelated listed vehicle, e.g. "OpenAI" -> C3.ai's "AI"). Seed list,
+# not exhaustive: the _resolve_symbol() name-overlap check is the general
+# backstop for private names missing here. All keys lowercase.
+KNOWN_PRIVATE_COMPANIES = frozenset({
+    "openai", "open ai",
+    "anthropic",
+    "xai", "x ai",
+    "mistral", "mistral ai",
+    "spacex", "space x",
+    "stripe",
+    "bytedance", "byte dance",
+    "databricks",
+    "discord",
+    "canva",
+    "shein",
+    "plaid",
+    "epic games",
+    "valve",
+    "anduril",
+    "rippling",
+    "chime",
+    "perplexity",
+    "scale ai",
+})
+
 # Canonical display names (query-order output of detect_entities).
 _DISPLAY_NAMES: Dict[str, str] = {
     "nvidia": "NVIDIA",
@@ -129,11 +156,85 @@ _COMPARISON_RE = re.compile(
 )
 
 
+# Function words that are never tradable/comparable entities on their own.
+# Shared with web_search._fallback_entities_from_text so both deterministic
+# entity inlets apply the same floor (ghost-entity fix: "My"/"If"/"US").
+ENTITY_FUNCTION_STOPWORDS = frozenset({
+    "my", "mine", "if", "it", "its", "we", "us", "our", "ours",
+    "you", "your", "yours", "he", "him", "his", "she", "her", "hers",
+    "they", "them", "their", "theirs",
+    "this", "that", "these", "those",
+    "so", "but", "not", "no", "nor",
+    "do", "does", "did", "done",
+    "can", "will", "would", "shall", "should", "could", "may", "might", "must",
+    "has", "have", "had", "having", "been", "being", "was", "were", "are",
+    "be", "am",
+    "in", "on", "at", "to", "of", "by", "as", "into", "onto", "out",
+    "up", "down", "off",
+    "all", "each", "every", "few", "more", "most", "other", "some",
+    "such", "only", "own", "same", "than", "too", "very", "just",
+    "about", "through", "during", "before", "after", "above", "below",
+    "under", "again", "further", "once", "here", "there",
+    "when", "where", "why", "because", "until", "while",
+    "although", "though", "since", "unless", "whereas", "whether",
+    "plus", "minus", "per", "via", "etc", "eg", "ie",
+    "vs", "uk", "usa",
+    # Generic tech-category acronyms: never a single tradable company.
+    "saas",
+    # Imperative/analysis verbs: sentence-initial in instructions
+    # ("Model three scenarios", "Keep pricing constant", "Rank them").
+    # Never a standalone single-word entity; multi-word names are
+    # unaffected (only a leading stopword is ever stripped).
+    "model", "models", "keep", "keeps", "rank", "ranks",
+    "assume", "assumes", "suppose", "consider", "estimate", "estimates",
+    "project", "projects", "forecast", "forecasts", "predict", "predicts",
+    "simulate", "simulates", "compute", "computes", "analyze", "analyses",
+    "evaluate", "evaluates", "determine", "determines", "examine", "examines",
+    "explore", "explores", "discuss", "discusses", "describe", "describes",
+    "outline", "outlines", "summarize", "summarizes", "suggest", "suggests",
+    "recommend", "recommends", "review", "reviews", "assess", "assesses",
+    "measure", "measures", "track", "tracks", "monitor", "monitors",
+    "plan", "plans", "build", "builds", "create", "creates",
+    "make", "makes", "take", "takes", "use", "uses", "run", "runs",
+    "display", "displays", "plot", "plots", "draw", "draws",
+    "illustrate", "illustrates", "present", "presents",
+    "provide", "provides", "send", "sends", "set", "puts", "put",
+    "get", "gets", "hold", "holds", "apply", "applies",
+    "try", "tries", "check", "checks", "test", "tests",
+    "verify", "verifies", "confirm", "confirms", "ensure", "ensures",
+    "choose", "chooses", "select", "selects", "pick", "picks",
+    "add", "adds", "remove", "removes", "include", "includes",
+    "exclude", "excludes", "ignore", "ignores", "skip", "skips",
+    "start", "starts", "begin", "begins", "stop", "stops",
+    "end", "ends", "continue", "continues", "remain", "remains",
+    "stay", "stays", "become", "becomes", "seem", "seems",
+    "look", "looks", "help", "helps", "need", "needs",
+    "want", "wants", "tell", "tells", "find", "finds",
+    "investigate", "identify", "identifies",
+    "highlight", "highlights", "draft", "drafts",
+    "write", "writes", "generate", "generates",
+    "produce", "produces", "break", "breaks",
+    "combine", "combines", "convert", "converts",
+    "map", "maps", "match", "matches", "fit", "fits",
+    "scale", "scales", "optimize", "optimizes",
+    "improve", "improves", "walk",
+    # Scenario-analysis nouns: never standalone entities.
+    "scenario", "scenarios", "sensitivity",
+    "conservative", "aggressive",
+})
+
 # Generic entity extraction (no question-specific lists): arbitrary
-# Title-case / ALL-CAPS candidates minus stopwords, plus a structural
-# "Compare A, B and C" fallback for lowercase phrasing. Known companies
-# above are alias resolution only; detection itself is generic.
-_GENERIC_CAP_RE = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b")
+# Title-case / CamelCase / ALL-CAPS candidates minus stopwords, plus a
+# structural "Compare A, B and C" fallback for lowercase phrasing. Known
+# companies above are alias resolution only; detection itself is generic.
+# The CamelCase word ([A-Z] ... with at least one lowercase) covers
+# "OpenAI"/"WooCommerce"/"BigCommerce", which the old Title-case-only
+# pattern could never match (its trailing \b fails mid-word). Pure-caps
+# tokens ("US", "AI", "FY") stay owned by _GENERIC_ALLCAPS_RE below.
+_GENERIC_CAMEL_WORD = r"[A-Z][A-Za-z]*[a-z][A-Za-z]*"
+_GENERIC_CAP_RE = re.compile(
+    rf"\b({_GENERIC_CAMEL_WORD}(?:\s+{_GENERIC_CAMEL_WORD}){{0,2}})\b"
+)
 _GENERIC_ALLCAPS_RE = re.compile(r"\b([A-Z]{2,}(?:\s+[A-Z]{2,})?)\b")
 _GENERIC_ENTITY_STOPWORDS = frozenset({
     "compare", "comparison", "versus", "between", "and", "or",
@@ -157,8 +258,72 @@ _GENERIC_ENTITY_STOPWORDS = frozenset({
 })
 
 
+# Function words apply to generic detection too (single source of truth
+# for the ghost-entity floor; web_search reuses ENTITY_FUNCTION_STOPWORDS).
+_GENERIC_ENTITY_STOPWORDS = _GENERIC_ENTITY_STOPWORDS | ENTITY_FUNCTION_STOPWORDS
+
+
+# Indicator/topic words that are never entities on their own: macro topics,
+# metric nouns, and result-presentation language. A structural/capitalized
+# candidate composed ENTIRELY of these ("Inflation", "Mortgage Rates",
+# "Projected Results Visually") is a topic phrase, not a comparable entity.
+# Exact-token match only (never substring: "MarketAxess" != "market").
+_INDICATOR_TOKENS = frozenset({
+    "inflation", "cpi", "mortgage", "rate", "rates", "housing",
+    "house", "houses", "home", "homes",
+    "affordability", "gdp", "unemployment", "interest", "fed",
+    "treasury", "yield", "recession", "economy", "economic",
+    "wage", "wages", "employment",
+    "price", "prices", "pricing", "cost", "costs",
+    "revenue", "revenues", "profit", "profits", "profitability",
+    "stock", "stocks", "share", "shares", "market", "markets",
+    "sale", "sales", "margin", "margins", "income", "incomes",
+    "earnings", "loss", "losses", "growth",
+    "projected", "projection", "baseline", "results", "result",
+    "visually", "visual", "visualization", "chart", "charts",
+    "table", "tables", "graph", "graphs", "estimated", "estimate",
+    "impact", "outlook", "trend", "trends", "figure", "figures",
+})
+
+
+def _is_indicator_word(word: str) -> bool:
+    """True when every alpha-token of the word is an indicator token.
+
+    Hyphenated compounds split ("house-price" -> price); punctuation is
+    ignored ("visually." -> visually). Pure.
+    """
+    parts = [p for p in re.split(r"[^a-z]+", (word or "").lower()) if p]
+    return bool(parts) and all(p in _INDICATOR_TOKENS for p in parts)
+
+
+def _is_indicator_phrase(candidate: str) -> bool:
+    """True when ALL words of a candidate are indicator words."""
+    words = (candidate or "").split()
+    return bool(words) and all(_is_indicator_word(w) for w in words)
+
+
+def _first_mention_index(text_lower: str, entity: str) -> int:
+    """Word-boundary appearance index (str.find matches substrings:
+
+    "ai".find inside "openai" sorted the ghost entity first -- this does
+    not). 10**9 when absent so unknown items sort last. Pure."""
+    try:
+        match = re.search(rf"\b{re.escape((entity or '').lower())}\b", text_lower or "")
+        return match.start() if match else 10**9
+    except re.error:
+        return 10**9
+
+
+def _single_token_occurrences(text: str, candidate: str) -> int:
+    """Case-insensitive whole-word occurrence count for one candidate."""
+    try:
+        return len(re.findall(rf"\b{re.escape(candidate)}\b", text or "", re.IGNORECASE))
+    except re.error:
+        return 0
+
+
 def _generic_capitalized_candidates(text: str) -> List[str]:
-    """Arbitrary Title-case / ALL-CAPS entity candidates in appearance order."""
+    """Arbitrary CamelCase / ALL-CAPS entity candidates in appearance order."""
     out: List[str] = []
     seen: set[str] = set()
     for pattern in (_GENERIC_ALLCAPS_RE, _GENERIC_CAP_RE):
@@ -175,11 +340,23 @@ def _generic_capitalized_candidates(text: str) -> List[str]:
                 continue
             if len(candidate) < 2:
                 continue
+            # Topic phrases are never entities ("Inflation" at a sentence
+            # start, "Mortgage Rates" in a heading).
+            if _is_indicator_phrase(candidate):
+                continue
+            # Structural backstop (not list-dependent): a single bare
+            # capitalized word seen only once is a sentence-start artifact
+            # ("My", "If") unless it is long enough to be a real name.
+            # Multi-word candidates are exempt (never sentence-start junk).
+            if len(words) == 1 and len(candidate) < 3 and (
+                _single_token_occurrences(text, candidate) < 2
+            ):
+                continue
             seen.add(key)
             out.append(candidate)
-    # Order by first appearance for determinism.
+    # Order by first whole-word appearance for determinism.
     lowered = (text or "").lower()
-    out.sort(key=lambda e: lowered.find(e.lower()) if lowered.find(e.lower()) >= 0 else 10**9)
+    out.sort(key=lambda e: _first_mention_index(lowered, e))
     return out
 
 
@@ -212,7 +389,12 @@ def _structural_comparison_candidates(text: str) -> List[str]:
     )
     if cut:
         segment = segment[:cut.start()]
-    parts = re.split(r"\s*,\s*|\s+and\s+|\s+vs\.?\s+|\s+versus\s+|\s+or\s+", segment)
+    # ", and " must split as ONE delimiter: comma-first alternation order
+    # stranded "and BigCommerce" as a piece (the Oxford-comma ghost).
+    parts = re.split(
+        r"\s*,\s+and\s+|\s*,\s*|\s+and\s+|\s+vs\.?\s+|\s+versus\s+|\s+or\s+",
+        segment,
+    )
     out: List[str] = []
     seen: set[str] = set()
     _NON_ENTITY = _GENERIC_ENTITY_STOPWORDS | {
@@ -222,8 +404,9 @@ def _structural_comparison_candidates(text: str) -> List[str]:
         piece = " ".join(part.strip().split())
         if not piece:
             continue
-        # Strip leading determiners.
-        piece = re.sub(r"^(the|a|an)\s+", "", piece, flags=re.IGNORECASE)
+        # Strip leading determiners and stray conjunctions (belt over the
+        # split fix above: "and BigCommerce" must never survive).
+        piece = re.sub(r"^(the|a|an|and|or)\s+", "", piece, flags=re.IGNORECASE)
         if not piece or piece.lower() in _NON_ENTITY:
             continue
         # Keep first 1-3 words as the entity name.
@@ -234,6 +417,10 @@ def _structural_comparison_candidates(text: str) -> List[str]:
         if not words:
             continue
         candidate = " ".join(words)
+        # Topic/metric spans are not entities ("inflation",
+        # "house-price growth" -> "house-price", "mortgage rates ...").
+        if _is_indicator_phrase(candidate):
+            continue
         # Display Title-cased for determinism ("acme" -> "Acme").
         display = " ".join(w if w.isupper() else w[:1].upper() + w[1:] for w in words)
         key = display.lower()
@@ -279,14 +466,14 @@ def detect_entities(query: str) -> List[str]:
             found.append(candidate)
 
     # Generic arbitrary candidates (Title-case / ALL-CAPS) fill the rest.
-    if len(found) < 4:
-        for candidate in _generic_capitalized_candidates(text):
-            key = candidate.lower()
-            if key not in seen:
-                seen.add(key)
-                found.append(candidate)
-            if len(found) >= 4:
-                break
+    # No per-pass truncation here: the final maximal-munch + cap stage
+    # below must see every candidate ("Google DeepMind" must be visible
+    # to subsume the "Google" fragment at its position).
+    for candidate in _generic_capitalized_candidates(text):
+        key = candidate.lower()
+        if key not in seen:
+            seen.add(key)
+            found.append(candidate)
     # Structural lowercase fallback when capitalization yields too few.
     if len(found) < 2 and is_comparison_query(text):
         for candidate in _structural_comparison_candidates(text):
@@ -294,12 +481,17 @@ def detect_entities(query: str) -> List[str]:
             if key not in seen:
                 seen.add(key)
                 found.append(candidate)
-            if len(found) >= 4:
-                break
 
-    # Order by first appearance in the query for determinism.
-    found.sort(key=lambda e: lowered.find(e.lower()) if lowered.find(e.lower()) >= 0 else 10**9)
-    return found[:4]
+    # Order by first whole-word appearance; same-start longest wins
+    # ("Google DeepMind" subsumes the "Google" fragment at its position --
+    # maximal munch, so one mention never yields two overlapping entities).
+    by_start: Dict[int, str] = {}
+    for entity in found:
+        pos = _first_mention_index(lowered, entity)
+        if pos not in by_start or len(entity) > len(by_start[pos]):
+            by_start[pos] = entity
+    ordered = [by_start[pos] for pos in sorted(by_start)]
+    return ordered[:4]
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +551,12 @@ def classify_entity_type(entity: str) -> str:
     lowered = name.lower()
     if lowered in KNOWN_COMPANIES:
         return "PUBLIC_COMPANY"
+    # Explicit private recognition BEFORE the ticker/UNKNOWN fallthrough:
+    # a known-unlisted name is PRIVATE_COMPANY (never Yahoo-routable),
+    # never UNKNOWN (which would invite a fuzzy symbol search).
+    _private_key = re.sub(r"'s$", "", lowered).strip()
+    if _private_key in KNOWN_PRIVATE_COMPANIES:
+        return "PRIVATE_COMPANY"
     if _TICKER_RE.match(name.strip()) and len(name.strip()) <= 6:
         # Ticker-like ALL-CAPS short tokens are instruments, but a generic
         # category word in caps ("ETF" aside) is not: require Yahoo-style
@@ -2083,7 +2281,12 @@ def build_evidence_coverage(
 
 
 def coverage_exclusion_note(coverage: EvidenceCoverage) -> str:
-    """Human-readable exclusion statement for partial answers."""
+    """Human-readable exclusion statement for partial answers.
+
+    LEGACY: no longer on the user-facing path (check_research_completeness
+    renders through canonical.exclusion_note_for instead, per the
+    single-renderer rule). Kept for backward-compatible imports only.
+    """
     bits: List[str] = []
     for item in coverage.excluded_entities:
         bits.append(f"{item.get('entity')} ({item.get('reason')})")
@@ -3037,6 +3240,27 @@ def check_research_completeness(
         )
     except Exception:
         coverage = EvidenceCoverage()
+    # Single-renderer rule: the user-facing exclusion note always renders
+    # through canonical.exclusion_note_for (plain names, never raw list
+    # repr, never a second ad-hoc format). coverage_exclusion_note() stays
+    # defined as legacy but is no longer on the user-facing path.
+    try:
+        from app.services.data.canonical import exclusion_note_for as _excl_for
+
+        _exclusion_note = _excl_for(
+            {
+                "excluded_entities": [
+                    {"entity": item.get("entity")}
+                    for item in coverage.excluded_entities
+                ],
+                "excluded_metrics": [
+                    {"metric": item.get("metric")}
+                    for item in coverage.excluded_metrics
+                ],
+            }
+        )
+    except Exception:
+        _exclusion_note = coverage_exclusion_note(coverage)
     return {
         "comparison_complete": comparison_complete,
         "per_entity": per_entity,
@@ -3055,5 +3279,5 @@ def check_research_completeness(
         "excluded_metrics": list(coverage.excluded_metrics),
         "sufficient_for_partial": bool(coverage.sufficient),
         "partial": bool(coverage.partial),
-        "exclusion_note": coverage_exclusion_note(coverage),
+        "exclusion_note": _exclusion_note,
     }

@@ -736,6 +736,7 @@ def build_prompt(
     web_sources: Optional[list] = None,
     fundamentals: Optional[list] = None,
     macro_data: Optional[list] = None,
+    macro_note: Optional[str] = None,
     price_history: Optional[list] = None,
     financial_history: Optional[list] = None,
     comparison_gate: Optional[Dict[str, Any]] = None,
@@ -755,6 +756,7 @@ def build_prompt(
     web_sources = web_sources or []
     fundamentals = fundamentals or []
     macro_data = macro_data or []
+    macro_note = macro_note or ""
     price_history = price_history or []
     financial_history = financial_history or []
     comparison_gate = comparison_gate or {}
@@ -819,6 +821,14 @@ def build_prompt(
         if macro_data
         else "none"
     )
+    if macro_note:
+        # Honest-gap disclosure (P4): the narrator must state the
+        # structural coverage gap plainly instead of implying no evidence
+        # exists anywhere.
+        macro_section += (
+            "\nData-gap notice (state this honestly in the answer; it is "
+            f"status, not evidence): {macro_note}"
+        )
 
     fundamentals_section = (
         "\n".join(
@@ -2702,6 +2712,22 @@ def _historical_comparison_gate(
     # single-series and mismatched evidence must never chart as "comparison".
     if not (is_comp and len(entities) >= 2):
         return empty
+    # Scope early-out: when NO requested entity can enter market adapters
+    # (all countries/geographies, all private/unlisted companies, all
+    # concepts...), this market-evidence gate is inapplicable -- the
+    # question is a qualitative/snippet comparison, not a Yahoo-chartable
+    # one. Without this, "Compare America and Britain" burns through
+    # stock/revenue validation and fails loudly with exclusion boilerplate
+    # for entities that were never market candidates.
+    try:
+        from app.services.data.comparison import (
+            market_candidate_entities as _market_candidates,
+        )
+
+        if not _market_candidates(entities):
+            return {**empty, "entities": entities, "metrics": metrics, "years": years}
+    except Exception:
+        pass
     gate: Dict[str, Any] = {
         **empty, "applies": True, "entities": entities,
         "metrics": metrics, "years": years,
@@ -3017,18 +3043,46 @@ def _historical_comparison_gate(
         if mixed else ""
     )
     gate["blocked"] = not (historical_ok and comparison_ok)
-    # Exclusion transparency for partial answers (never silent).
+    # Exclusion transparency for partial answers (never silent, never raw
+    # repr): structured entity/metric lists rendered through the single
+    # canonical renderer (exclusion_note_for) -- no f"{list}" interpolation
+    # anywhere near user-facing text.
     try:
-        _excluded_bits: List[str] = []
+        from app.services.data.canonical import exclusion_note_for as _excl_for
+
+        _validated_by_metric = validated_by_metric or {}
+        _fully_excluded = list(gate.get("excluded_entities", []) or [])
+        _fully_lower = {str(e).strip().lower() for e in _fully_excluded}
+        # A metric with zero validated entities is excluded as a whole;
+        # a metric validated for the subset names who lacks it per entity
+        # ("Umbrella (revenue_growth, profitability)"), so partial gaps
+        # are never silent and never raw repr.
+        _metric_bits: list = []
+        _partial_map: dict = {}
         for metric, excluded in (excluded_by_metric or {}).items():
-            if excluded:
-                _excluded_bits.append(f"{metric}: excluded {excluded}")
+            if not excluded:
+                continue
+            if _validated_by_metric.get(metric):
+                for entity in excluded:
+                    if str(entity).strip().lower() not in _fully_lower:
+                        _partial_map.setdefault(str(entity), []).append(str(metric))
+            else:
+                _metric_bits.append({"metric": str(metric)})
+        _entity_bits = [{"entity": entity} for entity in _fully_excluded]
+        for entity, metrics in _partial_map.items():
+            _entity_bits.append({"entity": f"{entity} ({', '.join(metrics)})"})
+        gate["excluded_metrics"] = [
+            bit["metric"] for bit in _metric_bits
+        ]
         gate["exclusion_note"] = (
-            "Partial evidence: validated "
-            f"{validated_entities_union} for {validated_metrics}; "
-            f"excluded {gate.get('excluded_entities', [])} "
-            f"({'; '.join(_excluded_bits)}).".strip()
-            if gate.get("partial") else ""
+            _excl_for(
+                {
+                    "excluded_entities": _entity_bits,
+                    "excluded_metrics": _metric_bits,
+                }
+            )
+            if gate.get("partial")
+            else ""
         )
     except Exception:
         gate["exclusion_note"] = ""
@@ -3190,7 +3244,33 @@ def is_what_if_query(query: str) -> bool:
             return True
     except Exception:
         pass
-    return bool(_WHAT_IF_RE.search(query or ""))
+    if _WHAT_IF_RE.search(query or ""):
+        return True
+    # Conditional multi-lever scenarios ("If price +25%, lose 18% of
+    # customers, ..., calculate the new revenue") don't say "what if" but
+    # are the same intent -- the query states its own baseline numbers
+    # with no uploaded data needed. Two detection paths: (a) the extractor
+    # itself confidently parses a baseline + lever, or (b) a lighter regex
+    # backstop for cases the extractor can't cleanly parse a baseline for
+    # (still worth routing away from market-history/historical-comparison
+    # visuals even when no number can be computed).
+    try:
+        from app.services.data.stats import (
+            compute_freeform_scenario as _compute_freeform,
+        )
+
+        if _compute_freeform(query or "") is not None:
+            return True
+    except Exception:
+        pass
+    try:
+        from app.services.data.stats import CONDITIONAL_SCENARIO_RE as _cond_re
+
+        if _cond_re.search(query or ""):
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _visual_intent(query: str) -> str:
@@ -4394,6 +4474,7 @@ async def run_pipeline(
     on_stage: Optional[Callable[[str], Awaitable[None]]] = None,
     fundamentals: Optional[list] = None,
     macro_data: Optional[list] = None,
+    macro_note: Optional[str] = None,
     price_history: Optional[list] = None,
     financial_history: Optional[list] = None,
     research_notes: Optional[list] = None,
@@ -4432,6 +4513,8 @@ async def run_pipeline(
         fundamentals = []
     if macro_data is None:
         macro_data = []
+    if macro_note is None:
+        macro_note = ""
     if price_history is None:
         price_history = []
     if financial_history is None:
@@ -4473,6 +4556,28 @@ async def run_pipeline(
                             )
                 except Exception as _exc:
                     logger.warning("Row what-if skipped: %s", _exc)
+            if not (computed_numbers or {}).get("what_if"):
+                # No uploaded data at all (or it didn't yield a scenario):
+                # the question may state its own baseline numbers directly
+                # ("5,000 customers paying $100/month. If price +25%...").
+                # Compute that deterministically too -- never let the LLM
+                # do this arithmetic silently just because there's no data
+                # table to scale from.
+                try:
+                    from app.services.data.stats import (
+                        compute_freeform_scenario as _compute_freeform,
+                    )
+
+                    _freeform = _compute_freeform(plan_query or user_query)
+                    if _freeform is not None:
+                        computed_numbers = {**(computed_numbers or {}), "what_if": _freeform}
+                        thinking.append(
+                            f"Deterministic freeform scenario computed: "
+                            f"{str(_freeform.get('pct_change'))}% revenue change "
+                            f"from stated baseline (no uploaded data used)."
+                        )
+                except Exception as _exc:
+                    logger.warning("Freeform scenario skipped: %s", _exc)
     except Exception as exc:
         logger.warning("Structured what-if skipped: %s", exc)
     for note in research_notes:
@@ -4737,6 +4842,7 @@ async def run_pipeline(
             web_sources=web_sources,
             fundamentals=fundamentals,
             macro_data=macro_data,
+            macro_note=macro_note,
             price_history=price_history,
             financial_history=financial_history,
             comparison_gate=gate,
@@ -4768,6 +4874,7 @@ async def run_pipeline(
                 web_sources=web_sources,
                 fundamentals=fundamentals,
                 macro_data=macro_data,
+                macro_note=macro_note,
                 price_history=price_history,
                 financial_history=financial_history,
                 comparison_gate=gate,
@@ -4834,6 +4941,7 @@ async def run_pipeline(
                     web_sources=web_sources,
                     fundamentals=fundamentals,
                     macro_data=macro_data,
+                    macro_note=macro_note,
                     price_history=price_history,
                     financial_history=financial_history,
                     comparison_gate=gate,
@@ -5380,6 +5488,7 @@ async def _narrate(
     web_sources: Optional[list] = None,
     fundamentals: Optional[list] = None,
     macro_data: Optional[list] = None,
+    macro_note: Optional[str] = None,
     price_history: Optional[list] = None,
     financial_history: Optional[list] = None,
     comparison_gate: Optional[Dict[str, Any]] = None,
@@ -5406,6 +5515,7 @@ async def _narrate(
         web_sources=web_sources,
         fundamentals=fundamentals,
         macro_data=macro_data,
+        macro_note=macro_note,
         price_history=price_history,
         financial_history=financial_history,
         comparison_gate=comparison_gate,
