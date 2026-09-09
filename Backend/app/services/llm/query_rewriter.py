@@ -37,6 +37,36 @@ def is_time_sensitive_query(text: str) -> bool:
     """Deterministic recency gate (no LLM needed)."""
     return bool(text and TIME_SENSITIVE_RE.search(text))
 
+
+# Clarification-merge scaffolding ("original [clarification answer: X - Y -
+# Z]") is meant for the LLM prompt, not a search engine. Sent verbatim, its
+# brackets/colons make it read as bot/scraper traffic -- observed directly:
+# DuckDuckGo returning an HTTP 202 challenge page (no results) for exactly
+# this shape of query. Every fallback path below (rewrite failure, malformed
+# payload) must clean this before using raw text as a search query.
+_CLARIFICATION_WRAPPER_RE = re.compile(
+    r"\[clarification answer:\s*(.*?)\]\s*$", re.IGNORECASE | re.DOTALL
+)
+
+
+def _clean_fallback_query(text: str) -> str:
+    """Unwrap (never delete) a trailing "[clarification answer: ...]"
+    wrapper so the refinement the user actually picked isn't lost. The
+    frontend prepends the original query when it joins selected options, so
+    if the unwrapped inner text already starts with the outer original, the
+    duplicate outer prefix is dropped rather than repeated."""
+    text = text or ""
+    match = _CLARIFICATION_WRAPPER_RE.search(text)
+    if not match:
+        return text.strip()
+    outer = text[: match.start()].strip()
+    inner = match.group(1).strip()
+    if outer and inner.lower().startswith(outer.lower()):
+        return inner
+    if outer and inner:
+        return f"{outer} {inner}".strip()
+    return inner or outer or text.strip()
+
 REWRITE_SYSTEM_PROMPT = """You frame web-search queries. You do NOT answer the user.
 
 You receive a chat message (possibly with appended clarification answers joined
@@ -65,20 +95,21 @@ MAX_REWRITE_QUERIES = 3
 
 
 def _coerce_rewrite_payload(payload: Any, raw_query: str) -> dict:
+    clean_query = _clean_fallback_query(raw_query)
     if not isinstance(payload, dict):
         return {
-            "queries": [raw_query],
+            "queries": [clean_query],
             "entities": [],
-            "time_sensitive": is_time_sensitive_query(raw_query),
+            "time_sensitive": is_time_sensitive_query(clean_query),
         }
     queries = payload.get("queries")
     if not isinstance(queries, list):
-        queries = [raw_query]
+        queries = [clean_query]
     cleaned = [str(item).strip() for item in queries if str(item).strip()]
     entities = payload.get("entities")
     if not isinstance(entities, list):
         entities = []
-    coerced_queries = cleaned[:MAX_REWRITE_QUERIES] or [raw_query]
+    coerced_queries = cleaned[:MAX_REWRITE_QUERIES] or [clean_query]
     flag = payload.get("time_sensitive")
     if not isinstance(flag, bool):
         # Deterministic backstop: regex over the raw message + framed queries
@@ -125,8 +156,9 @@ async def rewrite_search_queries(
         return _coerce_rewrite_payload(json.loads(text), user_query)
     except Exception as exc:
         logger.warning(f"Query rewrite failed, searching raw query: {exc}")
+        clean_query = _clean_fallback_query(user_query)
         return {
-            "queries": [user_query],
+            "queries": [clean_query],
             "entities": [],
-            "time_sensitive": is_time_sensitive_query(user_query),
+            "time_sensitive": is_time_sensitive_query(clean_query),
         }

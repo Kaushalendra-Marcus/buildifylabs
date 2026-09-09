@@ -283,17 +283,41 @@ _INDICATOR_TOKENS = frozenset({
     "visually", "visual", "visualization", "chart", "charts",
     "table", "tables", "graph", "graphs", "estimated", "estimate",
     "impact", "outlook", "trend", "trends", "figure", "figures",
+    # Comparison-aspect / capability vocabulary (generic across domains,
+    # not just AI models): the label text a judge/LLM generates for
+    # clarification options ("Benchmark scores and performance", "Context
+    # window size and latency") is a list of ASPECTS to compare, never a
+    # list of entities -- its capitalized lead words were leaking through
+    # as ghost entities purely because they happened to be real English
+    # nouns, not stopwords (observed: detect_entities returned ['Benchmark',
+    # 'Context'] for a real clarification-answer merge; 'Pricing' was
+    # already caught since it predates this addition).
+    "benchmark", "benchmarks", "context", "latency", "capability",
+    "capabilities", "feature", "features", "performance", "suitability",
+    "quality", "speed", "accuracy", "reliability", "scalability",
+    "security", "usability", "token", "tokens", "score", "scores",
+    "overall", "window", "windows",
+    # Generic descriptor nouns (never entities on their own, any domain).
+    "size", "length", "level", "levels", "type", "types", "range",
+    "count", "amount", "value", "values", "duration", "limit", "limits",
 })
 
 
 def _is_indicator_word(word: str) -> bool:
-    """True when every alpha-token of the word is an indicator token.
+    """True when every alpha-token of the word is an indicator token OR a
+    function-word stopword. The stopword allowance matters for multi-word
+    candidates: "Cost Per Token" has "cost"/"token" as indicators but "per"
+    as neither -- requiring literally every word to be a topic-indicator
+    let a preposition-glued phrase like that slip through as a fake entity
+    (observed by execution, not assumed).
 
     Hyphenated compounds split ("house-price" -> price); punctuation is
     ignored ("visually." -> visually). Pure.
     """
     parts = [p for p in re.split(r"[^a-z]+", (word or "").lower()) if p]
-    return bool(parts) and all(p in _INDICATOR_TOKENS for p in parts)
+    return bool(parts) and all(
+        p in _INDICATOR_TOKENS or p in _GENERIC_ENTITY_STOPWORDS for p in parts
+    )
 
 
 def _is_indicator_phrase(candidate: str) -> bool:
@@ -382,9 +406,15 @@ def _structural_comparison_candidates(text: str) -> List[str]:
         segment = raw[start:]
     else:
         segment = raw[start + len("compare"):]
-    # Cut at the first scope/metric/period cue.
+    # Cut at the first scope/metric/period cue, OR a standalone dash --
+    # "fable vs astra comparison - Benchmark scores..." is a clarification-
+    # merge continuation (or a natural qualifying clause), never more
+    # comparison entities; without this cut the whole aspect-list survives
+    # as one overlong piece and gets truncated into garbage like "Astra
+    # Comparison -" (observed by execution).
     cut = re.search(
-        r"\b(over|on|for|in|during|from|with|show|which|explain|calculate|between)\b",
+        r"\b(over|on|for|in|during|from|with|show|which|explain|calculate|between)\b"
+        r"|\s+-\s+",
         segment, re.IGNORECASE,
     )
     if cut:
