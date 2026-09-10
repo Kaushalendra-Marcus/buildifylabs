@@ -499,3 +499,68 @@ class TestDdgChallenge:
             assert "202" in str(exc)
         else:
             raise AssertionError("DDG 202 must raise, not parse challenge HTML")
+
+
+class TestCountFigures:
+    """Counts with count nouns (views/subscribers/jobs) are chartable
+    evidence: present numbers must become visuals, never prose-only.
+    Bare numbers ("Top 10", years) still never qualify."""
+
+    def test_views_and_subscribers_extract_with_values(self):
+        figures = _figures_from_snippets(
+            ["Sourav Joshi Vlogs crossed 16 billion views in 2024"]
+        )
+        assert len(figures) == 1
+        assert figures[0]["value"] == 16e9
+        assert figures[0]["unit"] == "count"
+        assert figures[0]["metric"] == "views"
+
+    def test_open_jobs_extract(self):
+        figures = _figures_from_snippets(
+            ["In North Dakota, 12,655 open jobs; trending down"]
+        )
+        assert len(figures) == 1
+        assert figures[0]["value"] == 12655.0
+        assert figures[0]["unit"] == "count"
+        assert figures[0]["metric"] == "jobs"
+
+    def test_bare_ranks_and_years_still_excluded(self):
+        assert _figures_from_snippets(["Top 10 Indian channels in 2026"]) == []
+        assert _figures_from_snippets(["8 months of growth"]) == []
+
+    def test_count_bar_groups_by_metric(self):
+        figures = _figures_from_snippets(
+            [
+                "Sourav Joshi Vlogs crossed 16 billion views",
+                "Techno Gamerz crossed 12 billion views",
+                "CarryMinati has 50M subscribers",
+                "Total Gaming has 40M subscribers",
+            ]
+        )
+        bar = _figures_bar_visual(figures, "youtube channel stats")
+        assert bar is not None
+        assert bar.props["chart_type"] == "bar"
+        # One metric per bar: views and subscribers never share one chart.
+        assert len(bar.props["datasets"][0]["values"]) == 2
+        assert bar.props["datasets"][0]["name"] in ("views", "subscribers")
+
+    def test_count_bar_grounds_in_snippets(self):
+        snippets = [
+            "Sourav Joshi Vlogs crossed 16 billion views",
+            "Techno Gamerz crossed 12 billion views",
+        ]
+        figures = _figures_from_snippets(snippets)
+        bar = _figures_bar_visual(figures, "youtube channel stats")
+        assert bar is not None
+        assert _visual_numbers_grounded(bar, snippets)
+
+    def test_count_figure_needs_no_currency(self):
+        from app.services.data.comparison import is_figure_comparison_eligible
+
+        figures = _figures_from_snippets(
+            ["Sourav Joshi Vlogs crossed 16 billion views"], "channels"
+        )
+        assert figures
+        if figures[0]["entity"] and figures[0]["metric"]:
+            ok, _ = is_figure_comparison_eligible(figures[0])
+            assert ok

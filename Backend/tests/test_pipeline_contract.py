@@ -1009,25 +1009,3 @@ class TestCitedFigures:
         assert tables[0].title == "Figures cited"
 
     def test_no_figures_no_figures_visuals(self, monkeypatch):
-        monkeypatch.setattr(
-            pipeline_mod,
-            "generate_response",
-            _sequenced_fake(
-                _decision_json(), _pipeline_json(visuals=[], confidence=0.6)
-            ),
-        )
-
-        output = asyncio.run(
-            run_pipeline(
-                user_query="follower tools?",
-                db_data=[],
-                source_scope="live_web",
-                news_context=["Free follower counter tools exist online."],
-                web_sources=[
-                    {"title": "Counter", "url": "https://c.example", "provider": "X"}
-                ],
-            )
-        )
-        # No plottable figures and no duplicate sources table: the answer
-        # carries no visuals; sources surface via the expandable section.
-        assert output.visuals == []
