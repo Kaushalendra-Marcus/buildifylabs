@@ -1324,12 +1324,26 @@ def _bind_figure(
       currency for money + definition + source_type). Raw figures are
       always preserved -- ineligible means prose-only, never dropped.
     """
-    # Display window (short, human-readable citation context).
+    # Display window (short, human-readable citation context). Snap to word
+    # boundaries so rows never start/end mid-word ("b outlook", "Informati"),
+    # and strip markdown/table artifacts ("||", "####", "[...]") that leak
+    # from raw web snippets into the figures table.
     before = max(0, match_start - 120)
+    while before > 0 and before < len(text) and not text[before].isspace():
+        before += 1
     after = min(len(text), match_end + 80)
+    while after > match_end and after < len(text) and not text[after - 1].isspace():
+        after -= 1
     window = " ".join(text[before:after].split())
+    window = re.sub(r"\[[^\]]*\]", " ", window)  # [...] / [n] remnants
+    window = window.replace("|", " ")
+    window = re.sub(r"#+\s*", "", window)  # markdown headings
+    window = re.sub(r"[-–—]{2,}", " ", window)  # table separators
+    window = re.sub(r"\s{2,}", " ", window).strip()
     if len(window) > _FIGURE_CONTEXT_CHARS:
-        window = window[:_FIGURE_CONTEXT_CHARS]
+        cut = window[:_FIGURE_CONTEXT_CHARS]
+        snap = cut.rfind(" ")
+        window = (cut[:snap] if snap > _FIGURE_CONTEXT_CHARS - 40 else cut).strip()
     # Binding scope: the FULL snippet text (never truncated before binding).
     # A wide local window is checked first for precision, then the full
     # text as recall backstop so distant cues still bind.
@@ -1424,6 +1438,38 @@ def _bind_figure(
     except Exception:
         candidate["comparison_eligible"] = False
     return candidate
+
+
+def _figure_label(figure: dict, max_len: int = 40) -> str:
+    """Human-readable chart label for a cited figure.
+
+    Prefers the bound entity name (short, accurate). Falls back to the
+    sentence within the ~200-char context window that actually contains
+    the figure's own matched text -- a blind context[:N] prefix slice
+    frequently lands in an unrelated clause from earlier in the window
+    (the window starts ~120 chars BEFORE the match), producing labels like
+    "vancements in personalized medicine." that describe a different
+    figure entirely.
+    """
+    entity = figure.get("entity")
+    if entity:
+        label = str(entity).strip()
+        if label:
+            return label[:max_len]
+    context = str(figure.get("context", "") or "")
+    match_text = str(figure.get("text", "") or "")
+    target = context
+    if context:
+        sentences = re.split(r"(?<=[.!?])\s+", context)
+        found = None
+        if match_text:
+            for sentence in sentences:
+                if match_text in sentence:
+                    found = sentence
+                    break
+        target = found if found is not None else (sentences[-1] if sentences else context)
+    target = target.strip()
+    return (target or context)[:max_len]
 
 
 def _figures_table_visual(figures: list) -> Optional[VisualOutput]:
@@ -1530,7 +1576,7 @@ def _figures_bar_visual(
         title=f"Cited {unit_word}s compared",
         props={
             "chart_type": "bar",
-            "labels": [f"{figure['context'][:36]} [{figure['ref']}]" for figure in group],
+            "labels": [f"{_figure_label(figure)} [{figure['ref']}]" for figure in group],
             "datasets": [
                 {
                     "name": unit_word,
@@ -1575,8 +1621,12 @@ def _timeline_visual(
         date = ((web_sources[index] or {}).get("published_date") or "").strip()
         if not date:
             continue
+        # Keep ISO dates compact (YYYY-MM-DD); keep human dates like
+        # "Wed, 09 Sep 2026" intact instead of blind [:10] truncation
+        # ("Wed, 09 Se"). Cap at 24 chars for chip layout.
+        short_date = date[:10] if re.match(r"\d{4}-\d{2}-\d{2}", date) else date[:24]
         event = " ".join(str(snippet).split())[:120]
-        rows.append([date[:10], f"{event} [{index + 1}]"])
+        rows.append([short_date, f"{event} [{index + 1}]"])
     if len(rows) < 2:
         return None
     rows = sorted(rows, key=lambda row: row[0], reverse=True)[
@@ -1698,7 +1748,7 @@ def _comparison_from_figures(
             "baseline": group[1]["value"],
             "groups": [
                 {
-                    "label": f"{figure['context'][:36]} [{figure['ref']}]",
+                    "label": f"{_figure_label(figure)} [{figure['ref']}]",
                     "value": figure["value"],
                 }
                 for figure in group
