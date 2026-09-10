@@ -227,10 +227,19 @@
 }
 
 /* Key first columns: Figure values and Dates stay on one line, prose wraps. */
-.visual-table__key {
+/* NOTE: scoped under tbody td — the generic td rule below (0,1,2) beats a
+ * bare class (0,1,0), so these must match or exceed that specificity. */
+.visual-table tbody td.visual-table__key {
   white-space: nowrap;
   width: 1%;
   font-variant-numeric: tabular-nums;
+}
+
+/* Vertical divider between columns (Figure | Context, Date | Event, …). */
+.visual-table thead th + th,
+.visual-table tbody td + td {
+  border-left: 1px solid
+    color-mix(in srgb, var(--text-muted) 18%, transparent);
 }
 
 .visual-table__figure {
@@ -300,11 +309,11 @@
   content: '';
   position: absolute;
   left: 5px;
-  top: 20px;
-  bottom: 0;
+  top: 22px;
+  bottom: 2px;
   width: 2px;
   border-radius: 2px;
-  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .visual-timeline__item:last-child::before {

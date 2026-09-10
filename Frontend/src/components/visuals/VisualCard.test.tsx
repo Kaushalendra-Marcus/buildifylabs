@@ -112,6 +112,62 @@ describe('VisualCard — type→component lookup (F4)', () => {
     expect(screen.getByRole('cell', { name: 'Jan' })).toBeInTheDocument()
   })
 
+  it('renders Figures cited as a real table with Figure/Context headers', () => {
+    const { container } = render(
+      <VisualCard
+        visual={{
+          visual_type: 'table',
+          title: 'Figures cited',
+          props: {
+            columns: ['Figure', 'Context'],
+            values: [
+              ['18.9% [2]', 'Job outlook is exceptionally bright.'],
+              ['$222,203 [3]', 'Top cities for tech jobs in 2026.'],
+            ],
+          },
+        }}
+      />,
+    )
+
+    expect(screen.getByRole('table')).toHaveClass('visual-table')
+    expect(
+      screen.getByRole('columnheader', { name: 'Figure' }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('columnheader', { name: 'Context' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText('18.9%')).toBeInTheDocument()
+    // Rows separated by hairlines, not cards: no list markup.
+    expect(container.querySelector('.visual-figures')).not.toBeInTheDocument()
+  })
+
+  it('renders Timeline as a vertical rail, not a table', () => {
+    const { container } = render(
+      <VisualCard
+        visual={{
+          visual_type: 'table',
+          title: 'Timeline',
+          props: {
+            columns: ['Date', 'Event'],
+            values: [
+              ['2026-09-09', 'LEAP 2026 reflections [1]'],
+              ['2026-09-08', 'Top cities for tech jobs [2]'],
+            ],
+          },
+        }}
+      />,
+    )
+
+    const rail = container.querySelector('ol.visual-timeline')
+    expect(rail).toBeInTheDocument()
+    expect(rail?.querySelectorAll('.visual-timeline__item')).toHaveLength(2)
+    expect(rail?.querySelectorAll('.visual-timeline__dot')).toHaveLength(2)
+    expect(screen.getByText('Sep 9, 2026')).toHaveClass(
+      'visual-timeline__date',
+    )
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  })
+
   it('renders a ComparisonCard for comparison', () => {
     render(
       <VisualCard
