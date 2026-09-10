@@ -53,7 +53,6 @@ try:
         insufficient_reason,
         is_comparison_query,
         is_figure_comparison_eligible,
-        is_researchable_comparison,
         must_not_clarify,
         normalize_currency,
         parse_time_range,
@@ -1448,8 +1447,9 @@ def _fallback_subject(window: str) -> Optional[str]:
 # a resolvable entity stay citable in the figures table but never chart.
 # ---------------------------------------------------------------------------
 # Generic leading words that are never entities (pronouns, verbs, commerce
-# boilerplate, currency words). A candidate whose FIRST word is one of
-# these is rejected.
+# boilerplate, currency words, sentence starters, months/weekdays — dates
+# never name chart data). A candidate whose FIRST word is one of these is
+# rejected.
 _CHART_ENTITY_STOPWORDS = frozenset({
     "this", "that", "these", "those", "it", "they", "them", "here", "there",
     "buy", "buys", "buying", "shop", "shopping", "check", "click", "read",
@@ -1459,15 +1459,38 @@ _CHART_ENTITY_STOPWORDS = frozenset({
     "overall", "more", "most", "such", "each", "other", "many", "some",
     "all", "the", "a", "an", "and", "or", "vs", "per", "rs", "inr", "usd",
     "eur", "gbp", "rupee", "rupees", "dollar", "dollars", "euro", "euros",
-    "pound", "pounds",
+    "pound", "pounds", "for", "as", "at", "by", "in", "of", "on", "to",
+    "is", "are", "was", "were", "be", "no", "not", "so", "if", "than",
+    "then", "into", "over", "after", "before",
+    "someone", "somebody", "something", "anyone", "anybody", "anything",
+    "everyone", "everybody", "everything", "nobody", "nothing",
+    "january", "february", "march", "april", "may", "june", "july",
+    "august", "september", "october", "november", "december",
+    "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept",
+    "oct", "nov", "dec",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+    "sunday", "mon", "tue", "wed", "thu", "fri", "sat", "sun",
 })
 # Trailing descriptors stripped from resolved phrases ("... Headphones
 # Price" -> "... Headphones"; "... H707 HD" -> "... H707").
 _CHART_TRAILING_LABELS = frozenset({"price", "prices", "mrp", "cost", "deal"})
-_CHART_TRAILING_SPECS = frozenset({"hd", "rgb", "led"})
+_CHART_TRAILING_SPECS = frozenset({"hd", "rgb", "led", "wireless", "bluetooth", "wired"})
 # Leading retailer tokens stripped when more words follow ("Amazon Echo
 # Dot" -> "Echo Dot").
 _CHART_RETAILER_PREFIXES = frozenset({"amazon", "flipkart", "myntra", "croma"})
+# Leading listing-boilerplate stripped the same way ("Headphone And
+# Earphone Price Available From Zebronics ..." -> "Zebronics ..."):
+# category nouns and filler words describe listings, never items.
+_CHART_CATEGORY_WORDS = frozenset({
+    "headphone", "headphones", "earphone", "earphones", "earbud", "earbuds",
+    "headset", "headsets", "speaker", "speakers", "laptop", "laptops",
+    "phone", "phones", "smartphone", "smartphones", "watch", "watches",
+    "television", "televisions", "camera", "cameras", "tablet", "tablets",
+    "neckband", "neckbands", "keyboard", "keyboards", "monitor", "monitors",
+    "printer", "printers", "router", "routers", "charger", "chargers",
+    "console", "consoles", "available", "online", "store", "official",
+    "genuine",
+})
 # Colors are never standalone entities ("(Black) Price" -> look further).
 _CHART_COLORS = frozenset({
     "black", "white", "blue", "red", "green", "yellow", "pink", "grey",
@@ -1497,7 +1520,7 @@ def _is_generic_entity(text: str) -> bool:
     return False
 
 
-def _clean_chart_phrase(words: list) -> Optional[str]:
+def _clean_chart_phrase(words: list, full_text: str = "") -> Optional[str]:
     """Brand-led product name from run words: strip leading stopwords /
     retailers and trailing price labels, keep the first 4 words (brand and
     model lead; trailing descriptors repeat across products). The phrase
@@ -1506,6 +1529,7 @@ def _clean_chart_phrase(words: list) -> Optional[str]:
     while len(cleaned) > 1 and (
         cleaned[0].lower() in _CHART_ENTITY_STOPWORDS
         or cleaned[0].lower() in _CHART_RETAILER_PREFIXES
+        or cleaned[0].lower() in _CHART_CATEGORY_WORDS
     ):
         cleaned.pop(0)
     cleaned = cleaned[:4]
@@ -1525,13 +1549,29 @@ def _clean_chart_phrase(words: list) -> Optional[str]:
         return None
     if len(cleaned) == 1 and cleaned[0].lower() in _CHART_COLORS:
         return None
+    if len(cleaned) == 1:
+        # Title-case common nouns ("Neckbands", "Headphones") are categories,
+        # not items: they occur lowercase somewhere in the snippet, while
+        # proper names ("Echo", "YRF") never do. ALLCAPS/digital names
+        # ("YRF", "H707") are always kept.
+        word = cleaned[0]
+        if (
+            word.upper() != word
+            and not re.search(r"\d", word)
+            and full_text
+            and re.search(
+                r"(?<![A-Za-z])" + re.escape(word.lower()) + r"(?![A-Za-z])",
+                full_text.lower(),
+            )
+        ):
+            return None
     phrase = " ".join(cleaned)
     if _is_generic_entity(phrase):
         return None
     return phrase
 
 
-def _nearest_product_phrase(window: str, pos: int) -> Optional[str]:
+def _nearest_product_phrase(window: str, pos: int, full_text: str = "") -> Optional[str]:
     """Closest capitalized product-like phrase to a figure position.
 
     Searches BACKWARD first: listicles name the product before its price
@@ -1566,12 +1606,16 @@ def _nearest_product_phrase(window: str, pos: int) -> Optional[str]:
     if backward:
         # Nearest run first.
         for run in sorted(backward, key=lambda run: pos - run[-1][1]):
-            phrase = _clean_chart_phrase([word for _, _, word in run])
+            phrase = _clean_chart_phrase(
+                [word for _, _, word in run], full_text or window
+            )
             if phrase:
                 return phrase
     if forward:
         for run in sorted(forward, key=lambda run: run[0][0] - pos):
-            phrase = _clean_chart_phrase([word for _, _, word in run])
+            phrase = _clean_chart_phrase(
+                [word for _, _, word in run], full_text or window
+            )
             if phrase:
                 return phrase
     return None
@@ -1602,7 +1646,9 @@ def _resolve_chart_entity(figure: dict, queried_entities: list) -> Optional[str]
     pos = window.find(match_text) if match_text else -1
     if pos < 0:
         pos = len(window)
-    phrase = _nearest_product_phrase(window, pos)
+    phrase = _nearest_product_phrase(
+        window, pos, str((figure or {}).get("full_context", "") or "")
+    )
     if phrase:
         return phrase
     if entity and not _is_generic_entity(str(entity)):
@@ -1654,6 +1700,29 @@ def _query_price_constraint(query: str) -> Optional[tuple]:
     return (direction, value, (currency or "").upper() or None)
 
 
+_BUDGET_KEYWORDS = (
+    "under", "below", "less than", "up to", "upto", "within", "budget",
+    "maximum", "max", "over", "above", "more than", "minimum", "min",
+    "at least", "starting",
+)
+
+
+def _window_restates_constraint(window: str, cap: float) -> bool:
+    """True when a figure's own context restates the query's budget ("the
+    best headphones under ₹2000 ... ₹2000 ..."): the figure IS the
+    constraint, not a product price, so it must not chart as an answer."""
+    lowered = f" {(window or '').lower()} ".replace(",", "")
+    for symbol in ("₹", "$", "€", "£"):
+        lowered = lowered.replace(symbol, " ")
+    if not any(keyword in lowered for keyword in _BUDGET_KEYWORDS):
+        return False
+    try:
+        digits = str(int(cap)) if float(cap).is_integer() else str(cap)
+    except (TypeError, ValueError):
+        return False
+    return f" {digits} " in lowered or f" {digits}." in lowered
+
+
 def _apply_budget_constraint(figures: list, query: str) -> list:
     """Drop money figures that violate the query's stated budget from CHART
     pools (over-budget prices never bar as answers to "under X"). The
@@ -1674,6 +1743,14 @@ def _apply_budget_constraint(figures: list, query: str) -> list:
                 kept.append(figure)
                 continue
             value = float((figure or {}).get("value"))
+            if value == cap and _window_restates_constraint(
+                str((figure or {}).get("context", "") or ""), cap
+            ):
+                logger.info(
+                    "Budget filter: %s restates the query cap, bar-only drop.",
+                    (figure or {}).get("text"),
+                )
+                continue
             if direction == "max" and value > cap:
                 logger.info(
                     "Budget filter: %s above %s %s cap, bar-only drop.",
@@ -1760,8 +1837,22 @@ def _bind_figure(
         # Bound against a query-named entity: strictest provenance.
         entity_source = "queried"
     if entity is None and not queried_entities:
-        # No known entities in play: fall back to the window's own subject
-        # so "Acme raised $X" vs "Globex sold for $Y" stay attributable.
+        # No known entities in play: nearest product phrase beats the
+        # window-leading fallback (the fallback names article headings
+        # like "Smartprix:", proximity names the priced item). Guarded to
+        # empty-entity queries so strict attribution never weakens.
+        try:
+            pos = window.find(match_text) if match_text else -1
+            phrase = _nearest_product_phrase(
+                window, pos if pos >= 0 else len(window), full_scope
+            )
+        except Exception:
+            phrase = None
+        if phrase:
+            entity, entity_source = phrase, "phrase"
+    if entity is None and not queried_entities:
+        # Still nothing: fall back to the window's own subject so "Acme
+        # raised $X" vs "Globex sold for $Y" stay attributable.
         entity = _fallback_subject(window) or _fallback_subject(wide_scope)
         if entity is not None:
             entity_source = "fallback"
@@ -1777,6 +1868,11 @@ def _bind_figure(
                 metric = figure_metric_label(wide_scope) or figure_metric_label(full_scope)
         except Exception:
             metric = None
+    if metric is None and unit == "money" and (entity_source == "phrase"):
+        # A bare currency amount next to a named product with no other cue
+        # is its price ("Zeb-Duke Pro Wireless Headphones ₹1,449"). The
+        # phrase requirement keeps untyped "$202B somewhere" ineligible.
+        metric = "price"
     currency: Optional[str] = None
     if unit == "money":
         try:
@@ -1940,6 +2036,46 @@ def _figure_chart_groups(figures: list) -> list:
     return [group for group in by_key.values() if len(group) >= 2]
 
 
+def _comparison_intent_pool(figures: list, query: Optional[str] = None) -> Optional[list]:
+    """Eligible-only pool for comparison-intent queries ("best", "vs",
+    "compare"): ONLY strictly bound figures (H2) may chart, and money in
+    KNOWN different currencies never mixes. Full pool otherwise. None when
+    the gate blocks. Shared by the bar and the product table so both show
+    the same member set."""
+    pool = list(figures or [])
+    try:
+        if query and is_comparison_query is not None and is_comparison_query(query):
+            eligible = [fig for fig in pool if fig.get("comparison_eligible")]
+            if len(eligible) < 2:
+                logger.info(
+                    "Chart pool blocked: fewer than 2 semantically bound "
+                    "figures for a comparison query."
+                )
+                return None
+            pool = eligible
+            # H5: money bars in KNOWN different currencies never compare.
+            try:
+                known = {
+                    str(fig.get("currency", "") or "").strip().upper()
+                    for fig in pool if fig.get("unit") == "money"
+                }
+                known.discard("")
+                if len(known) > 1:
+                    logger.info(
+                        "Chart pool blocked: mixed currencies %s.", sorted(known)
+                    )
+                    return None
+            except Exception as exc:
+                # Fail-closed: currency check unavailable -> block.
+                logger.warning("Figure currency check failed, blocking: %s", exc)
+                return None
+    except Exception as exc:
+        # Fail-closed: eligibility check unavailable -> block.
+        logger.warning("Figure eligibility check failed, blocking: %s", exc)
+        return None
+    return pool
+
+
 def _figures_bar_visual(
     figures: list, query: Optional[str] = None
 ) -> Optional[VisualOutput]:
@@ -1957,40 +2093,8 @@ def _figures_bar_visual(
     its resolved entity, over-budget prices are excluded, and conflicting
     metrics never share one bar.
     """
-    pool = list(figures or [])
-    try:
-        if query and is_comparison_query is not None and is_comparison_query(query):
-            eligible = [fig for fig in pool if fig.get("comparison_eligible")]
-            if len(eligible) < 2:
-                logger.info(
-                    "Figures bar blocked: fewer than 2 semantically bound "
-                    "figures for a comparison query."
-                )
-                return None
-            pool = eligible
-            # H3: metric agreement is mandatory for comparison bars, not
-            # just for comparison cards. funding vs startup_cost (or views
-            # vs subscribers) must not bar-chart together even when both
-            # are eligible on their own. Enforced per chart group below.
-            # H5: money bars in KNOWN different currencies never compare.
-            try:
-                known = {
-                    str(fig.get("currency", "") or "").strip().upper()
-                    for fig in pool if fig.get("unit") == "money"
-                }
-                known.discard("")
-                if len(known) > 1:
-                    logger.info(
-                        "Figures bar blocked: mixed currencies %s.", sorted(known)
-                    )
-                    return None
-            except Exception as exc:
-                # Fail-closed: currency check unavailable -> block the bar.
-                logger.warning("Figure currency check failed, blocking bar: %s", exc)
-                return None
-    except Exception as exc:
-        # Fail-closed: eligibility check unavailable -> no comparison bar.
-        logger.warning("Figure eligibility check failed, blocking bar: %s", exc)
+    pool = _comparison_intent_pool(figures, query)
+    if pool is None:
         return None
     # Attributed-datum gate: every bar must name its WHO (resolved entity).
     # Unattributed figures stay citable in the figures table only.
@@ -1998,27 +2102,11 @@ def _figures_bar_visual(
     if len(pool_figs) < 2:
         logger.info("Figures bar blocked: fewer than 2 attributed figures.")
         return None
-    candidates = _figure_chart_groups(pool_figs)
-    if not candidates:
+    picked = _pick_chart_group(pool_figs)
+    if picked is None:
+        logger.info("Figures bar blocked: no metric-agreeing group.")
         return None
-    # Prefer the largest group whose metrics agree; a group with
-    # conflicting cues is skipped rather than charted (H3).
-    ordered = sorted(candidates, key=len, reverse=True)
-    group: Optional[list] = None
-    if figures_share_metric is not None:
-        for candidate in ordered:
-            try:
-                shares, _ = figures_share_metric(candidate)
-            except Exception:
-                shares = True
-            if shares:
-                group = candidate
-                break
-        if group is None:
-            logger.info("Figures bar blocked: no metric-agreeing group.")
-            return None
-    else:
-        group = ordered[0]
+    group, _ = picked
     assert group is not None
     unit = group[0]["unit"]
     if unit == "money":
@@ -2044,6 +2132,131 @@ def _figures_bar_visual(
                 }
             ],
         },
+    )
+
+
+def _pick_chart_group(pool_figs: list) -> Optional[tuple]:
+    """Largest metric-agreeing chart group (H3): a group with conflicting
+    cues is skipped rather than charted. Returns (group, None) or None.
+    Shared by the bar chart and the product table so both show the same
+    coherent member set."""
+    candidates = _figure_chart_groups(pool_figs)
+    if not candidates:
+        return None
+    ordered = sorted(candidates, key=len, reverse=True)
+    if figures_share_metric is not None:
+        for candidate in ordered:
+            try:
+                shares, _ = figures_share_metric(candidate)
+            except Exception:
+                shares = True
+            if shares:
+                return (candidate, None)
+        return None
+    return (ordered[0], None)
+
+
+def _product_table_visual(figures: list, query: str) -> Optional[VisualOutput]:
+    """Ranking-style table from attributed chart pairs: Product|Price for
+    money, Item|<Metric> for counts — the grounded equivalent of a
+    recommendation ranking. Same gated member set as the bar would chart
+    (comparison intent needs bound figures; budget violators excluded).
+    None when fewer than 2 qualify."""
+    pool = _comparison_intent_pool(figures, query)
+    if pool is None:
+        return None
+    pool_figs, entities_by_id, _ = _attributed_pool(pool, query or "")
+    if len(pool_figs) < 2:
+        return None
+    picked = _pick_chart_group(pool_figs)
+    if picked is None:
+        return None
+    group, _ = picked
+    unit = group[0].get("unit")
+    if unit == "money":
+        title, columns = "Products compared", ["Product", "Price"]
+    else:
+        metric = str(group[0].get("metric") or unit or "value").capitalize()
+        title, columns = f"{metric} compared", ["Item", metric]
+    return VisualOutput(
+        visual_type="table",
+        title=title,
+        props={
+            "columns": columns,
+            "values": [
+                [
+                    entities_by_id.get(id(figure), _figure_label(figure)),
+                    f"{figure['text']} [{figure['ref']}]",
+                ]
+                for figure in group
+            ],
+        },
+    )
+
+
+# Recommended items (books, products, tools): verbatim title phrases from
+# the evidence — double-quoted titles ("The Hundred-Page Machine Learning
+# Book") and "Title by Author" mentions ("AI Engineering by Chip Huyen").
+# Single quotes are skipped (apostrophes collide). A quote must start
+# uppercase ("thanks for reading it!..." never qualifies).
+_RECOMMENDED_QUOTE_RE = re.compile(r'"([^"<>]{8,80})"')
+_RECOMMENDED_BY_RE = re.compile(
+    r"\b([A-Z][\w&',\-:; ]{2,60}?)\s+by\s+([A-Z][\w.\-']+(?:\s+[A-Z][\w.\-']+){0,2})"
+)
+_SYNTH_ITEMS_MAX = 8
+
+
+def _recommended_from_snippets(
+    news_context: Optional[list], web_sources: Optional[list] = None
+) -> list:
+    """Recommended items as (item, ref) pairs in snippet order, deduped.
+    Pure evidence phrases — never invented, never reworded."""
+    found: list = []
+    seen: set = set()
+    for index, snippet in enumerate(news_context or [], start=1):
+        text = str(snippet or "")
+        candidates: list = []
+        for match in _RECOMMENDED_QUOTE_RE.finditer(text):
+            candidates.append(match.group(1).strip())
+        for match in _RECOMMENDED_BY_RE.finditer(text):
+            candidates.append(
+                f"{match.group(1).strip()} by {match.group(2).strip()}"
+            )
+        for item in candidates:
+            item = " ".join(item.split())
+            if len(item) < 8 or not re.match(r"[A-Z0-9]", item):
+                continue
+            if not re.search(r"[A-Za-z]", item):
+                continue
+            key = item.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append((item, index))
+            if len(found) >= _SYNTH_ITEMS_MAX:
+                return found
+    return found
+
+
+def _recommended_table_visual(
+    news_context: Optional[list], web_sources: Optional[list] = None
+) -> Optional[VisualOutput]:
+    """Ranking-style table of recommended items (books/products/tools) with
+    the citing source per row. Needs 2+ distinct items; None otherwise."""
+    items = _recommended_from_snippets(news_context, web_sources)
+    if len(items) < 2:
+        return None
+    sources = list(web_sources or [])
+    rows = []
+    for item, ref in items:
+        title = ""
+        if 0 <= ref - 1 < len(sources):
+            title = str((sources[ref - 1] or {}).get("title", "") or "")[:60]
+        rows.append([item, f"{title} [{ref}]" if title else f"[{ref}]"])
+    return VisualOutput(
+        visual_type="table",
+        title="Recommended",
+        props={"columns": ["Item", "Source"], "values": rows},
     )
 
 
@@ -4965,6 +5178,46 @@ def ensure_visuals(
             except Exception:
                 pass
             synthesized.append(table)
+        product_table = _product_table_visual(figures, query or "")
+        if product_table is not None:
+            # Ranking-style table from attributed pairs (grounded
+            # recommendation shape, never invented scores).
+            try:
+                if getattr(product_table, "provenance", None) is None:
+                    _fig_ents = sorted({str(f.get("entity", "")) for f in figures if f.get("entity")})[:4]
+                    attach_provenance(product_table, build_visual_provenance(
+                        query=query, entities=_fig_ents,
+                        metric=str((figures[0].get("metric") if figures else "") or "") or None,
+                        units=str((figures[0].get("unit") if figures else "") or "") or None,
+                        timeframe=None, frequency=None,
+                        source_ids=[f"snippet:{f.get('ref')}" for f in figures[:4]],
+                        computation_ids=[], data_points={"figures": len(figures)},
+                    ))
+            except Exception:
+                pass
+            try:
+                if float(output.confidence or 0.0) > 0.0:
+                    synthesized.append(product_table)
+            except (TypeError, ValueError):
+                synthesized.append(product_table)
+        recommended = _recommended_table_visual(news_context, web_sources)
+        if recommended is not None:
+            # Recommended-items table (books/products/tools with citing
+            # sources): pure evidence phrases, never invented.
+            try:
+                if getattr(recommended, "provenance", None) is None:
+                    _rec_items = _recommended_from_snippets(
+                        news_context, web_sources
+                    )[:4]
+                    attach_provenance(recommended, build_visual_provenance(
+                        query=query, entities=[],
+                        metric=None, units=None, timeframe=None, frequency=None,
+                        source_ids=[f"snippet:{ref}" for _, ref in _rec_items],
+                        computation_ids=[], data_points={"items": len(_rec_items)},
+                    ))
+            except Exception:
+                pass
+            synthesized.append(recommended)
         timeline = _timeline_visual(news_context, web_sources)
         if timeline is not None:
             synthesized.append(timeline)
@@ -4992,7 +5245,9 @@ def ensure_visuals(
             synthesized.append(outlook)
     if synthesized:
         logger.info(f"Visual guarantee synthesized {len(synthesized)} visual(s).")
-        output.visuals = list(output.visuals) + synthesized[:3]
+        # Four slots: comparison/bar/product-table/figures-table/timeline
+        # compete; the ranking-style product table must survive alongside.
+        output.visuals = list(output.visuals) + synthesized[:4]
     # Sources render once in the expandable section — never as a table card.
     output.visuals = _drop_sources_table_visuals(output.visuals)
     # Final provenance gate for all synthesized paths (fail closed).

@@ -1103,3 +1103,39 @@ class TestCitedFigures:
         tables = [v for v in output.visuals if v.visual_type == "table"]
         assert tables and tables[0].title == "Figures cited"
         assert len(tables[0].props["values"]) == 3
+
+    def test_books_query_yields_recommended_table(self, monkeypatch):
+        # Recommendation answers surface quoted titles as a Recommended
+        # table with citing sources — never invented items.
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(), _pipeline_json(visuals=[], confidence=0.9)
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(
+                user_query="what are best books to read for ai engineer role",
+                db_data=[],
+                source_scope="live_web",
+                news_context=[
+                    'Essential books for AI engineers include "The Hundred-Page Machine Learning Book" and more',
+                    '"AI Engineering by Chip Huyen" This is the first book you should read on AI Eng',
+                ],
+                web_sources=[
+                    {"title": "s1", "url": "https://s1.example", "provider": "X"},
+                    {"title": "s2", "url": "https://s2.example", "provider": "Y"},
+                ],
+            )
+        )
+        tables = {
+            v.title: v for v in output.visuals if v.visual_type == "table"
+        }
+        assert "Recommended" in tables
+        rows = tables["Recommended"].props["values"]
+        assert rows[0][0] == "The Hundred-Page Machine Learning Book"
+        assert "[1]" in rows[0][1]
+        assert rows[1][0] == "AI Engineering by Chip Huyen"
+        assert "[2]" in rows[1][1]

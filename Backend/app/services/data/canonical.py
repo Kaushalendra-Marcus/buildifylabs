@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 CANONICAL_SCHEMA_VERSION = "canonical-v1"

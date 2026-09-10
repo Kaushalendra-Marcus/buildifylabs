@@ -672,3 +672,212 @@ class TestAttributedChartData:
         assert _query_price_constraint(self.QUERY) == ("max", 2000.0, "INR")
         assert _query_price_constraint("laptops above $50") == ("min", 50.0, "USD")
         assert _query_price_constraint("how is revenue?") is None
+
+    def test_months_never_become_entities(self):
+        from app.services.llm.langchain_pipeline import (
+            _fallback_subject,
+            _is_generic_entity,
+        )
+
+        assert _is_generic_entity("Oct")
+        assert _is_generic_entity("March")
+        assert _fallback_subject("Oct, 2026 sales were strong, revenue $5M") is None
+        assert _fallback_subject("Acme raised $50M in 2024") == "Acme"
+
+    def test_common_noun_single_word_rejected_proper_kept(self):
+        from app.services.llm.langchain_pipeline import _nearest_product_phrase
+
+        window = "Best neckbands under Rs 2000: neckbands from boAt rock"
+        assert (
+            _nearest_product_phrase(window, window.find("2000"), window) is None
+            or "Neckbands" not in (_nearest_product_phrase(window, window.find("2000"), window) or "")
+        )
+        echo_window = "Buy on Amazon Echo Dot Price: \u20b94,499 today"
+        assert (
+            _nearest_product_phrase(echo_window, echo_window.find("\u20b94,499"), echo_window)
+            == "Echo Dot"
+        )
+
+    def test_constraint_restatement_excluded_from_bar(self):
+        from app.services.llm.langchain_pipeline import (
+            _figures_bar_visual,
+            _figures_from_snippets,
+            _window_restates_constraint,
+        )
+
+        assert _window_restates_constraint("the best headphones under \u20b92000 in India", 2000.0)
+        assert not _window_restates_constraint("OneOdio Pro 10 Price: \u20b91,999 Buy", 2000.0)
+        figures = _figures_from_snippets(
+            [
+                "The best headphones under \u20b92000 in India include boAt Rockerz 550",
+                "Zebronics Zeb-Duke Pro Wireless Headphones \u20b91,449 Mar, 2026",
+                "Noise Airwave Max 2 Wireless Headphones \u20b91,499 Aug, 2026",
+            ],
+            "which headphones are best under 2000 rs india",
+        )
+        bar = _figures_bar_visual(figures, "which headphones are best under 2000 rs india")
+        assert bar is not None
+        assert bar.props["datasets"][0]["values"] == [1449.0, 1499.0]
+        assert all("2000" not in label for label in bar.props["labels"])
+
+    def test_phrase_binding_beats_heading_fallback(self):
+        from app.services.llm.langchain_pipeline import _figures_from_snippets
+
+        figures = _figures_from_snippets(
+            ["Smartprix: Headphone Price From Zebronics Zeb-Duke Pro Wireless Headphones \u20b91,449 Today"]
+        )
+        assert figures[0]["entity"] == "Zebronics Zeb-Duke Pro"
+        assert figures[0]["metric"] == "price"
+        assert figures[0]["comparison_eligible"] is True
+
+    def test_product_table_lists_attributed_members(self):
+        from app.services.llm.langchain_pipeline import (
+            _figures_from_snippets,
+            _product_table_visual,
+        )
+
+        figures = _figures_from_snippets(
+            [
+                "Zebronics Zeb-Duke Pro Wireless Headphones \u20b91,449 Mar, 2026",
+                "Boult Fluid X Pro Wireless Headphones \u20b91,799 Jun, 2025",
+            ],
+            "headphone prices india",
+        )
+        table = _product_table_visual(figures, "headphone prices india")
+        assert table is not None
+        assert table.title == "Products compared"
+        assert table.props["columns"] == ["Product", "Price"]
+        assert [row[0] for row in table.props["values"]] == [
+            "Zebronics Zeb-Duke Pro",
+            "Boult Fluid X Pro",
+        ]
+
+
+class TestRecommendationEvidence:
+    """Recommendation queries get full page bodies (not just excerpts);
+    source titles prefer the real head; quoted titles become visuals."""
+
+    def test_recommendation_intent_detection(self):
+        assert web_search_mod.wants_recommendation_extract(
+            "what are best books to read for ai engineer role"
+        )
+        assert web_search_mod.wants_recommendation_extract(
+            "which headphones are best under 2000 rs india"
+        )
+        assert web_search_mod.wants_recommendation_extract("compare Acme vs Globex")
+        assert not web_search_mod.wants_recommendation_extract("how is revenue?")
+        assert not web_search_mod.wants_recommendation_extract(
+            "Free follower counter tools exist online."
+        )
+
+    def test_source_title_prefers_real_head(self):
+        assert web_search_mod._source_title(
+            "20 books and 1 piece of advise for aspiring ML engineers: But first"
+        ) == "20 books and 1 piece of advise for aspiring ML engineers"
+        # Boilerplate head falls back to the raw slice.
+        assert web_search_mod._source_title(
+            "2026) Smartprix: Headphone And Earphone Price Available From X"
+        ).startswith("2026) Smartprix")
+        assert web_search_mod._source_title("short text") == "short text"
+
+    def test_recommendation_query_prepends_full_content(self, monkeypatch):
+        cache_mod._reset_cache_state()
+
+        async def fake_tavily(client, query_item, settings, time_sensitive=False):
+            return [
+                ("Some listicle: intro words here", "https://t.example/a", "Tavily", None, 0.9),
+                ("Other excerpt here", "https://t.example/b", "Tavily", None, 0.8),
+            ]
+
+        async def fake_ddg(client, query_item, settings):
+            return []
+
+        async def fake_rewrite(query, prior_clarification=None, company_name=None):
+            return {"queries": ["best books query"], "entities": [], "time_sensitive": False}
+
+        extract_calls = []
+
+        async def fake_extract(client, url, query, settings):
+            extract_calls.append(url)
+            return (
+                f"Full content from {url}: 'The Hundred-Page Machine Learning Book' is great. (Tavily Extract.)",
+                {"title": f"Extracted: {url[:80]}", "url": url, "provider": "Tavily Extract"},
+            )
+
+        monkeypatch.setattr(web_search_mod, "_tavily_search", fake_tavily)
+        monkeypatch.setattr(web_search_mod, "_ddg_search", fake_ddg)
+        monkeypatch.setattr(web_search_mod, "rewrite_search_queries", fake_rewrite)
+        monkeypatch.setattr(web_search_mod, "_tavily_extract", fake_extract)
+        monkeypatch.setattr(
+            web_search_mod.get_settings(), "WEB_SEARCH_API_KEY", "test-key"
+        )
+
+        result = asyncio.run(web_search_mod.search_web("best books query"))
+        assert len(extract_calls) == 2
+        # Full content first, 1:1 aligned with its source.
+        assert result.context[0].startswith("Full content from https://t.example/a")
+        assert result.sources[0]["url"] == "https://t.example/a"
+        # Superseded excerpts for extracted URLs are gone (no dup evidence).
+        assert sum("t.example/a" in (s.get("url") or "") for s in result.sources) == 1
+
+    def test_non_recommendation_query_skips_extract(self, monkeypatch):
+        cache_mod._reset_cache_state()
+
+        async def fake_tavily(client, query_item, settings, time_sensitive=False):
+            return [("plain excerpt", "https://t.example/a", "Tavily", None, 0.9)]
+
+        async def fake_ddg(client, query_item, settings):
+            return []
+
+        async def fake_rewrite(query, prior_clarification=None, company_name=None):
+            return {"queries": ["revenue question"], "entities": [], "time_sensitive": False}
+
+        async def fake_extract(client, url, query, settings):  # pragma: no cover
+            raise AssertionError("extract must not fire here")
+
+        monkeypatch.setattr(web_search_mod, "_tavily_search", fake_tavily)
+        monkeypatch.setattr(web_search_mod, "_ddg_search", fake_ddg)
+        monkeypatch.setattr(web_search_mod, "rewrite_search_queries", fake_rewrite)
+        monkeypatch.setattr(web_search_mod, "_tavily_extract", fake_extract)
+        monkeypatch.setattr(
+            web_search_mod.get_settings(), "WEB_SEARCH_API_KEY", "test-key"
+        )
+
+        result = asyncio.run(web_search_mod.search_web("revenue question"))
+        assert result.context == ["plain excerpt"]
+
+
+class TestRecommendedTable:
+    """Quoted titles + 'Title by Author' become a Recommended table."""
+
+    SNIPPETS = [
+        'Essential books for AI engineers include "The Hundred-Page Machine Learning Book" and more',
+        '"AI Engineering by Chip Huyen" This is the first book you should read on AI Eng',
+        "thanks for reading it! yeah i think i sh",
+    ]
+
+    def test_extracts_quoted_and_by_author(self):
+        from app.services.llm.langchain_pipeline import _recommended_from_snippets
+
+        items = _recommended_from_snippets(self.SNIPPETS)
+        texts = [item for item, _ in items]
+        assert "The Hundred-Page Machine Learning Book" in texts
+        assert "AI Engineering by Chip Huyen" in texts
+        assert len(texts) == 2
+
+    def test_needs_two_distinct_items(self):
+        from app.services.llm.langchain_pipeline import _recommended_table_visual
+
+        assert (
+            _recommended_table_visual(["only \"One Single Book\" here"]) is None
+        )
+        table = _recommended_table_visual(
+            self.SNIPPETS,
+            [{"title": "t1"}, {"title": "t2"}, {"title": "t3"}],
+        )
+        assert table is not None
+        assert table.title == "Recommended"
+        assert table.props["columns"] == ["Item", "Source"]
+        assert table.props["values"][0][0] == "The Hundred-Page Machine Learning Book"
+        assert "[1]" in table.props["values"][0][1]
+        assert "[2]" in table.props["values"][1][1]

@@ -2,7 +2,7 @@ import logging
 
 import sqlglot
 from sqlglot import exp
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 

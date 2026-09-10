@@ -4,12 +4,6 @@ from datetime import datetime
 from typing import Optional
 
 
-class FileUploadRequest(BaseModel):
-    file_name: str
-    file_type: str
-    file_size: Optional[int] = None
-
-
 class FileResponse(BaseModel):
     id: UUID
     file_name: str

@@ -1,14 +1,9 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from jose import jwt, JWTError
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from uuid import UUID
 from datetime import datetime, timedelta, timezone
 
 from app.config import get_settings
-from app.db.models.user import User
-from app.db.database import get_db
 
 settings = get_settings()
 

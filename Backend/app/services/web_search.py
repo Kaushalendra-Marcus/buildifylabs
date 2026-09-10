@@ -1064,6 +1064,38 @@ def _find_urls(text: str) -> list[str]:
     return found[:MAX_EXTRACT_URLS]
 
 
+# Recommendation / ranking / comparison questions need page BODIES, not
+# just excerpts: book titles, product models and specs live past the
+# snippet ("best books", "top 10", "which X should I", "X vs Y").
+_RECOMMENDATION_INTENT_RE = re.compile(
+    r"\b(best|top|recommend(?:ed|ations?|s)?|suggest(?:ed|ions?|s)?|"
+    r"which\s+(?:one|ones|is|are|should)|list\s+of|rankings?|ranked|"
+    r"versus|compar(?:e|ison)|cheapest|greatest)\b"
+    r"|\bvs\.?\b",
+    re.IGNORECASE,
+)
+_RECOMMENDATION_EXTRACT_URLS = 3
+
+
+def wants_recommendation_extract(query_text: str) -> bool:
+    """True when the question asks for a list/ranking/comparison whose
+    items live inside pages, not inside excerpts."""
+    return bool(_RECOMMENDATION_INTENT_RE.search(query_text or ""))
+
+
+def _source_title(text: str) -> str:
+    """Readable source title: Tavily-style "Title: content" heads the real
+    title; otherwise the first 80 chars. The head must look title-ish
+    (several alpha words) or it is snippet boilerplate ("2026) Smartprix")."""
+    raw = " ".join(str(text or "").split())
+    head, sep, _ = raw.partition(": ")
+    if sep and 20 <= len(head) <= 120:
+        alpha_words = re.findall(r"[A-Za-z]{2,}", head)
+        if len(alpha_words) >= 3:
+            return head
+    return raw[:80]
+
+
 async def _tavily_extract(
     client: httpx.AsyncClient, url: str, query: str, settings
 ) -> Optional[tuple[str, dict]]:
@@ -2236,7 +2268,7 @@ async def search_web(
                     seen_urls.add(url)
                 merged_texts.append(text)
                 source_entry: dict[str, Any] = {
-                    "title": text[:80],
+                    "title": _source_title(text),
                     "url": url,
                     "provider": provider,
                 }
@@ -2248,6 +2280,61 @@ async def search_web(
                     except (TypeError, ValueError):
                         pass
                 merged_sources.append(source_entry)
+            # Recommendation deep-read: list/ranking/comparison questions
+            # need page bodies (book titles, models, specs live past the
+            # excerpt). Fetch full content for the top few http URLs and
+            # prepend it, keeping context/sources 1:1 aligned (superseded
+            # excerpts for the same URLs are dropped). Keyed Tavily only;
+            # failures fall back to excerpts silently.
+            if settings.WEB_SEARCH_API_KEY and wants_recommendation_extract(
+                query_text or ""
+            ):
+                deep_urls: list[str] = []
+                for source in merged_sources:
+                    url = str(source.get("url", "") or "")
+                    if url.startswith("http") and url not in deep_urls:
+                        deep_urls.append(url)
+                    if len(deep_urls) >= _RECOMMENDATION_EXTRACT_URLS:
+                        break
+                if deep_urls:
+                    try:
+                        deep_results = await asyncio.gather(
+                            *(
+                                _tavily_extract(client, url, query_text or "", settings)
+                                for url in deep_urls
+                            ),
+                            return_exceptions=True,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Recommendation extract fan-out failed: %s", exc
+                        )
+                        deep_results = []
+                    deep_texts: list[str] = []
+                    deep_sources: list[dict] = []
+                    deep_done: set[str] = set()
+                    for url, fetched in zip(deep_urls, deep_results):
+                        if isinstance(fetched, Exception) or not fetched:
+                            continue
+                        text, source = fetched
+                        deep_texts.append(text)
+                        entry = dict(source)
+                        entry["title"] = _source_title(
+                            source.get("title", "") or url
+                        )
+                        deep_sources.append(entry)
+                        deep_done.add(url)
+                    if deep_texts:
+                        merged_texts = deep_texts + [
+                            text
+                            for text, source in zip(merged_texts, merged_sources)
+                            if source.get("url") not in deep_done
+                        ]
+                        merged_sources = deep_sources + [
+                            source
+                            for source in merged_sources
+                            if source.get("url") not in deep_done
+                        ]
             # Second-pass research: a historical comparison that still
             # lacks annual financials for a required company must keep
             # researching (targeted per-company web queries) -- never stop

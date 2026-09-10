@@ -2272,8 +2272,6 @@ def build_evidence_coverage(
     coverage.validated_entities = sorted(ent_ok.keys())
     coverage.validated_metrics = sorted(met_ok.keys())
     # Common validated metrics across >=2 entities drive sufficiency.
-    from collections import Counter as _Counter
-
     metric_entity_count: Dict[str, int] = {}
     for metric in metrics:
         ents = {
