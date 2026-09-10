@@ -698,6 +698,50 @@ class TestRobustnessLoop:
         # expandable sources section (web_sources), never as a duplicate card.
         assert all(table.title != "Sources cited" for table in tables)
 
+    def test_model_drafted_sources_table_is_stripped(self, monkeypatch):
+        # The model may still draft a sources table from old habits: the
+        # pipeline must strip it — sources render once, expandable below.
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(),
+                _pipeline_json(
+                    visuals=[
+                        {
+                            "visual_type": "table",
+                            "title": "Sources cited",
+                            "props": {
+                                "columns": ["Source"],
+                                "values": [["Acme raises"], ["Globex launches"]],
+                            },
+                        }
+                    ],
+                    confidence=0.7,
+                ),
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(
+                user_query="startup news",
+                db_data=[],
+                source_scope="live_web",
+                news_context=["snippet one", "snippet two"],
+                web_sources=[
+                    {"title": "Acme raises", "url": "https://a.example", "provider": "X"},
+                    {"title": "Globex launches", "url": "https://b.example", "provider": "Y"},
+                ],
+            )
+        )
+        assert all(
+            not (
+                v.visual_type == "table"
+                and str(v.title or "").strip().lower() == "sources cited"
+            )
+            for v in output.visuals
+        )
+
     def test_empty_options_backfilled_from_judge(self, monkeypatch):
         # Both affordances, always: the narrator left options empty, so the
         # judge's evidence-grounded suggestions fill the pills.

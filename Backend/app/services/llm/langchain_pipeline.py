@@ -4006,8 +4006,9 @@ def ensure_visuals(
     A 0-confidence answer never gains a chart here -- insufficient
     evidence blocks visualization by design.
     Fail-closed: if gate/completeness validation itself throws, comparison
-    visuals are BLOCKED (existing graph/comparison cards are stripped and
-    only honest sources remain) instead of shipping unverified charts.
+    visuals are BLOCKED (existing graph/comparison cards are stripped;
+    sources stay visible via web_sources) instead of shipping unverified
+    charts.
     """
     rows = list(rows or [])
     market_data = list(market_data or [])
@@ -4238,7 +4239,7 @@ def ensure_visuals(
         # narration model proposing only metric/insight cards of its own
         # (no graph/comparison) -- previously that alone caused an
         # unconditional early return here, silently skipping ALL of the
-        # richer synthesis below (comparison/bar charts, sources tables,
+        # richer synthesis below (comparison/bar charts,
         # timelines) even when real, eligible evidence existed for them.
         # Falling through instead lets that synthesis ADD to (never
         # replace) whatever the model already proposed, so answers land
