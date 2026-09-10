@@ -1416,14 +1416,263 @@ _FIGURE_SUBJECT_RE = re.compile(r"^\s*([A-Z][\w&.\-]*(?:\s+[A-Z][\w&.\-]*){0,2})
 def _fallback_subject(window: str) -> Optional[str]:
     """Leading capitalized subject of a snippet window ("Acme raised ..." ->
     "Acme"). Used ONLY when the query names no known entities; otherwise an
-    unattributed figure stays unattributed (strict path)."""
+    unattributed figure stays unattributed (strict path). Generic leading
+    words ("This", "Buy", "Price") are never subjects."""
     match = _FIGURE_SUBJECT_RE.search(window or "")
     if not match:
         return None
     candidate = " ".join(match.group(1).split())
-    if len(candidate) < 2:
+    if len(candidate) < 2 or _is_generic_entity(candidate):
         return None
     return candidate
+
+
+def _fallback_subject(window: str) -> Optional[str]:
+    """Leading capitalized subject of a snippet window ("Acme raised ..." ->
+    "Acme"). Used ONLY when the query names no known entities; otherwise an
+    unattributed figure stays unattributed (strict path). Generic leading
+    words ("This", "Buy", "Price") are never subjects."""
+    match = _FIGURE_SUBJECT_RE.search(window or "")
+    if not match:
+        return None
+    candidate = " ".join(match.group(1).split())
+    if len(candidate) < 2 or _is_generic_entity(candidate):
+        return None
+    return candidate
+
+
+# ---------------------------------------------------------------------------
+# Attributed chart data: every bar/comparison datum must name its WHO.
+# A chart label is ALWAYS a resolved entity (product/company/channel) from
+# the evidence — never a sentence fragment ("Buy", "This"). Figures without
+# a resolvable entity stay citable in the figures table but never chart.
+# ---------------------------------------------------------------------------
+# Generic leading words that are never entities (pronouns, verbs, commerce
+# boilerplate, currency words). A candidate whose FIRST word is one of
+# these is rejected.
+_CHART_ENTITY_STOPWORDS = frozenset({
+    "this", "that", "these", "those", "it", "they", "them", "here", "there",
+    "buy", "buys", "buying", "shop", "shopping", "check", "click", "read",
+    "see", "find", "get", "top", "best", "price", "prices", "deal", "deals",
+    "offer", "offers", "sale", "list", "lists", "review", "reviews", "guide",
+    "guides", "under", "with", "from", "about", "new", "latest", "full",
+    "overall", "more", "most", "such", "each", "other", "many", "some",
+    "all", "the", "a", "an", "and", "or", "vs", "per", "rs", "inr", "usd",
+    "eur", "gbp", "rupee", "rupees", "dollar", "dollars", "euro", "euros",
+    "pound", "pounds",
+})
+# Trailing descriptors stripped from resolved phrases ("... Headphones
+# Price" -> "... Headphones"; "... H707 HD" -> "... H707").
+_CHART_TRAILING_LABELS = frozenset({"price", "prices", "mrp", "cost", "deal"})
+_CHART_TRAILING_SPECS = frozenset({"hd", "rgb", "led"})
+# Leading retailer tokens stripped when more words follow ("Amazon Echo
+# Dot" -> "Echo Dot").
+_CHART_RETAILER_PREFIXES = frozenset({"amazon", "flipkart", "myntra", "croma"})
+# Colors are never standalone entities ("(Black) Price" -> look further).
+_CHART_COLORS = frozenset({
+    "black", "white", "blue", "red", "green", "yellow", "pink", "grey",
+    "gray", "silver", "gold", "brown", "orange", "purple", "beige", "navy",
+})
+_CHART_WORD_RE = re.compile(r"[A-Za-z0-9][\w&.\-]*")
+
+
+def _is_generic_entity(text: str) -> bool:
+    """True when a candidate cannot be a chart entity (generic leading word,
+    all-generic words, too short, or a bare number)."""
+    words = str(text or "").split()
+    if not words:
+        return True
+    first = words[0].strip(".,;:!?()\"'").lower()
+    if first in _CHART_ENTITY_STOPWORDS or first in _CHART_RETAILER_PREFIXES:
+        # Retailer alone ("Amazon") is never a chart entity; retailer-led
+        # phrases are handled (stripped) by the phrase cleaner, not here.
+        return True
+    if all(w.strip(".,;:!?()\"'").lower() in _CHART_ENTITY_STOPWORDS for w in words):
+        return True
+    joined = " ".join(words)
+    if len(joined) < 2:
+        return True
+    if re.fullmatch(r"[\d,.\s]+", joined):
+        return True
+    return False
+
+
+def _clean_chart_phrase(words: list) -> Optional[str]:
+    """Brand-led product name from run words: strip leading stopwords /
+    retailers and trailing price labels, keep the first 4 words (brand and
+    model lead; trailing descriptors repeat across products). The phrase
+    must start with a capital and must not be a bare number."""
+    cleaned = list(words)
+    while len(cleaned) > 1 and (
+        cleaned[0].lower() in _CHART_ENTITY_STOPWORDS
+        or cleaned[0].lower() in _CHART_RETAILER_PREFIXES
+    ):
+        cleaned.pop(0)
+    cleaned = cleaned[:4]
+    while len(cleaned) > 1 and cleaned[-1].lower() in _CHART_TRAILING_LABELS:
+        cleaned.pop()
+    while len(cleaned) > 1 and cleaned[-1].lower() in _CHART_TRAILING_SPECS:
+        cleaned.pop()
+    while len(cleaned) > 1 and cleaned[-1].lower() in _CHART_ENTITY_STOPWORDS:
+        cleaned.pop()
+    if not cleaned:
+        return None
+    if not re.match(r"[A-Z]", cleaned[0]):
+        return None
+    if len(cleaned) == 1 and cleaned[0].lower() in _CHART_COLORS:
+        return None
+    phrase = " ".join(cleaned)
+    if _is_generic_entity(phrase):
+        return None
+    return phrase
+
+
+def _nearest_product_phrase(window: str, pos: int) -> Optional[str]:
+    """Closest capitalized product-like phrase to a figure position.
+
+    Searches BACKWARD first: listicles name the product before its price
+    ("... Ant Esports H707 ... Price: ₹1,499"). Forward only as fallback.
+    Returns a brand-led phrase of at most 4 words, stopword-cleaned, or
+    None when nothing entity-like is near.
+    """
+    tokens: list = []
+    for match in _CHART_WORD_RE.finditer(window or ""):
+        word = match.group(0)
+        # Lowercase-led words ("on", "the") break runs but never join them:
+        # product phrases are capitalized runs ("Amazon Echo Dot").
+        if re.match(r"[a-z]", word):
+            continue
+        tokens.append((match.start(), match.end(), word))
+    if not tokens:
+        return None
+    # Maximal runs of single-space separated tokens.
+    runs: list = []
+    current = [tokens[0]]
+    for start, end, word in tokens[1:]:
+        if start == current[-1][1] + 1:
+            current.append((start, end, word))
+        else:
+            runs.append(current)
+            current = [(start, end, word)]
+    runs.append(current)
+    backward = [run for run in runs if run[-1][1] <= pos]
+    forward = [run for run in runs if run[0][0] >= pos]
+    if backward:
+        # Nearest run first.
+        for run in sorted(backward, key=lambda run: pos - run[-1][1]):
+            phrase = _clean_chart_phrase([word for _, _, word in run])
+            if phrase:
+                return phrase
+    if forward:
+        for run in sorted(forward, key=lambda run: run[0][0] - pos):
+            phrase = _clean_chart_phrase([word for _, _, word in run])
+            if phrase:
+                return phrase
+    return None
+
+
+def _resolve_chart_entity(figure: dict, queried_entities: list) -> Optional[str]:
+    """The WHO for one figure, best signal first: bound entity, queried
+    entity mentioned near the figure, nearest product phrase. None means
+    unchartable (stays in the figures table only)."""
+    entity = (figure or {}).get("entity")
+    if entity and not _is_generic_entity(str(entity)):
+        return str(entity).strip()
+    window = str((figure or {}).get("context", "") or "")
+    if queried_entities and figure_entity_label is not None:
+        try:
+            hit = figure_entity_label(window, queried_entities or [])
+        except Exception:
+            hit = None
+        if hit and not _is_generic_entity(str(hit)):
+            return str(hit).strip()
+    match_text = str((figure or {}).get("text", "") or "")
+    pos = window.find(match_text) if match_text else -1
+    if pos < 0:
+        pos = len(window)
+    return _nearest_product_phrase(window, pos)
+
+
+def _query_price_constraint(query: str) -> Optional[tuple]:
+    """Budget stated in the query ("under 2000 rs", "above $50"):
+    (direction, value, ISO-currency-or-None). None when unstated."""
+    if not query:
+        return None
+    match = re.search(
+        r"(under|below|less\s+than|up\s*to|upto|within|budget(?: of| is)?|"
+        r"max(?:imum)?|over|above|more\s+than|minimum|min(?:imum)?|"
+        r"at\s+least|starting\s+(?:at|from))\s?"
+        r"([₹$€£])?\s?([\d,]+(?:\.\d+)?)\s?"
+        r"(rs|inr|usd|dollars?|eur|euros?|gbp|pounds?|₹|\$)?",
+        query,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    keyword = re.sub(r"\s+", " ", (match.group(1) or "").lower())
+    direction = (
+        "min"
+        if keyword.split()[0] in ("over", "above", "more", "minimum", "min", "at", "starting")
+        else "max"
+    )
+    try:
+        value = float((match.group(3) or "").replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+    symbol, word = match.group(2), match.group(4)
+    currency: Optional[str] = None
+    try:
+        if normalize_currency is not None and (symbol or word):
+            currency = normalize_currency(symbol or None, word or None)
+    except Exception:
+        currency = None
+    if currency is None and (symbol or word):
+        manual = {
+            "₹": "INR", "rs": "INR", "inr": "INR",
+            "$": "USD", "usd": "USD", "dollars": "USD", "dollar": "USD",
+            "€": "EUR", "eur": "EUR", "euros": "EUR", "euro": "EUR",
+            "£": "GBP", "gbp": "GBP", "pounds": "GBP", "pound": "GBP",
+        }
+        currency = manual.get(str(symbol or word or "").strip().lower())
+    return (direction, value, (currency or "").upper() or None)
+
+
+def _apply_budget_constraint(figures: list, query: str) -> list:
+    """Drop money figures that violate the query's stated budget from CHART
+    pools (over-budget prices never bar as answers to "under X"). The
+    figures table keeps everything; figures whose currency cannot be
+    verified are kept (not dropped on uncertain grounds)."""
+    constraint = _query_price_constraint(query or "")
+    if constraint is None:
+        return list(figures or [])
+    direction, cap, currency = constraint
+    kept = []
+    for figure in figures or []:
+        try:
+            if (figure or {}).get("unit") != "money":
+                kept.append(figure)
+                continue
+            code = str((figure or {}).get("currency", "") or "").strip().upper()
+            if not code or not currency or code != currency:
+                kept.append(figure)
+                continue
+            value = float((figure or {}).get("value"))
+            if direction == "max" and value > cap:
+                logger.info(
+                    "Budget filter: %s above %s %s cap, bar-only drop.",
+                    (figure or {}).get("text"), cap, currency,
+                )
+                continue
+            if direction == "min" and value < cap:
+                logger.info(
+                    "Budget filter: %s below %s %s floor, bar-only drop.",
+                    (figure or {}).get("text"), cap, currency,
+                )
+                continue
+        except (TypeError, ValueError):
+            pass
+        kept.append(figure)
+    return kept
 
 
 def _bind_figure(
