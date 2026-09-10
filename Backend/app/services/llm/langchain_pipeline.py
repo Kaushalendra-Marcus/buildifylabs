@@ -1204,6 +1204,15 @@ _FIGURE_COUNT_RE = re.compile(
     r"(?:open\s+)?(" + _FIGURE_COUNT_NOUNS + r")\b",
     re.IGNORECASE,
 )
+# Scale-bearing bare numbers ("about 350 billion", "around 315 million"):
+# the scale word proves it is a quantity, not a rank/year. The WHAT comes
+# from the nearest count noun in a small window ("lifetime views (about
+# 350 billion)" -> views). Unit-less decimals ("58.3") never qualify.
+_FIGURE_SCALED_BARE_RE = re.compile(
+    r"(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand)\b",
+    re.IGNORECASE,
+)
+_FIGURE_NOUN_WINDOW = 80
 # Count nouns normalised to their canonical metric label (matches the
 # count cues in comparison.figure_metric_label).
 _FIGURE_COUNT_NOUN_TO_METRIC = {
@@ -1231,10 +1240,38 @@ _FIGURE_SCALE = {
 }
 
 
+def _nearest_count_noun(text: str, start: int, end: int, radius: int = 80) -> Optional[str]:
+    """Closest count noun to a bare scaled number, canonicalised to its
+    metric label. Either side counts ("lifetime views (about 350
+    billion)" -> views); nearest wins so mixed answers resolve per number.
+    None when no count noun is near — the figure stays metric-less."""
+    window_start = max(0, start - radius)
+    window = text[window_start:min(len(text), end + radius)]
+    best: Optional[str] = None
+    best_dist: Optional[int] = None
+    for hit in re.finditer(_FIGURE_COUNT_NOUNS, window, re.IGNORECASE):
+        pos = window_start + hit.start()
+        hit_end = window_start + hit.end()
+        if pos < end and start < hit_end:
+            dist = 0
+        else:
+            dist = min(abs(pos - start), abs(hit_end - end))
+        if best_dist is None or dist < best_dist:
+            best_dist = dist
+            best = hit.group(0).strip().lower()
+    if best is None:
+        return None
+    return _FIGURE_COUNT_NOUN_TO_METRIC.get(best)
+
+
 def _figures_from_snippets(
     snippets: Optional[list], query: Optional[str] = None
 ) -> list:
     """Extract cited money/percent/count figures verbatim from web snippets.
+
+    Counts cover adjacent nouns ("50M subscribers") AND scale-bearing bare
+    numbers ("about 350 billion", WHAT resolved from the nearest count
+    noun). Unit-less decimals, ranks ("Top 10") and years never qualify.
 
     Each figure keeps its exact text, a normalized value for bar heights, a
     unit class (money vs percent vs count, never mixed on one chart), the FULL
@@ -1321,6 +1358,32 @@ def _figures_from_snippets(
                     queried_entities=queried_entities,
                     scale=scale,
                     count_noun=_FIGURE_COUNT_NOUN_TO_METRIC.get(noun),
+                )
+            )
+        for match in _FIGURE_SCALED_BARE_RE.finditer(text):
+            # Already claimed by a money/percent/adjacent-noun match (e.g.
+            # "16 billion" inside "16 billion views") — skip the double count.
+            if any(
+                match.start() < end and start < match.end()
+                for start, end in claimed_spans
+            ):
+                continue
+            claimed_spans.append((match.start(), match.end()))
+            amount = float(match.group(1).replace(",", ""))
+            scale = _FIGURE_SCALE.get(match.group(2) or "", 1)
+            figures.append(
+                _bind_figure(
+                    text=text,
+                    match_text=match.group(0).strip(),
+                    value=amount * scale,
+                    unit="count",
+                    symbol="",
+                    match_start=match.start(),
+                    match_end=match.end(),
+                    ref=index,
+                    queried_entities=queried_entities,
+                    scale=scale,
+                    count_noun=_nearest_count_noun(text, match.start(), match.end()),
                 )
             )
     ordered: list = []

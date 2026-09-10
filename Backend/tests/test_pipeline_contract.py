@@ -1009,3 +1009,56 @@ class TestCitedFigures:
         assert tables[0].title == "Figures cited"
 
     def test_no_figures_no_figures_visuals(self, monkeypatch):
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(), _pipeline_json(visuals=[], confidence=0.6)
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(
+                user_query="follower tools?",
+                db_data=[],
+                source_scope="live_web",
+                news_context=["Free follower counter tools exist online."],
+                web_sources=[
+                    {"title": "Counter", "url": "https://c.example", "provider": "X"}
+                ],
+            )
+        )
+        # No plottable figures and no duplicate sources table: the answer
+        # carries no visuals; sources surface via the expandable section.
+        assert output.visuals == []
+
+    def test_count_figures_produce_bar_and_table(self, monkeypatch):
+        # Ranking-style answers whose numbers are counts (views) must still
+        # chart: numbers present in evidence become visuals, never prose-only.
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(), _pipeline_json(visuals=[], confidence=0.7)
+            ),
+        )
+
+        output = asyncio.run(
+            run_pipeline(
+                user_query="best youtube channels by views",
+                db_data=[],
+                source_scope="live_web",
+                news_context=[
+                    "Sourav Joshi Vlogs crossed 16 billion views in 2024",
+                    "Techno Gamerz crossed 12 billion views in 2024",
+                ],
+                web_sources=[],
+            )
+        )
+        kinds = [visual.visual_type for visual in output.visuals]
+        assert "graph" in kinds
+        graph = next(v for v in output.visuals if v.visual_type == "graph")
+        assert graph.props["chart_type"] == "bar"
+        assert graph.props["datasets"][0]["values"] == [16e9, 12e9]
+        tables = [v for v in output.visuals if v.visual_type == "table"]
+        assert tables and tables[0].title == "Figures cited"

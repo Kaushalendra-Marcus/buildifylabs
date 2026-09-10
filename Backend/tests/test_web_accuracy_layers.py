@@ -564,3 +564,37 @@ class TestCountFigures:
         if figures[0]["entity"] and figures[0]["metric"]:
             ok, _ = is_figure_comparison_eligible(figures[0])
             assert ok
+
+    def test_bare_scaled_number_resolves_nearest_noun(self):
+        figures = _figures_from_snippets(
+            ["T-Series leads lifetime views with about 350 billion"]
+        )
+        assert len(figures) == 1
+        assert figures[0]["value"] == 350e9
+        assert figures[0]["unit"] == "count"
+        assert figures[0]["metric"] == "views"
+
+    def test_mixed_answer_resolves_per_number(self):
+        figures = _figures_from_snippets(
+            [
+                "T-Series leads lifetime views with about 350 billion",
+                "Highest subscriber base of around 315 million",
+            ]
+        )
+        by_value = {f["value"]: f["metric"] for f in figures}
+        assert by_value[350e9] == "views"
+        assert by_value[315e6] == "subscribers"
+
+    def test_unitless_decimal_still_excluded(self):
+        assert _figures_from_snippets(["YRF is next at 58.3 overall"]) == []
+
+    def test_bare_scaled_bar_only_with_agreeing_pair(self):
+        figures = _figures_from_snippets(
+            [
+                "T-Series leads lifetime views with about 350 billion",
+                "SET India follows with 188.8 billion lifetime views",
+            ]
+        )
+        bar = _figures_bar_visual(figures, "top channels by views")
+        assert bar is not None
+        assert bar.props["datasets"][0]["values"] == [350e9, 188.8e9]
