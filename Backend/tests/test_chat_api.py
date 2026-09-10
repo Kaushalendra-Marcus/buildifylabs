@@ -424,10 +424,9 @@ class TestGracefulFallbacks:
         assert "[1]" in body["answer"]
         assert "[7]" not in body["answer"]
         tables = [v for v in body["visuals"] if v["visual_type"] == "table"]
-        assert [table["title"] for table in tables] == [
-            "Figures cited",
-            "Sources cited",
-        ]
+        # Figures only: no duplicate "Sources cited" table — sources render
+        # once in the expandable section below the answer.
+        assert [table["title"] for table in tables] == ["Figures cited"]
         assert tables[0]["props"]["columns"] == ["Figure", "Context"]
         assert body["thinking"]
         assert any("Judged" in step for step in body["thinking"])

@@ -671,7 +671,7 @@ class TestRobustnessLoop:
         assert any("Judged" in step for step in output.thinking)
         assert any("Visuals out" in step for step in output.thinking)
 
-    def test_sources_table_for_web_only_answer(self, monkeypatch):
+    def test_no_sources_table_visual_for_web_answer(self, monkeypatch):
         monkeypatch.setattr(
             pipeline_mod,
             "generate_response",
@@ -694,9 +694,9 @@ class TestRobustnessLoop:
             )
         )
         tables = [v for v in output.visuals if v.visual_type == "table"]
-        assert tables
-        assert tables[0].title == "Sources cited"
-        assert tables[0].props["columns"] == ["Source"]
+        # No "Sources cited" table visual: sources surface once, via the
+        # expandable sources section (web_sources), never as a duplicate card.
+        assert all(table.title != "Sources cited" for table in tables)
 
     def test_empty_options_backfilled_from_judge(self, monkeypatch):
         # Both affordances, always: the narrator left options empty, so the
@@ -838,24 +838,6 @@ class TestFollowups:
             return await _narrate_prose_rescue("q", [], [], [])
 
         assert asyncio.run(scenario()) is None
-
-    def test_sources_table_includes_provider_only_rows(self):
-        from app.services.llm.langchain_pipeline import _sources_table_visual
-
-        table = _sources_table_visual(
-            [
-                {"title": "Acme raises", "url": "https://a.example", "provider": "X"},
-                {"title": "Tavily answer", "url": "", "provider": "Tavily"},
-                {"title": "  ", "url": "", "provider": "Y"},
-            ]
-        )
-        assert table is not None
-        assert table.props["columns"] == ["Source"]
-        assert table.props["values"] == [
-            ["Acme raises"],
-            ["Tavily answer"],
-        ]
-
 
 class TestEvidenceConfidence:
     def _answer_run(self, monkeypatch, narration, **kwargs):
@@ -1002,6 +984,6 @@ class TestCitedFigures:
                 ],
             )
         )
-        # No plottable figures: only the honest sources table goes out.
-        assert [v.visual_type for v in output.visuals] == ["table"]
-        assert output.visuals[0].title == "Sources cited"
+        # No plottable figures and no duplicate sources table: the answer
+        # carries no visuals; sources surface via the expandable section.
+        assert output.visuals == []

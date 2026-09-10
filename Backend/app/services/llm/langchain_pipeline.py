@@ -311,8 +311,9 @@ STRICT RULES:
 - VISUAL MANDATE: every normal answer MUST include visuals whenever anything
     plottable exists (evidence rows, market series, or prior data) - and more than
     one whenever the evidence supports more than one shape (chart AND table,
-    table AND metric, graph AND sources table). One lonely visual is a failure
-    when two honest ones fit. Choose
+    table AND metric, graph AND comparison). One lonely visual is a failure
+    when two honest ones fit. Never emit sources as a visual: the expandable
+    sources section below the answer renders them automatically. Choose
     by data shape, not by topic:
       a date-like column + a numeric column (3+ rows) -> line or area graph;
       a text column with 2-12 distinct values + a numeric column -> bar graph;
@@ -357,7 +358,8 @@ STRICT RULES:
   funding vs cost, or monthly vs multi-year figures as like-for-like.
 - OUTLOOK RULE: for sentiment/opinion/outlook questions with no hard numbers,
     use a status badge grounded in the cited snippets (state what the sources
-    suggest, not your own verdict) plus a sources table - never a fabricated chart.
+    suggest, not your own verdict) - never a fabricated chart and never a
+    sources table (sources render automatically below the answer).
 - PRIOR RESULT RULE: when PRIOR DATA is present and the query is a follow-up on it
     (chart it, filter it, compare it, explain a part of it), answer from PRIOR DATA.
     Do not claim the data is missing and do not re-ask what was already answered.
@@ -426,7 +428,8 @@ freshness/meta -> status; raw rows -> table; cited snippets with no numbers ->
 insight. Empty plan ONLY when nothing plottable exists at all.
 Steer explicitly: "X vs Y"/compare questions -> comparison; dated news
 snippets ("what's going on with X") -> table timeline; sentiment/outlook
-questions with no numbers -> status outlook badge + sources table.
+questions with no numbers -> status outlook badge (never a sources table:
+sources render automatically below the answer).
 
 suggested_options (for clarify only): 2-4 concrete options grounded in the
 actually available columns, metrics, or entities - never invented values.
@@ -1587,25 +1590,39 @@ def _figures_bar_visual(
     )
 
 
-def _sources_table_visual(web_sources: list) -> Optional[VisualOutput]:
-    """Honest visual for qualitative web answers: the actual cited sources as
-    a single-column table of titles, so even a prose answer carries an
-    artifact. Titles only — every row resolves through the same provider, so
-    a provider column is noise. Provider-only entries (no URL) are included -
-    the frontend renders them without a link instead of dropping the
-    citation."""
-    rows = [
-        [str(source.get("title", "Source"))[:80]]
-        for source in (web_sources or [])
-        if str(source.get("title", "")).strip()
-    ][:_SYNTH_SOURCES_MAX_ROWS]
-    if not rows:
-        return None
-    return VisualOutput(
-        visual_type="table",
-        title="Sources cited",
-        props={"columns": ["Source"], "values": rows},
-    )
+_SOURCES_TABLE_TITLES = frozenset({"sources cited", "sources", "cited sources"})
+_SOURCES_TABLE_COLUMNS = frozenset(
+    {"source", "sources", "title", "provider", "url", "link"}
+)
+
+
+def _drop_sources_table_visuals(visuals: list) -> list:
+    """Strip sources-dump table visuals, whoever proposed them.
+
+    Sources render exactly once in the frontend's expandable sources
+    section (from web_sources). A "Sources cited" table card next to it is
+    pure duplication, so it never ships — whether the synthesis code or the
+    model drafted it (prompts used to ask for one; they no longer do).
+    Anything that is not clearly a sources dump passes through untouched.
+    """
+    kept = []
+    for visual in visuals or []:
+        try:
+            title = str(getattr(visual, "title", "") or "").strip().lower()
+            if getattr(visual, "visual_type", "") != "table":
+                kept.append(visual)
+                continue
+            props = getattr(visual, "props", {}) or {}
+            columns = [str(c).strip().lower() for c in (props.get("columns") or [])]
+            if title in _SOURCES_TABLE_TITLES and all(
+                c in _SOURCES_TABLE_COLUMNS for c in columns
+            ):
+                logger.info("Dropped duplicate sources-table visual: %s.", title)
+                continue
+        except Exception:
+            pass
+        kept.append(visual)
+    return kept
 
 
 def _timeline_visual(
@@ -1938,7 +1955,7 @@ def _visual_numbers_grounded(visual: VisualOutput, snippets: list) -> bool:
     """
     numbers = _iter_visual_numbers(visual.props)
     if not numbers:
-        return True  # qualitative cards (sources table, outlook) need no grounding
+        return True  # qualitative cards (timeline, outlook) need no grounding
     snippet_values: list[float] = []
     for snippet in snippets or []:
         snippet_values.extend(_parse_scaled_number(str(snippet)))
@@ -3976,8 +3993,9 @@ def ensure_visuals(
     when plottable tool outputs exist. Clarifications and already-visual
     answers pass through untouched; synthesis only uses real values. Web-only
     answers get cited-figures visuals (comparison for X-vs-Y, bar when
-    comparable, timeline when dated, outlook status for sentiment) plus the
-    sources table, so even qualitative answers carry multiple cards.
+    comparable, timeline when dated, outlook status for sentiment).
+    Sources are never a visual: they render once in the expandable
+    sources section from web_sources.
 
     Final invariant (H10, enforced in CODE): a comparison visualization
     requires comparison_complete == True AND comparison_gate == PASSED AND
@@ -4003,10 +4021,6 @@ def ensure_visuals(
     # the market path charts market_data only, macro never enters it.
     combined_series = list(market_data)
     synthesized: list = []
-
-    def _sources_only() -> list:
-        table = _sources_table_visual(web_sources)
-        return [table] if table is not None else []
 
     def _strip_comparison_visuals(visuals: list) -> tuple[list, int]:
         kept = [
@@ -4237,16 +4251,15 @@ def ensure_visuals(
             return output
     if gate.get("applies") and gate.get("blocked"):
         logger.info("Historical comparison blocked: %s", gate.get("blocked_reason", "")[:160])
-        # Blocked comparisons get sources only (honest, not a chart).
+        # Blocked comparisons ship no chart. Sources stay visible via the
+        # expandable sources section (web_sources), not a table visual.
         # Fail-closed: any pre-existing graph/comparison is stripped first.
         output.visuals, _ = _strip_comparison_visuals(output.visuals)
-        synthesized = _sources_only()
-        if synthesized:
-            output.visuals = list(output.visuals) + synthesized[:3]
+        output.visuals = _drop_sources_table_visuals(output.visuals)
         return output
     # What-if queries never synthesize market-history charts (no inheritance
     # across incompatible intents). They get deterministic scenario visuals
-    # from computed what-if numbers plus honest sources only.
+    # from computed what-if numbers.
     if _is_what_if:
         what_if = (computed_numbers or {}).get("what_if")
         if isinstance(what_if, dict) and what_if:
@@ -4279,9 +4292,6 @@ def ensure_visuals(
                     synthesized.append(what_visual)
             except Exception as exc:
                 logger.warning("What-if visual failed: %s", exc)
-        sources = _sources_table_visual(web_sources)
-        if sources is not None:
-            synthesized.append(sources)
         # Tables of raw rows may still help; never market-history graphs.
         if rows:
             try:
@@ -4306,7 +4316,9 @@ def ensure_visuals(
         if synthesized:
             output.visuals = list(output.visuals) + synthesized[:3]
         # Provenance-validate before returning (fail closed).
-        output.visuals = _provenance_filter_final(output.visuals, query, gate)
+        output.visuals = _provenance_filter_final(
+            _drop_sources_table_visuals(output.visuals), query, gate
+        )
         return output
     if gate.get("applies") and not gate.get("blocked"):
         # Validated history: chart the validated subset (partial allowed),
@@ -4334,16 +4346,15 @@ def ensure_visuals(
         if margin_table is not None:
             _attach_history_provenance(margin_table, query, financial_history, years, METRIC_PROFIT)
             synthesized.append(margin_table)
-        sources = _sources_table_visual(web_sources)
-        if sources is not None:
-            synthesized.append(sources)
         if synthesized:
             logger.info(f"Visual guarantee synthesized {len(synthesized)} validated visual(s).")
             # Validated multi-year evidence earns the full set (graph +
-            # annual tables + margin table + sources): capping at 3 here
+            # annual tables + margin table): capping at 3 here
             # silently dropped the single comparable profitability view.
             output.visuals = list(output.visuals) + synthesized[:5]
-        output.visuals = _provenance_filter_final(output.visuals, query, gate)
+        output.visuals = _provenance_filter_final(
+            _drop_sources_table_visuals(output.visuals), query, gate
+        )
         return output
 
     if rows:
@@ -4412,9 +4423,10 @@ def ensure_visuals(
             except (TypeError, ValueError):
                 synthesized.append(fundamentals_comparison)
         if not synthesized:
-            # Gated short-term series (historical query, single entity):
-            # fall through to honest sources only, never an empty naked answer.
-            synthesized = _sources_only()
+            # Gated short-term series (historical query, single entity) with
+            # nothing chartable: no fallback visual. Sources stay visible via
+            # the expandable sources section (web_sources), not a table.
+            pass
     else:
         figures = _figures_from_snippets(news_context, query)
         # Explicit X-vs-Y steers to a comparison card first (never invented).
@@ -4511,12 +4523,11 @@ def ensure_visuals(
         outlook = _outlook_status_visual(news_context, query)
         if outlook is not None:
             synthesized.append(outlook)
-        sources = _sources_table_visual(web_sources)
-        if sources is not None:
-            synthesized.append(sources)
     if synthesized:
         logger.info(f"Visual guarantee synthesized {len(synthesized)} visual(s).")
         output.visuals = list(output.visuals) + synthesized[:3]
+    # Sources render once in the expandable section — never as a table card.
+    output.visuals = _drop_sources_table_visuals(output.visuals)
     # Final provenance gate for all synthesized paths (fail closed).
     try:
         output.visuals = _provenance_filter_final(output.visuals, query, gate)
