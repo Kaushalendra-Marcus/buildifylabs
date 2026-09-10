@@ -1,15 +1,15 @@
 /**
  * BusinessSummaryTable (F4) — `table` visual (src/lib/schemas/visuals.ts).
- * Always a real table: header row with clear column names, body rows with
- * zebra + hover, wrapped cells (no horizontal-scroll clipping). Spans two
- * columns in the grid (specs/14 §4.2).
+ * Spans two columns in the grid (specs/14 §4.2).
  *
- * Column pairs from the backend keep their clear names:
- * - ["Figure", "Context"] → figure cell in accent, context tidied (snippet
- *   windows can leak markdown "||"/"####", marked with "…" where cut).
- * - ["Date", "Event"]     → date cell in mono, event tidied the same way.
+ * - ["Figure", "Context"] → real table with clear headers: accent figure
+ *   cell, tidied context (snippet windows can leak markdown "||"/"####",
+ *   marked with "…" where cut). Rows separated by hairlines.
+ * - ["Date", "Event"]     → vertical timeline rail (dot + date chip +
+ *   wrapped event), the design that worked before.
  * - anything else         → generic table with numeric right-alignment.
  */
+import { CalendarDays } from 'lucide-react';
 import type { TableProps } from '../../lib/schemas/visuals';
 
 /** "18.9% [2]" → { value: "18.9%", ref: "2" }; falls back to raw text. */
@@ -60,6 +60,40 @@ function cleanProse(raw: string): string {
   return text;
 }
 
+function TimelineList({ values }: { values: (string | number)[][] }) {
+  return (
+    <ol className="visual-timeline" aria-label="Timeline events">
+      {values.map((row, rowIndex) => {
+        const [dateCell = '', eventCell = ''] = row;
+        const { text, ref } = splitEventCited(String(eventCell));
+        return (
+          <li key={rowIndex} className="visual-timeline__item">
+            <span className="visual-timeline__dot" aria-hidden="true" />
+            <div className="visual-timeline__body">
+              <span className="visual-timeline__date">
+                <CalendarDays size={12} aria-hidden="true" />
+                {shortDate(String(dateCell))}
+              </span>
+              <p className="visual-timeline__event">
+                {cleanProse(text)}
+                {ref !== null && (
+                  <a
+                    className="answer-cite"
+                    href={`#source-${ref}`}
+                    aria-label={`Source ${ref}`}
+                  >
+                    {ref}
+                  </a>
+                )}
+              </p>
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 export function BusinessSummaryTable({ props }: { props: TableProps }) {
   const { columns, values } = props;
 
@@ -76,6 +110,14 @@ export function BusinessSummaryTable({ props }: { props: TableProps }) {
     normalized.length === 2 &&
     normalized[0] === 'date' &&
     normalized[1] === 'event';
+
+  if (isTimeline) {
+    return (
+      <div className="visual-table-wrap visual-table-wrap--flush">
+        <TimelineList values={values} />
+      </div>
+    );
+  }
 
   // Generic table: detect numeric columns once for right-alignment.
   const numericColumn = columns.map((_, columnIndex) =>
@@ -132,7 +174,7 @@ export function BusinessSummaryTable({ props }: { props: TableProps }) {
                   return (
                     <td
                       key={cellIndex}
-                      className="visual-table__key visual-table__date"
+                      className="visual-table__key visual-table__datecell"
                     >
                       {shortDate(String(cell))}
                     </td>

@@ -160,6 +160,15 @@
   border-radius: 999px;
 }
 
+/* Flush wrapper for the timeline rail (no table box around it). */
+.visual-table-wrap--flush {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  max-height: 340px;
+  padding: 2px;
+}
+
 .visual-table {
   width: 100%;
   border-collapse: collapse;
