@@ -1062,3 +1062,44 @@ class TestCitedFigures:
         assert graph.props["datasets"][0]["values"] == [16e9, 12e9]
         tables = [v for v in output.visuals if v.visual_type == "table"]
         assert tables and tables[0].title == "Figures cited"
+    def test_headphone_budget_query_charts_attributed_in_budget(self, monkeypatch):
+        # End-to-end rebuild check: product names as labels (never "Buy" /
+        # "This"), over-budget prices out of the bar, full table kept.
+        monkeypatch.setattr(
+            pipeline_mod,
+            "generate_response",
+            _sequenced_fake(
+                _decision_json(), _pipeline_json(visuals=[], confidence=0.9)
+            ),
+        )
+        snippets = [
+            "Headphones Under 2000 in India (2025) 1. OneOdio Studio Pro 10 "
+            "OneOdio Pro 10 Wired Over-Ear Headphones Price: \u20b91,999 "
+            "Buy on Amazon",
+            "Cosmic Byte Equinox Europa 7.1 (Black) Price: \u20b92,399 "
+            "Buy on Amazon best gaming",
+            "Ant Esports H707 HD RGB Wired Gaming Headset Price: \u20b91,499 "
+            "Buy on Amazon",
+        ]
+
+        output = asyncio.run(
+            run_pipeline(
+                user_query="which headphones are best under 2000 rs india",
+                db_data=[],
+                source_scope="live_web",
+                news_context=snippets,
+                web_sources=[
+                    {"title": "s", "url": "https://s.example", "provider": "X"}
+                ],
+            )
+        )
+        graphs = [v for v in output.visuals if v.visual_type == "graph"]
+        assert graphs
+        bar = next(v for v in graphs if v.props["chart_type"] == "bar")
+        assert bar.props["datasets"][0]["values"] == [1999.0, 1499.0]
+        labels = " | ".join(bar.props["labels"])
+        assert "OneOdio" in labels and "Ant Esports" in labels
+        assert "Buy" not in labels and "This" not in labels
+        tables = [v for v in output.visuals if v.visual_type == "table"]
+        assert tables and tables[0].title == "Figures cited"
+        assert len(tables[0].props["values"]) == 3

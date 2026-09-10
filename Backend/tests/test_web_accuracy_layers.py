@@ -598,3 +598,77 @@ class TestCountFigures:
         bar = _figures_bar_visual(figures, "top channels by views")
         assert bar is not None
         assert bar.props["datasets"][0]["values"] == [350e9, 188.8e9]
+
+
+class TestAttributedChartData:
+    """Chart data must be attributed: every bar names its resolved entity,
+    over-budget prices never chart as answers to 'under X', and scale
+    letters inside words ('Buy') never inflate values."""
+
+    SNIPS = [
+        "Headphones Under 2000 in India (2025) 1. OneOdio Studio Pro 10 "
+        "OneOdio Pro 10 Wired Over-Ear Headphones Price: \u20b91,999 "
+        "Buy on Amazon",
+        "Cosmic Byte Equinox Europa 7.1 (Black) Price: \u20b92,399 "
+        "Buy on Amazon best gaming",
+        "Buy on Amazon EKSA Stereo Gaming Headset EKSA E800 Gaming "
+        "Wired Over-Ear Headphones (Blue) Price: \u20b92,499",
+        "Ant Esports H707 HD RGB Wired Gaming Headset Price: \u20b91,499 "
+        "Buy on Amazon",
+    ]
+    QUERY = "which headphones are best under 2000 rs india"
+
+    def test_scale_letter_inside_word_not_parsed(self):
+        from app.services.llm.langchain_pipeline import _figures_from_snippets
+
+        figures = _figures_from_snippets([self.SNIPS[0]])
+        assert [(f["text"], f["value"]) for f in figures] == [("\u20b91,999", 1999.0)]
+
+    def test_bar_labels_are_product_names(self):
+        from app.services.llm.langchain_pipeline import (
+            _figures_bar_visual,
+            _figures_from_snippets,
+        )
+
+        figures = _figures_from_snippets(self.SNIPS, self.QUERY)
+        bar = _figures_bar_visual(figures, self.QUERY)
+        assert bar is not None
+        labels = bar.props["labels"]
+        assert any("OneOdio" in label for label in labels)
+        assert any("Ant Esports" in label for label in labels)
+        for bad in ("Buy", "This", "Headphones Under", "Price:"):
+            assert all(bad not in label for label in labels)
+
+    def test_over_budget_excluded_from_bar_kept_in_table(self):
+        from app.services.llm.langchain_pipeline import (
+            _figures_bar_visual,
+            _figures_from_snippets,
+            _figures_table_visual,
+        )
+
+        figures = _figures_from_snippets(self.SNIPS, self.QUERY)
+        bar = _figures_bar_visual(figures, self.QUERY)
+        assert bar is not None
+        assert bar.props["datasets"][0]["values"] == [1999.0, 1499.0]
+        table = _figures_table_visual(figures)
+        assert table is not None
+        assert len(table.props["values"]) == 4
+
+    def test_unrelated_funding_figure_blocks_mixed_bar(self):
+        from app.services.llm.langchain_pipeline import (
+            _figures_bar_visual,
+            _figures_from_snippets,
+        )
+
+        figures = _figures_from_snippets(
+            self.SNIPS + ["Acme raised $300k in 2024"], self.QUERY
+        )
+        # Funding vs headphone prices: no shared metric, no bar.
+        assert _figures_bar_visual(figures, self.QUERY) is None
+
+    def test_budget_constraint_parsing(self):
+        from app.services.llm.langchain_pipeline import _query_price_constraint
+
+        assert _query_price_constraint(self.QUERY) == ("max", 2000.0, "INR")
+        assert _query_price_constraint("laptops above $50") == ("min", 50.0, "USD")
+        assert _query_price_constraint("how is revenue?") is None

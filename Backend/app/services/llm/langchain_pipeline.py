@@ -1191,16 +1191,16 @@ def _interleave_entities(rows: list[list], max_rows: int) -> list[list]:
 # number attached to a count noun ("16 billion views", "12,655 open jobs")
 # IS chartable evidence and must become visuals, never prose-only.
 _FIGURE_MONEY_RE = re.compile(
-    r"([$€₹£])\s?(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand)?"
+    r"([$€₹£])\s?(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand)?\b"
 )
-_FIGURE_PERCENT_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s?(%|percent)")
+_FIGURE_PERCENT_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s?(%(?!\w)|percent\b)")
 _FIGURE_COUNT_NOUNS = (
     r"views?|subscribers?|followers?|jobs?|openings?|vacancies|"
     r"users?|downloads?|installs?|employees?|headcount|staff|"
     r"customers?|clients?|members?|orders?|listeners?|students?"
 )
 _FIGURE_COUNT_RE = re.compile(
-    r"(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand)?\s?"
+    r"(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand)?\b\s?"
     r"(?:open\s+)?(" + _FIGURE_COUNT_NOUNS + r")\b",
     re.IGNORECASE,
 )
@@ -1509,6 +1509,10 @@ def _clean_chart_phrase(words: list) -> Optional[str]:
     ):
         cleaned.pop(0)
     cleaned = cleaned[:4]
+    # A product name heads with a capital ("Boeing 747", not "2025
+    # iPhone"): drop leading non-capitals left by list numbering.
+    while len(cleaned) > 1 and not re.match(r"[A-Z]", cleaned[0]):
+        cleaned.pop(0)
     while len(cleaned) > 1 and cleaned[-1].lower() in _CHART_TRAILING_LABELS:
         cleaned.pop()
     while len(cleaned) > 1 and cleaned[-1].lower() in _CHART_TRAILING_SPECS:
@@ -1537,12 +1541,14 @@ def _nearest_product_phrase(window: str, pos: int) -> Optional[str]:
     """
     tokens: list = []
     for match in _CHART_WORD_RE.finditer(window or ""):
-        word = match.group(0)
-        # Lowercase-led words ("on", "the") break runs but never join them:
-        # product phrases are capitalized runs ("Amazon Echo Dot").
+        # Trailing dots are sentence/list punctuation ("1. OneOdio"),
+        # never part of the name; stripping them also splits glued runs.
+        word = match.group(0).rstrip(".")
+        if not word:
+            continue
         if re.match(r"[a-z]", word):
             continue
-        tokens.append((match.start(), match.end(), word))
+        tokens.append((match.start(), match.start() + len(word), word))
     if not tokens:
         return None
     # Maximal runs of single-space separated tokens.
@@ -1572,11 +1578,17 @@ def _nearest_product_phrase(window: str, pos: int) -> Optional[str]:
 
 
 def _resolve_chart_entity(figure: dict, queried_entities: list) -> Optional[str]:
-    """The WHO for one figure, best signal first: bound entity, queried
-    entity mentioned near the figure, nearest product phrase. None means
+    """The WHO for one figure, best signal first: query-bound entity, then
+    the nearest product phrase (a window-leading fallback like "Headphones
+    Under" describes the article heading, not the priced item — proximity
+    to the figure wins), then any valid bound entity. None means
     unchartable (stays in the figures table only)."""
     entity = (figure or {}).get("entity")
-    if entity and not _is_generic_entity(str(entity)):
+    if (
+        entity
+        and not _is_generic_entity(str(entity))
+        and (figure or {}).get("entity_source") == "queried"
+    ):
         return str(entity).strip()
     window = str((figure or {}).get("context", "") or "")
     if queried_entities and figure_entity_label is not None:
@@ -1590,7 +1602,12 @@ def _resolve_chart_entity(figure: dict, queried_entities: list) -> Optional[str]
     pos = window.find(match_text) if match_text else -1
     if pos < 0:
         pos = len(window)
-    return _nearest_product_phrase(window, pos)
+    phrase = _nearest_product_phrase(window, pos)
+    if phrase:
+        return phrase
+    if entity and not _is_generic_entity(str(entity)):
+        return str(entity).strip()
+    return None
 
 
 def _query_price_constraint(query: str) -> Optional[tuple]:
@@ -1731,6 +1748,7 @@ def _bind_figure(
     wide_scope = " ".join(text[wide_before:wide_after].split())
     full_scope = " ".join(str(text or "").split())
     entity: Optional[str] = None
+    entity_source: Optional[str] = None
     try:
         if figure_entity_label is not None:
             entity = figure_entity_label(wide_scope, queried_entities or [])
@@ -1738,10 +1756,15 @@ def _bind_figure(
                 entity = figure_entity_label(full_scope, queried_entities or [])
     except Exception:
         entity = None
+    if entity is not None and queried_entities:
+        # Bound against a query-named entity: strictest provenance.
+        entity_source = "queried"
     if entity is None and not queried_entities:
         # No known entities in play: fall back to the window's own subject
         # so "Acme raised $X" vs "Globex sold for $Y" stay attributable.
         entity = _fallback_subject(window) or _fallback_subject(wide_scope)
+        if entity is not None:
+            entity_source = "fallback"
     metric: Optional[str] = None
     if count_noun:
         # The count noun adjacent to the match is the most precise WHAT
@@ -1800,6 +1823,7 @@ def _bind_figure(
         "full_context": full_scope[:2000],
         "ref": ref,
         "entity": entity,
+        "entity_source": entity_source,
         "metric": metric,
         "currency": currency,
         "count_noun": count_noun,
@@ -1928,9 +1952,10 @@ def _figures_bar_visual(
     figures cannot become comparison evidence -- AND figures with
     EXPLICITLY different metric cues (funding vs startup_cost, revenue vs
     cost, views vs subscribers) never share one bar (the 504999900% root
-    cause). Qualitative (non-comparison) queries keep the legacy leniency
-    (same unit, no explicit metric conflict), since that bar is a
-    cited-amounts illustration, not a like-for-like claim.
+    cause). Qualitative (non-comparison) queries are lenient on eligibility
+    (untyped figures may chart) but NEVER on attribution: every bar names
+    its resolved entity, over-budget prices are excluded, and conflicting
+    metrics never share one bar.
     """
     pool = list(figures or [])
     try:
@@ -2008,7 +2033,10 @@ def _figures_bar_visual(
         title=f"Cited {unit_word}s compared",
         props={
             "chart_type": "bar",
-            "labels": [f"{_figure_label(figure)} [{figure['ref']}]" for figure in group],
+            "labels": [
+                f"{entities_by_id.get(id(figure), _figure_label(figure))} [{figure['ref']}]"
+                for figure in group
+            ],
             "datasets": [
                 {
                     "name": series_name,
@@ -2129,6 +2157,12 @@ def _comparison_from_figures(
         # Fail-closed: currency check unavailable -> block comparison.
         logger.warning("Figure currency check failed, blocking comparison: %s", exc)
         return None
+    # Budget: figures violating the query's stated budget never compare as
+    # answers to "under X" (they stay citable in the figures table).
+    pool = _apply_budget_constraint(pool, query or "")
+    if len(pool) < 2:
+        logger.info("Comparison blocked: fewer than 2 figures within budget.")
+        return None
     candidates = _figure_chart_groups(pool)
     if not candidates:
         return None
@@ -2191,7 +2225,7 @@ def _comparison_from_figures(
             "baseline": group[1]["value"],
             "groups": [
                 {
-                    "label": f"{_figure_label(figure)} [{figure['ref']}]",
+                    "label": f"{_figure_label(figure, queried_entities=entities)} [{figure['ref']}]",
                     "value": figure["value"],
                 }
                 for figure in group
@@ -4879,12 +4913,14 @@ def ensure_visuals(
                 synthesized.append(comparison)
         # A figures bar over mismatched metrics (funding vs cost, views vs
         # subscribers) is the same false-comparison bug: only chart when
-        # cues agree. Group-aware: one mixed pair must not veto an
-        # otherwise chartable group. Fail-closed: check unavailable blocks.
+        # cues agree. Group-aware on the ATTRIBUTED pool (same pool the bar
+        # gate judges): one mixed pair must not veto an otherwise chartable
+        # group. Fail-closed: check unavailable blocks the bar.
         bar_ok = True
         try:
             if figures_share_metric is not None and len(figures) >= 2:
-                groups = _figure_chart_groups(figures)
+                pool_figs, _, _ = _attributed_pool(figures, query or "")
+                groups = _figure_chart_groups(pool_figs)
                 bar_ok = (not groups) or any(
                     figures_share_metric(group)[0] for group in groups
                 )
