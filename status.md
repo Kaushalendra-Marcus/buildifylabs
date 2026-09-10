@@ -1,3 +1,22 @@
+# Scalability Split — Run Status (this run)
+
+`langchain_pipeline.py` (6,523 lines) and `comparison.py` (3,370 lines) split into focused packages. Zero behavior change — pure move, proven by identical suites + identical import surfaces.
+
+## Completed
+
+- [x] **Mapped** structure (138 + ~100 top-level nodes), import graph, and test-patch surface (24 patches on 4 names — the key design constraint)
+- [x] **`app/services/llm/pipeline/`** (12 modules): models, prompts, deps, judge, prompting, figures, visuals, grounding, history, guarantee, run + shared (test-patch indirection). Old file is now a 15-line shim; every old import path works
+- [x] **`app/services/data/comparison/`** (7 modules): symbols, entities, timeframe, currency, plans, figures, evidence. Old dotted path resolves to the package with identical surface
+- [x] **Verified**: backend **638 passed** (unchanged), frontend **124 passed** (untouched); `dir()` surface byte-identical pre/post split; `shim.X is pkg.mod.X`; new paths (`pipeline.visuals`, `comparison.entities`, …) importable
+- [x] Biggest file now `evidence.py` (1,695) / `run.py` (1,300) — down from 6,523
+
+## Notes for future work
+
+- Fix bugs in the small module that owns them; keep the `shared.py` forwarder pattern for any name tests patch on the shim
+- `web_search.py` (2,512 lines) is the next split candidate if it keeps growing — same recipe applies
+
+---
+
 # Visual-Empty Fix — Run Status (this run)
 
 Production bug: correct prose answer, zero component visuals, ASCII chart drawn in text.
