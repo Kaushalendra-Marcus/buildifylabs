@@ -142,7 +142,11 @@ export function GraphCard({ props }: { props: GraphProps }) {
         dataKey="label"
         tick={{ fontSize: 12, fill: 'var(--text-muted)' }}
       />
-      <YAxis tick={{ fontSize: 12, fill: 'var(--text-muted)' }} />
+      <YAxis
+        tick={{ fontSize: 12, fill: 'var(--text-muted)' }}
+        tickFormatter={(value: number) => formatCompactNumber(Number(value))}
+        width={44}
+      />
       <Legend wrapperStyle={{ fontSize: 12 }} />
     </>
   );
@@ -152,6 +156,10 @@ export function GraphCard({ props }: { props: GraphProps }) {
       contentStyle={TOOLTIP_STYLE}
       labelStyle={TOOLTIP_LABEL_STYLE}
       cursor={cursor}
+      formatter={(value, name) => [
+        Number(value).toLocaleString(),
+        name,
+      ]}
     />
   );
 

@@ -2680,6 +2680,18 @@ _FIGURE_METRIC_PATTERNS: List[Tuple[str, re.Pattern]] = [
             re.IGNORECASE,
         ),
     ),
+    # Count nouns ("16 billion views", "50M subscribers", "12,655 open
+    # jobs"): the WHAT for count-unit figures. Ordered LAST so an explicit
+    # money cue in the same window ("$50M funding for 1000 users") still
+    # wins the more specific financial label.
+    ("views", re.compile(r"\bviews?\b", re.IGNORECASE)),
+    ("subscribers", re.compile(r"\bsubscribers?\b", re.IGNORECASE)),
+    ("followers", re.compile(r"\bfollowers?\b", re.IGNORECASE)),
+    ("jobs", re.compile(r"\b(jobs?|job\s*openings?|openings?|vacanc\w+)\b", re.IGNORECASE)),
+    ("users", re.compile(r"\busers?\b", re.IGNORECASE)),
+    ("downloads", re.compile(r"\b(downloads?|installs?)\b", re.IGNORECASE)),
+    ("employees", re.compile(r"\b(employees?|headcount|staff|workers?)\b", re.IGNORECASE)),
+    ("customers", re.compile(r"\b(customers?|clients?|members?)\b", re.IGNORECASE)),
 ]
 
 
@@ -2789,9 +2801,9 @@ def is_figure_comparison_eligible(figure: Any) -> Tuple[bool, str]:
     safely enter comparison math/tables/bars/winners:
 
     - entity (WHO) and metric (WHAT) bound -- never generic "money"
-    - numeric value (WHAT amount) and unit class (money vs percent)
+    - numeric value (WHAT amount) and unit class (money vs percent vs count)
     - explicit ISO currency when unit is money (USD/JPY/CNY/...; generic
-      "currency"/"money" is explicitly unknown and FAILS)
+      "currency"/"money" is explicitly unknown and FAILS; counts need none)
     - scale (magnitude multiplier; 1 when already in single units)
     - definition (what the number MEANS; defaults to metric when absent
       only if metric itself is a specific cue like funding/startup_cost)
@@ -2834,7 +2846,7 @@ def is_figure_comparison_eligible(figure: Any) -> Tuple[bool, str]:
 
     if not _math.isfinite(value_f):
         return False, "non-finite numeric value"
-    if str(unit or "").strip().lower() not in ("money", "percent"):
+    if str(unit or "").strip().lower() not in ("money", "percent", "count"):
         return False, f"missing/unknown unit {unit!r}"
     if str(unit or "").strip().lower() == "money":
         code = str(currency or "").strip().upper()

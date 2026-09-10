@@ -19,6 +19,7 @@ import app.services.web_search_cache as cache_mod
 from app.services.llm.langchain_pipeline import (
     VisualOutput,
     _comparison_from_figures,
+    _figures_bar_visual,
     _figures_from_snippets,
     _fundamentals_comparison_visual,
     _outlook_status_visual,

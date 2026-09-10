@@ -1185,13 +1185,45 @@ def _interleave_entities(rows: list[list], max_rows: int) -> list[list]:
         index += 1
     return out
 
-# Verbatim figures with explicit units only (money or percent). Bare numbers
-# ("30 ideas", "8 months", years like "2024") never qualify, so dates and
-# counts cannot leak into charts.
+# Verbatim figures with explicit units only (money, percent, or counts with
+# a count noun). Bare numbers ("30 ideas", "8 months", "Top 10", years like
+# "2024") never qualify, so dates and ranks cannot leak into charts — but a
+# number attached to a count noun ("16 billion views", "12,655 open jobs")
+# IS chartable evidence and must become visuals, never prose-only.
 _FIGURE_MONEY_RE = re.compile(
     r"([$€₹£])\s?(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand)?"
 )
 _FIGURE_PERCENT_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s?(%|percent)")
+_FIGURE_COUNT_NOUNS = (
+    r"views?|subscribers?|followers?|jobs?|openings?|vacancies|"
+    r"users?|downloads?|installs?|employees?|headcount|staff|"
+    r"customers?|clients?|members?|orders?|listeners?|students?"
+)
+_FIGURE_COUNT_RE = re.compile(
+    r"(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand)?\s?"
+    r"(?:open\s+)?(" + _FIGURE_COUNT_NOUNS + r")\b",
+    re.IGNORECASE,
+)
+# Count nouns normalised to their canonical metric label (matches the
+# count cues in comparison.figure_metric_label).
+_FIGURE_COUNT_NOUN_TO_METRIC = {
+    "view": "views", "views": "views",
+    "subscriber": "subscribers", "subscribers": "subscribers",
+    "follower": "followers", "followers": "followers",
+    "job": "jobs", "jobs": "jobs",
+    "opening": "jobs", "openings": "jobs", "vacancy": "jobs", "vacancies": "jobs",
+    "user": "users", "users": "users",
+    "download": "downloads", "downloads": "downloads",
+    "install": "downloads", "installs": "downloads",
+    "employee": "employees", "employees": "employees",
+    "headcount": "employees", "staff": "employees",
+    "customer": "customers", "customers": "customers",
+    "client": "customers", "clients": "customers",
+    "member": "customers", "members": "customers",
+    "order": "orders", "orders": "orders",
+    "listener": "listeners", "listeners": "listeners",
+    "student": "students", "students": "students",
+}
 _FIGURE_SCALE = {
     "k": 1e3, "K": 1e3, "thousand": 1e3,
     "M": 1e6, "million": 1e6,
@@ -1202,19 +1234,20 @@ _FIGURE_SCALE = {
 def _figures_from_snippets(
     snippets: Optional[list], query: Optional[str] = None
 ) -> list:
-    """Extract cited money/percent figures verbatim from web snippets.
+    """Extract cited money/percent/count figures verbatim from web snippets.
 
     Each figure keeps its exact text, a normalized value for bar heights, a
-    unit class (money vs percent, never mixed on one chart), the FULL
+    unit class (money vs percent vs count, never mixed on one chart), the FULL
     snippet scope for semantic binding (H3: never truncated before
     WHO/WHAT/WHEN/UNIT/CURRENCY/DEFINITION resolution), the snippet it
     came from, and the citation number. Semantic binding (entity / metric
     / period / currency / frequency / definition / scale) is attached
     deterministically against the query's entities when `query` is given;
     a figure is comparison_eligible ONLY under the strict H2 contract
-    (entity + specific metric + explicit ISO currency for money + ...).
-    Untyped "$202B" (no known meaning) stays citable in the figures table
-    but must never enter numerical comparison. No NLP, no invention.
+    (entity + specific metric + explicit ISO currency for money + ...;
+    counts need entity + specific metric, no currency). Untyped "$202B"
+    (no known meaning) stays citable in the figures table but must never
+    enter numerical comparison. No NLP, no invention.
     """
     figures: list = []
     seen: set[str] = set()
@@ -1228,7 +1261,9 @@ def _figures_from_snippets(
         queried_entities = []
     for index, snippet in enumerate(snippets or [], start=1):
         text = str(snippet)
+        claimed_spans: list = []
         for match in _FIGURE_MONEY_RE.finditer(text):
+            claimed_spans.append((match.start(), match.end()))
             amount = float(match.group(2).replace(",", ""))
             scale = _FIGURE_SCALE.get(match.group(3) or "", 1)
             figures.append(
@@ -1246,6 +1281,7 @@ def _figures_from_snippets(
                 )
             )
         for match in _FIGURE_PERCENT_RE.finditer(text):
+            claimed_spans.append((match.start(), match.end()))
             figures.append(
                 _bind_figure(
                     text=text,
@@ -1258,6 +1294,33 @@ def _figures_from_snippets(
                     ref=index,
                     queried_entities=queried_entities,
                     scale=1.0,
+                )
+            )
+        for match in _FIGURE_COUNT_RE.finditer(text):
+            # A count overlapping a money/percent match belongs to that
+            # figure (e.g. "$50M" inside "$50M subscribers") — skip it.
+            if any(
+                match.start() < end and start < match.end()
+                for start, end in claimed_spans
+            ):
+                continue
+            claimed_spans.append((match.start(), match.end()))
+            amount = float(match.group(1).replace(",", ""))
+            scale = _FIGURE_SCALE.get(match.group(2) or "", 1)
+            noun = str(match.group(3) or "").strip().lower()
+            figures.append(
+                _bind_figure(
+                    text=text,
+                    match_text=match.group(0).strip(),
+                    value=amount * scale,
+                    unit="count",
+                    symbol="",
+                    match_start=match.start(),
+                    match_end=match.end(),
+                    ref=index,
+                    queried_entities=queried_entities,
+                    scale=scale,
+                    count_noun=_FIGURE_COUNT_NOUN_TO_METRIC.get(noun),
                 )
             )
     ordered: list = []
@@ -1312,6 +1375,7 @@ def _bind_figure(
     ref: int,
     queried_entities: list,
     scale: Optional[float] = None,
+    count_noun: Optional[str] = None,
 ) -> dict:
     """Attach semantic binding to one raw figure (Phase 4/5, hardened H2/H3).
 
@@ -1367,11 +1431,17 @@ def _bind_figure(
         # so "Acme raised $X" vs "Globex sold for $Y" stay attributable.
         entity = _fallback_subject(window) or _fallback_subject(wide_scope)
     metric: Optional[str] = None
-    try:
-        if figure_metric_label is not None:
-            metric = figure_metric_label(wide_scope) or figure_metric_label(full_scope)
-    except Exception:
-        metric = None
+    if count_noun:
+        # The count noun adjacent to the match is the most precise WHAT
+        # ("50M subscribers" -> subscribers), beating distant cues in the
+        # wide scope ("revenue" three sentences away must not rebind it).
+        metric = count_noun
+    else:
+        try:
+            if figure_metric_label is not None:
+                metric = figure_metric_label(wide_scope) or figure_metric_label(full_scope)
+        except Exception:
+            metric = None
     currency: Optional[str] = None
     if unit == "money":
         try:
@@ -1420,6 +1490,7 @@ def _bind_figure(
         "entity": entity,
         "metric": metric,
         "currency": currency,
+        "count_noun": count_noun,
         "scale": resolved_scale,
         "period_start": period_start,
         "period_end": period_end,
@@ -1491,20 +1562,38 @@ def _figures_table_visual(figures: list) -> Optional[VisualOutput]:
     )
 
 
+def _figure_chart_group_key(figure: dict):
+    """Chart-grouping key: money/percent pool by unit (legacy shape);
+    counts split by metric so views never bar against subscribers."""
+    unit = (figure or {}).get("unit")
+    if unit in ("money", "percent"):
+        return unit
+    return (unit, (figure or {}).get("metric") or (figure or {}).get("count_noun") or "")
+
+
+def _figure_chart_groups(figures: list) -> list:
+    """Candidate chart groups: 2+ figures sharing one grouping key."""
+    by_key: dict = {}
+    for figure in figures or []:
+        by_key.setdefault(_figure_chart_group_key(figure), []).append(figure)
+    return [group for group in by_key.values() if len(group) >= 2]
+
+
 def _figures_bar_visual(
     figures: list, query: Optional[str] = None
 ) -> Optional[VisualOutput]:
     """Bar chart over same-class figures (money with money, percent with
-    percent) using normalized values; labels carry citation numbers.
+    percent, counts with same-metric counts) using normalized values;
+    labels carry citation numbers.
 
     Contract (Phase 6/13, hardened H2/H3): on an explicit comparison query
     ONLY strictly eligible figures (H2 contract) may chart -- untyped
     figures cannot become comparison evidence -- AND figures with
     EXPLICITLY different metric cues (funding vs startup_cost, revenue vs
-    cost) never share one bar (the 504999900% root cause). Qualitative
-    (non-comparison) queries keep the legacy leniency (same unit, no
-    explicit metric conflict), since that bar is a cited-amounts
-    illustration, not a like-for-like claim.
+    cost, views vs subscribers) never share one bar (the 504999900% root
+    cause). Qualitative (non-comparison) queries keep the legacy leniency
+    (same unit, no explicit metric conflict), since that bar is a
+    cited-amounts illustration, not a like-for-like claim.
     """
     pool = list(figures or [])
     try:
@@ -1518,16 +1607,9 @@ def _figures_bar_visual(
                 return None
             pool = eligible
             # H3: metric agreement is mandatory for comparison bars, not
-            # just for comparison cards. funding vs startup_cost must not
-            # bar-chart together even when both are eligible on their own.
-            if figures_share_metric is not None:
-                try:
-                    shares, detail = figures_share_metric(pool)
-                except Exception:
-                    shares, detail = True, ""
-                if not shares:
-                    logger.info("Figures bar blocked: %s.", detail)
-                    return None
+            # just for comparison cards. funding vs startup_cost (or views
+            # vs subscribers) must not bar-chart together even when both
+            # are eligible on their own. Enforced per chart group below.
             # H5: money bars in KNOWN different currencies never compare.
             try:
                 known = {
@@ -1548,13 +1630,10 @@ def _figures_bar_visual(
         # Fail-closed: eligibility check unavailable -> no comparison bar.
         logger.warning("Figure eligibility check failed, blocking bar: %s", exc)
         return None
-    by_unit: Dict[str, list] = {}
-    for figure in pool:
-        by_unit.setdefault(figure["unit"], []).append(figure)
-    candidates = [group for group in by_unit.values() if len(group) >= 2]
+    candidates = _figure_chart_groups(pool)
     if not candidates:
         return None
-    # Prefer the largest same-unit group whose metrics agree; a group with
+    # Prefer the largest group whose metrics agree; a group with
     # conflicting cues is skipped rather than charted (H3).
     ordered = sorted(candidates, key=len, reverse=True)
     group: Optional[list] = None
@@ -1573,7 +1652,14 @@ def _figures_bar_visual(
     else:
         group = ordered[0]
     assert group is not None
-    unit_word = "amount" if group[0]["unit"] == "money" else "percent"
+    unit = group[0]["unit"]
+    if unit == "money":
+        unit_word, series_name = "amount", "amount"
+    elif unit == "percent":
+        unit_word, series_name = "percent", "percent"
+    else:
+        unit_word = "count"
+        series_name = str(group[0].get("metric") or "count")
     return VisualOutput(
         visual_type="graph",
         title=f"Cited {unit_word}s compared",
@@ -1582,7 +1668,7 @@ def _figures_bar_visual(
             "labels": [f"{_figure_label(figure)} [{figure['ref']}]" for figure in group],
             "datasets": [
                 {
-                    "name": unit_word,
+                    "name": series_name,
                     "values": [figure["value"] for figure in group],
                 }
             ],
@@ -1660,7 +1746,7 @@ def _comparison_from_figures(
     figures: list, query: str
 ) -> Optional[VisualOutput]:
     """Comparison card for explicit 'X vs Y' web questions: first two
-    same-unit figures become value/baseline, all become labeled groups.
+    same-class figures become value/baseline, all become labeled groups.
     Only fires on comparative intent with 2+ comparable figures.
 
     Hardened against the funding-vs-cost false comparison (shared root
@@ -1700,13 +1786,10 @@ def _comparison_from_figures(
         # Fail-closed: currency check unavailable -> block comparison.
         logger.warning("Figure currency check failed, blocking comparison: %s", exc)
         return None
-    by_unit: Dict[str, list] = {}
-    for figure in pool:
-        by_unit.setdefault(figure.get("unit"), []).append(figure)
-    candidates = [group for group in by_unit.values() if len(group) >= 2]
+    candidates = _figure_chart_groups(pool)
     if not candidates:
         return None
-    # Prefer the largest same-unit group, but drop any group whose figures
+    # Prefer the largest group, but drop any group whose figures
     # carry conflicting metric cues (total funding vs startup cost, ...).
     ordered = sorted(candidates, key=len, reverse=True)
     group: Optional[list] = None
@@ -4451,13 +4534,17 @@ def ensure_visuals(
                     synthesized.append(comparison)
             except (TypeError, ValueError):
                 synthesized.append(comparison)
-        # A figures bar over mismatched metrics (funding vs cost) is the
-        # same false-comparison bug: only chart when cues agree.
-        # Fail-closed: metric check unavailable blocks the bar.
+        # A figures bar over mismatched metrics (funding vs cost, views vs
+        # subscribers) is the same false-comparison bug: only chart when
+        # cues agree. Group-aware: one mixed pair must not veto an
+        # otherwise chartable group. Fail-closed: check unavailable blocks.
         bar_ok = True
         try:
             if figures_share_metric is not None and len(figures) >= 2:
-                bar_ok, _ = figures_share_metric(figures)
+                groups = _figure_chart_groups(figures)
+                bar_ok = (not groups) or any(
+                    figures_share_metric(group)[0] for group in groups
+                )
         except Exception as exc:
             logger.warning("Figures metric check failed, blocking bar: %s", exc)
             bar_ok = False
