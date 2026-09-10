@@ -328,6 +328,12 @@ STRICT RULES:
     invented, AND at least one insight card grounded in the cited snippets) or
     (b) a BLOCKED historical comparison (insufficient multi-year evidence):
     then return NO chart at all and state the missing data instead.
+- NO TEXT CHARTS: never draw charts with characters in the answer prose - no
+    bars made of block/pipe characters, no hand-typed tables, no dash diagrams.
+    Any comparison of numbers belongs in the visuals array using the 7 real
+    components above (graph with chart_type bar, table, comparison, metric),
+    with values taken ONLY from the supplied evidence sections. Prose states
+    the takeaway in words; the components carry the numbers.
 - CITATION RULE: Web Search Results are numbered ([1], [2], ...). Every factual
     claim taken from them MUST carry its source number inline, e.g. "raised $50M
     in 2024 [2]". Cite the exact snippet each fact came from; never cite a number
@@ -4988,7 +4994,7 @@ def ensure_visuals(
             except Exception as exc:
                 logger.warning("What-if row visuals failed: %s", exc)
         if synthesized:
-            output.visuals = list(output.visuals) + synthesized[:3]
+            output.visuals = list(output.visuals) + synthesized[: get_settings().MAX_SYNTHESIZED_VISUALS]
         # Provenance-validate before returning (fail closed).
         output.visuals = _provenance_filter_final(
             _drop_sources_table_visuals(output.visuals), query, gate
@@ -5025,11 +5031,17 @@ def ensure_visuals(
             # Validated multi-year evidence earns the full set (graph +
             # annual tables + margin table): capping at 3 here
             # silently dropped the single comparable profitability view.
-            output.visuals = list(output.visuals) + synthesized[:5]
-        output.visuals = _provenance_filter_final(
-            _drop_sources_table_visuals(output.visuals), query, gate
-        )
-        return output
+            output.visuals = list(output.visuals) + synthesized[: get_settings().MAX_SYNTHESIZED_VISUALS]
+            output.visuals = _provenance_filter_final(
+                _drop_sources_table_visuals(output.visuals), query, gate
+            )
+            return output
+        # No validated-history visual (the gate fired but no price/financial
+        # history exists -- e.g. phantom entities with only snippet evidence):
+        # fall through to row/series/figure synthesis below instead of
+        # returning a naked answer. BLOCKED gates never reach here (handled
+        # above), and every path below keeps its own grounding/provenance
+        # guards plus the shared final filter, so nothing unverified ships.
 
     if rows:
         chart_requested = bool(re.search(CHART_INTENT_RE, query, re.IGNORECASE))
@@ -5247,7 +5259,7 @@ def ensure_visuals(
         logger.info(f"Visual guarantee synthesized {len(synthesized)} visual(s).")
         # Four slots: comparison/bar/product-table/figures-table/timeline
         # compete; the ranking-style product table must survive alongside.
-        output.visuals = list(output.visuals) + synthesized[:4]
+        output.visuals = list(output.visuals) + synthesized[: get_settings().MAX_SYNTHESIZED_VISUALS]
     # Sources render once in the expandable section — never as a table card.
     output.visuals = _drop_sources_table_visuals(output.visuals)
     # Final provenance gate for all synthesized paths (fail closed).

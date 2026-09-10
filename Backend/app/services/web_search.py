@@ -26,6 +26,7 @@ from urllib.parse import quote_plus
 import httpx
 
 from app.config import get_settings
+from app.services.llm.context_budget import fit_pairs_to_budget, rank_snippet_pairs
 from app.services.llm.langchain_pipeline import TOOL_CATALOG
 from app.services.llm.query_rewriter import (
     is_time_sensitive_query,
@@ -59,7 +60,7 @@ STOCK_ALIASES = {
     "Samsung": "005930.KS",
 }
 
-MAX_SEARCH_QUERIES = 3
+MAX_SEARCH_QUERIES = 4
 # Entity budget: 3-company comparisons (Tesla/BYD/Toyota) must never lose
 # a company to truncation. 4 gives headroom without runaway Yahoo fan-out.
 MAX_MARKET_ENTITIES = 4
@@ -1123,7 +1124,11 @@ async def _tavily_extract(
         content = str(results[0].get("raw_content", "") or "").strip()
         if not content:
             return None
-        trimmed = content[:EXTRACT_MAX_CHARS]
+        if len(content) > get_settings().SUMMARIZE_TRIGGER_CHARS:
+            from app.services.llm.evidence_summarizer import summarize_long_text
+            trimmed = await summarize_long_text(content, query)
+        else:
+            trimmed = content[:EXTRACT_MAX_CHARS]
         text = f"Full content from {url}: {trimmed} (Tavily Extract.)"
         source = {
             "title": f"Extracted: {url[:80]}",
@@ -2290,11 +2295,18 @@ async def search_web(
                 query_text or ""
             ):
                 deep_urls: list[str] = []
+                try:
+                    deep_cap = int(
+                        getattr(settings, "MAX_DEEP_READ_URLS", None)
+                        or _RECOMMENDATION_EXTRACT_URLS
+                    )
+                except (TypeError, ValueError):
+                    deep_cap = _RECOMMENDATION_EXTRACT_URLS
                 for source in merged_sources:
                     url = str(source.get("url", "") or "")
                     if url.startswith("http") and url not in deep_urls:
                         deep_urls.append(url)
-                    if len(deep_urls) >= _RECOMMENDATION_EXTRACT_URLS:
+                    if len(deep_urls) >= deep_cap:
                         break
                 if deep_urls:
                     try:
@@ -2424,22 +2436,46 @@ async def search_web(
                             "Second-pass web research completed annual "
                             "financials for all required companies."
                         )
-            total_cap = settings.WEB_SEARCH_MAX_RESULTS * max(1, len(search_queries))
-            structured_texts = _dedupe_texts(
+            # Whole-pool budgeting: structured evidence (small, high-signal:
+            # market/fundamentals/macro/history/Wikipedia) is deduped as
+            # (text, source) PAIRS so context[i] <-> sources[i] stays aligned,
+            # placed first, then the ranked snippet pool. One greedy fit
+            # guarantees the TOTAL stays within MAX_EVIDENCE_CONTEXT_CHARS.
+            structured_pairs: list[tuple[str, dict]] = []
+            _seen_structured: set[str] = set()
+            for _text, _source in zip(
                 market_texts + fundamentals_texts + macro_texts
                 + price_history_texts + financial_history_texts
-                + knowledge_texts
+                + knowledge_texts,
+                market_sources + fundamentals_sources + macro_sources
+                + price_history_sources + financial_history_sources
+                + knowledge_sources,
+            ):
+                _key = " ".join((_text or "").lower().split())
+                if _key and _key not in _seen_structured:
+                    _seen_structured.add(_key)
+                    structured_pairs.append((_text, _source))
+            ranked_texts, ranked_sources = rank_snippet_pairs(
+                merged_texts, merged_sources, query_text or ""
             )
-            context = structured_texts + merged_texts[:total_cap]
-            sources = (
-                market_sources
-                + fundamentals_sources
-                + macro_sources
-                + price_history_sources
-                + financial_history_sources
-                + knowledge_sources
-                + merged_sources[:total_cap]
+            pooled_texts = [text for text, _source in structured_pairs] + list(
+                ranked_texts
             )
+            pooled_sources = [source for _text, source in structured_pairs] + list(
+                ranked_sources
+            )
+            budget_texts, budget_sources, dropped = fit_pairs_to_budget(
+                pooled_texts, pooled_sources, settings.MAX_EVIDENCE_CONTEXT_CHARS
+            )
+            if dropped:
+                research_notes.append(
+                    f"Trimmed {dropped} lower-relevance web result(s) to stay within "
+                    "the evidence budget; the highest-relevance/most-recent results "
+                    "were kept."
+                )
+
+            context = budget_texts
+            sources = budget_sources
             result = WebSearchResult(
                 context,
                 sources,

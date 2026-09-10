@@ -57,6 +57,14 @@ QUERY_E = (
     "20% growth and 3% churn. Keep pricing constant, calculate revenue "
     "for each scenario, rank them, and show the sensitivity visually."
 )
+# Case F (production screenshot): "compare cost of top models input and
+# output prize" ghosted "Cost Of Top" and "Output Prize Both" as comparable
+# entities, which fired the comparison gate and returned a naked answer
+# (the model drew an ASCII chart in prose instead of using components).
+QUERY_F = (
+    "compare cost of top models input and output prize both - Compare input "
+    "cost vs output price for top AI language models. show graphs"
+)
 
 
 class TestGhostEntities:
@@ -92,6 +100,19 @@ class TestGhostEntities:
             assert ghost not in detect_entities(QUERY_E)
         assert _fallback_entities_from_text(QUERY_E) == []
         gate = _historical_comparison_gate(QUERY_E)
+        assert gate["applies"] is False
+
+    def test_case_f_pricing_scaffolding_yields_no_entities(self):
+        from app.services.llm.langchain_pipeline import (
+            _historical_comparison_gate,
+        )
+
+        entities = detect_entities(QUERY_F)
+        assert entities == []
+        for ghost in ("Cost Of Top", "Output Prize Both", "Top", "Both"):
+            assert ghost not in entities
+        assert _fallback_entities_from_text(QUERY_F) == []
+        gate = _historical_comparison_gate(QUERY_F)
         assert gate["applies"] is False
 
 

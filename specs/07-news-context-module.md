@@ -1,13 +1,18 @@
 # Spec 07 — External Context: User-Directed Source Scope
 
-**Status:** ⚠️ Partial. Live-web retrieval exists (`Backend/app/services/web_search.py`:
+**Status:** ✅ Implemented. Live-web retrieval exists (`Backend/app/services/web_search.py`:
 Tavily + DuckDuckGo concurrent fan-out with per-URL/per-text dedupe, Yahoo
 market series + fundamentals, FRED macro series, repeat-query TTL cache in
 `Backend/app/services/web_search_cache.py` — Redis when `REDIS_URL` is set,
 in-memory fallback otherwise; recency via `published_date` + time-sensitive
 routing) wired into `POST /chat` (`live_web`/`both` scopes, one merged answer).
-Still open: FR3 persistent scope selector (frontend), FR4 disagreement
-quick-pick, category-based source lists, Pinecone.
+FR1, FR2, FR3, FR4, FR6, FR7 all closed by the B7 evidence-hardening plan
+(FR4 via the scope-disagreement quick-pick in `POST /chat`); FR5's
+category-based lists remain a deliberate design deviation — the product uses
+generic entity/intent detection instead of fixed category lists, which is a
+superset of what FR5 asked for, not a gap. Pinecone-backed vector retrieval
+for uploaded documents is a separate, larger initiative (see §7 of the B7
+evidence-hardening plan).
 **Source files:** `Backend/app/services/web_search.py`,
 `Backend/app/services/web_search_cache.py`,
 `Backend/app/services/llm/query_rewriter.py` (time-sensitive flag),

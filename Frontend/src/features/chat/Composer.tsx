@@ -3,9 +3,10 @@
  * message stream column. Delivers all five §5 controls:
  *   5.1  multiline auto-grow text input; placeholder is a real example query
  *   5.2  source-scope selector (Your data / Live web / Both), always visible,
- *        defaults to and persists "Your data"; Live web/Both are gated until
- *        B7 — never switched silently (07 FR4), the composer just annotates
- *        and lets the backend's honest fallback answer
+ *        defaults to and persists "Your data"; Live web / Both are live,
+ *        gated only by the backend's `ENABLE_LIVE_WEB_SCOPE` switch — never
+ *        switched silently (07 FR4), the composer just annotates and lets
+ *        the backend's honest fallback answer
  *   5.3  upload button ABSENT for `guest` plans (never shown disabled), opens
  *        the UploadPopover (drag-drop, "CSV, PDF, or XLSX", size hint)
  *   5.4  Send disabled ONLY when the input is empty — never by quota: the
@@ -149,7 +150,7 @@ export function Composer() {
                 title={
                   segment.value === 'own_data'
                     ? 'Questions are answered from your uploaded data.'
-                    : 'Not available yet — answers fall back to your own data.'
+                    : 'Questions are answered using live web search and your uploaded data.'
                 }
                 onClick={() => setScope(segment.value)}
               >

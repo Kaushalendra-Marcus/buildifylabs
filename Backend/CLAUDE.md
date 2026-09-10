@@ -12,7 +12,7 @@ business data → ask questions in plain English → get the right chart, a root
 recommendations. Async FastAPI + SQLAlchemy, Neon Postgres (not Supabase — blocked in India),
 stateless JWT auth, Groq LLM primary / HuggingFace fallback. **Auth, plan/quota, file upload
 (CSV → per-user data table), and chat (`POST /chat` — SQL generation → user-scoped execution →
-pandas stats → insight pipeline) are wired end-to-end today** — payments and news are still to
+pandas stats → insight pipeline, already supports `live_web`/`both` via `search_web` alongside `own_data`) are wired end-to-end today** — payments and news are still to
 build, and forecasting/what-if/benchmarking (specs/11 §3.2–3.4) extend the same chat route. Don't
 assume a module's status from memory; check `../specs/00-overview.md`'s module map if it matters
 for the task (one read, not a habit).
@@ -43,7 +43,7 @@ for the task (one read, not a habit).
 
 FastAPI (async) + Uvicorn · PostgreSQL (Neon) + SQLAlchemy async + Alembic · `python-jose` JWT +
 `passlib[bcrypt]` + `google-auth` · `aiosmtplib` · Groq (primary LLM) → HuggingFace (fallback) ·
-`sqlglot` (AST-based SQL safety). Not wired yet: Pinecone, Redis, Neo4j, Razorpay SDK.
+`sqlglot` (AST-based SQL safety). Not wired yet: Pinecone, Neo4j, Razorpay SDK. (Redis is wired, optional via `REDIS_URL` in `web_search_cache.py`.)
 
 ## 4. Setup
 

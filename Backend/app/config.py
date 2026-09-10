@@ -67,6 +67,43 @@ class Settings(BaseSettings):
     # model instead of GROQ_MODEL. Unset -> GROQ_MODEL (no behavior change).
     GROQ_STRONG_MODEL: Optional[str] = Field(None, env="GROQ_STRONG_MODEL")
 
+    # --- Live-web evidence budgeting (specs/07 hardening) ---
+
+    # Hard character budget for the ranked snippet pool that enters the
+    # synthesis prompt. A cheap proxy for a token budget (no tokenizer
+    # dependency) — see app/services/llm/context_budget.py::estimate_tokens
+    # for the exact heuristic. Multiple search queries x multiple providers
+    # can produce more snippets than any single call should see; this is the
+    # ceiling that turns "first N by arrival order" into "best-fitting subset
+    # by relevance."
+    MAX_EVIDENCE_CONTEXT_CHARS: int = 12000
+
+    # A single retrieved source (e.g. one full Tavily-Extract page) larger
+    # than this triggers map-reduce summarization (Phase 3) before it is
+    # added to the evidence pool, instead of being hard-truncated mid-sentence.
+    SUMMARIZE_TRIGGER_CHARS: int = 6000
+
+    # How many top result URLs the recommendation deep-read may fetch in full
+    # (Tavily Extract) for list/ranking/comparison questions. Bounded so page
+    # bodies improve answers without runaway latency/cost; each page still
+    # goes through map-reduce summarization above when oversized.
+    MAX_DEEP_READ_URLS: int = 5
+
+    # --- Visual guarantee (specs/06 FR9) ---
+
+    # Ceiling on how many deterministically-synthesized visuals
+    # ensure_visuals() may attach to one answer. Single source of truth —
+    # replaces three separate literal slices inside that function.
+    MAX_SYNTHESIZED_VISUALS: int = 7
+
+    # --- source_scope rollout kill switch (specs/07, Phase 6 of this plan) ---
+
+    # Independent of any code change: flip to false (env var, no redeploy of
+    # logic) if e.g. the Tavily free-tier monthly quota is at risk. When
+    # false, live_web/both requests answer honestly from own_data only (never
+    # a silent full failure) — see Phase 6.
+    ENABLE_LIVE_WEB_SCOPE: bool = Field(True, env="ENABLE_LIVE_WEB_SCOPE")
+
     HF_API_KEY: Optional[str] = Field(None, env="HF_API_KEY")
     HF_MODEL: str = "mistralai/Mixtral-8x7B-Instruct-v0.1"
 

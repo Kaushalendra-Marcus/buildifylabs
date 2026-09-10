@@ -1,8 +1,9 @@
 /**
  * Composer (F5, specs/14 §5) component tests — acceptance: multiline input
  * with the real-example placeholder (5.1), 3-way source-scope segmented
- * control defaulting to/persisting "Your data" with a gated hint for
- * Live web/Both (5.2), upload button ABSENT — not disabled — for guests (5.3),
+ * control defaulting to/persisting "Your data", Live web/Both live with
+ * the backend ENABLE_LIVE_WEB_SCOPE copy (5.2), upload button ABSENT — not
+ * disabled — for guests (5.3),
  * Send disabled ONLY when empty — never by quota (5.4), and both 429 states
  * flowing from a rejected `/chat` into stream notices (5.6).
  */
@@ -83,6 +84,18 @@ describe('Composer (F5, specs/14 §5)', () => {
     expect(screen.getByRole('button', { name: 'Your data' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('button', { name: 'Live web' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByRole('button', { name: 'Both' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: 'Your data' })).toHaveAttribute(
+      'title',
+      'Questions are answered from your uploaded data.',
+    )
+    expect(screen.getByRole('button', { name: 'Live web' })).toHaveAttribute(
+      'title',
+      'Questions are answered using live web search and your uploaded data.',
+    )
+    expect(screen.getByRole('button', { name: 'Both' })).toHaveAttribute(
+      'title',
+      'Questions are answered using live web search and your uploaded data.',
+    )
     expect(screen.getByRole('button', { name: 'Send message' })).toBeDisabled()
   })
 

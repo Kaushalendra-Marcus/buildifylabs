@@ -9,6 +9,7 @@ import asyncio
 import app.services.llm.query_rewriter as rewriter_mod
 import app.services.web_search as web_search_mod
 from app.services.llm.query_rewriter import rewrite_search_queries
+from app.services.llm.query_rewriter import wants_external_context
 from app.services.web_search import _DuckDuckGoParser, _dedupe_texts, search_web
 
 
@@ -50,7 +51,7 @@ class TestRewriteSearchQueries:
         ]
         assert framed["entities"] == ["OpenAI"]
 
-    def test_query_list_capped_at_three(self, monkeypatch):
+    def test_query_list_capped_at_four(self, monkeypatch):
         import json
 
         monkeypatch.setattr(
@@ -60,7 +61,7 @@ class TestRewriteSearchQueries:
         )
 
         framed = asyncio.run(rewrite_search_queries("q"))
-        assert framed["queries"] == ["a", "b", "c"]
+        assert framed["queries"] == ["a", "b", "c", "d"]
 
     def test_garbage_falls_back_to_raw_query(self, monkeypatch):
         monkeypatch.setattr(
@@ -162,3 +163,14 @@ class TestFanOutMerge:
             "url": "",
             "provider": "DuckDuckGo",
         }
+
+
+class TestWantsExternalContext:
+    def test_positive_cases(self):
+        assert wants_external_context("check the news on X") is True
+        assert wants_external_context("what's happening in the market today") is True
+        assert wants_external_context("search the web for Y") is True
+
+    def test_negative_cases(self):
+        assert wants_external_context("what was my march revenue") is False
+        assert wants_external_context("show me a bar chart") is False

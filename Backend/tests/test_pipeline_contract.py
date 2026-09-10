@@ -66,6 +66,9 @@ class TestSystemPrompt:
         for stale in ("line_chart", "bar_chart", "kpi_card", "india_map", "funnel_chart", "heatmap"):
             assert stale not in pipeline_mod.SYSTEM_PROMPT
 
+    def test_no_text_charts_rule(self):
+        assert "NO TEXT CHARTS" in pipeline_mod.SYSTEM_PROMPT
+
 
 class TestTruncation:
     def test_rows_past_cap_are_truncated_with_note(self):
@@ -1139,3 +1142,130 @@ class TestCitedFigures:
         assert "[1]" in rows[0][1]
         assert rows[1][0] == "AI Engineering by Chip Huyen"
         assert "[2]" in rows[1][1]
+
+
+class TestMaxSynthesizedVisuals:
+    """Phase 2 (specs/06 FR9 hardening): ensure_visuals() honors the single
+    tunable ceiling MAX_SYNTHESIZED_VISUALS instead of mixed literal caps."""
+
+    QUERY = "headphones outlook"
+    SNIPPETS = [
+        "OneOdio Pro 10 price is $1999 with strong growth outlook, great gains",
+        "Ant Esports price is $1499 with strong growth outlook, great gains",
+        'Top books: "The Great AI Bet" and "Chip Wars Story" are must reads for outlook growth',
+        'More: "Deep Learning Guide" and outlook remains strong with growth gains',
+        "Update: headphones market shows growth and strong gains, outlook positive strong rise",
+        "Another update: audio gear shows growth and gains, outlook positive strong",
+    ]
+    SOURCES = [
+        {"title": "s1", "url": "https://a.example", "provider": "X", "published_date": "2026-09-01"},
+        {"title": "s2", "url": "https://b.example", "provider": "X", "published_date": "2026-09-02"},
+        {"title": "s3", "url": "https://c.example", "provider": "X", "published_date": "2026-09-03"},
+        {"title": "s4", "url": "https://d.example", "provider": "X", "published_date": "2026-09-04"},
+        {"title": "s5", "url": "https://e.example", "provider": "X", "published_date": "2026-09-05"},
+        {"title": "s6", "url": "https://f.example", "provider": "X", "published_date": "2026-09-06"},
+    ]
+    FUNDAMENTALS = [
+        {"entity": "OneOdio", "symbol": "ODD", "market_cap": 1e9, "currency": "USD"},
+        {"entity": "Ant Esports", "symbol": "AES", "market_cap": 5e8, "currency": "USD"},
+    ]
+
+    def _run_ensure(self):
+        from app.services.llm.langchain_pipeline import ensure_visuals
+
+        output = PipelineOutput(
+            answer="ans", visuals=[], insights=[], summary="",
+            root_causes=[], recommendations=[], news_context=[],
+            anomalies=[], confidence=0.8,
+        )
+        return ensure_visuals(
+            output, rows=[], computed_numbers={}, market_data=[],
+            web_sources=list(self.SOURCES), news_context=list(self.SNIPPETS),
+            preferred_visual=None, query=self.QUERY,
+            fundamentals=list(self.FUNDAMENTALS), macro_data=[], price_history=[],
+            financial_history=[],
+        )
+
+    def test_web_only_fixture_reaches_seven_not_capped_at_six(self):
+        from app.config import get_settings
+
+        assert get_settings().MAX_SYNTHESIZED_VISUALS == 7
+        output = self._run_ensure()
+        assert len(output.visuals) == 7
+
+    def test_ceiling_is_load_bearing_via_monkeypatch(self, monkeypatch):
+        monkeypatch.setattr(
+            pipeline_mod.get_settings(), "MAX_SYNTHESIZED_VISUALS", 2
+        )
+        output = self._run_ensure()
+        assert len(output.visuals) == 2
+
+
+class TestPricingComparisonVisuals:
+    """Production repro: a model-pricing comparison shipped zero visuals and
+    the narrator drew an ASCII chart in prose. Snippet money figures must
+    become real component visuals (comparison/bar/table), never prose art."""
+
+    QUERY = (
+        "compare cost of top models input and output prize both - Compare input "
+        "cost vs output price for top AI language models. show graphs"
+    )
+    SNIPPETS = [
+        "Claude Fable 5 costs $10 input and $50 output per million tokens according to pricing page",
+        "GPT-5.6Sol costs $5 input and $30 output per million tokens pricing details",
+        "Claude Opus 4.6 costs $5 input and $25 output per million tokens latest pricing",
+        "Grok 3 costs $2 input and $6 output per million tokens official pricing",
+        "GPT-4.1 Nano costs $0.10 input and $0.40 output per million tokens budget tier",
+        "Across providers output pricing is 3-8 times higher than input analysis 2026",
+    ]
+    SOURCES = [
+        {"title": "s1", "url": "https://a.example", "provider": "X", "published_date": "2026-09-01"},
+        {"title": "s2", "url": "https://b.example", "provider": "X", "published_date": "2026-09-02"},
+        {"title": "s3", "url": "https://c.example", "provider": "X", "published_date": "2026-09-03"},
+        {"title": "s4", "url": "https://d.example", "provider": "X", "published_date": "2026-09-04"},
+        {"title": "s5", "url": "https://e.example", "provider": "X", "published_date": "2026-09-05"},
+        {"title": "s6", "url": "https://f.example", "provider": "X", "published_date": "2026-09-06"},
+    ]
+
+    def _run_ensure(self, query=None, snippets=None):
+        from app.services.llm.langchain_pipeline import ensure_visuals
+
+        output = PipelineOutput(
+            answer="ans", visuals=[], insights=[], summary="",
+            root_causes=[], recommendations=[], news_context=[],
+            anomalies=[], confidence=0.35,
+        )
+        return ensure_visuals(
+            output, rows=[], computed_numbers={}, market_data=[],
+            web_sources=list(self.SOURCES),
+            news_context=list(snippets if snippets is not None else self.SNIPPETS),
+            preferred_visual=None, query=query or self.QUERY,
+            fundamentals=[], macro_data=[], price_history=[],
+            financial_history=[],
+        )
+
+    def test_pricing_figures_become_component_visuals(self):
+        output = self._run_ensure()
+        kinds = [v.visual_type for v in output.visuals]
+        assert len(output.visuals) >= 4
+        assert "comparison" in kinds
+        assert "graph" in kinds
+        titles = [v.title for v in output.visuals]
+        assert "Figures cited" in titles
+        assert "Products compared" in titles
+
+    def test_gate_without_history_never_fabricates_visuals(self):
+        # Trust boundary pin: gate applies (two real entities) but zero
+        # evidence exists anywhere -- the guarantee must stay naked and
+        # honest, never invent a comparison from nothing (the fall-through
+        # still ends at the shared provenance filter).
+        output = self._run_ensure(
+            query="Compare Tesla and Toyota on price",
+            snippets=[
+                "Tesla Model 3 price is $35000 according to listing",
+                "Toyota Corolla price is $22000 according to listing",
+            ],
+        )
+        kinds = [v.visual_type for v in output.visuals]
+        assert "graph" not in kinds
+        assert "comparison" not in kinds

@@ -29,8 +29,7 @@ the **plain type→component lookup** the F3 grid seam calls, with `UnknownVisua
 fallback for an unrecognized `visual_type`. **F5 the composer + ambient controls are in** —
 `src/features/chat/Composer.tsx` (specs/14 §5) now delivers the multiline auto-grow text input
 (placeholder "Why did revenue drop last week?"), the always-visible **3-way source-scope selector**
-(`scope-store.ts`, defaults to/persists "Your data"; Live web/Both are B7-gated with a hint, never
-silently switched), a **upload button that is entirely ABSENT for `guest` plans** opening the
+(`scope-store.ts`, defaults to/persists "Your data"; Live web/Both are live, backend feature-flagged via `ENABLE_LIVE_WEB_SCOPE`, never silently switched), a **upload button that is entirely ABSENT for `guest` plans** opening the
 `UploadPopover` (drag-drop, "CSV, PDF, or XLSX", 3MB-free/10MB-pro hint, file list with
 processing/completed/failed chips + stored failed reason), **Send disabled ONLY when empty — never
 by quota**, the **two distinct 429 states** in the stream (window-exhausted inline notice with a live

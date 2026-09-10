@@ -41,7 +41,7 @@ integration-based friction reduction, GTM channel).
 ## 2. System Architecture (current target)
 
 ```
-Frontend (Next.js)
+Frontend (React 19 + Vite + react-router)
         │
         ▼
 Backend (FastAPI, async)
@@ -75,7 +75,7 @@ removed. See `13-frontend-migration.md` for full detail and current migration st
 | 4 | File upload validation + ingestion pipeline | ⚠️ Partial — routes/storage/defensive CSV → per-user data table done (B3); PDF/XLSX parse + Pinecone deferred | `04-file-upload-ingestion.md` |
 | 5 | NL→SQL generation + SQL safety sandbox | ✅ Generation (`clean_sql_response`), sanitizer, executor + user-scoping done; B4 feeds real per-file schema into the `/chat` prompt | `05-query-sql-safety.md` |
 | 6 | AI insight/visual pipeline (structured output) | ✅ Reachable end-to-end via `POST /chat` (B4): 7 real types + `props`, bounded `confidence`, `clarification`, deterministic stats narration, trust fields | `06-ai-insight-pipeline.md` |
-| 7 | External context (user-directed `own_data`/`live_web`/`both` scope + category web scraping) | ❌ Not started — deferred, see `09` §8 | `07-news-context-module.md` |
+| 7 | External context (user-directed `own_data`/`live_web`/`both` scope + category web scraping) | ✅ Implemented | `07-news-context-module.md` |
 | 8 | Graph knowledge store (Neo4j entity/relationship retrieval) | ❌ Not started — deferred, see `09` §8 | `08-graph-knowledge-store.md` |
 | 11 | Prediction, calculation & benchmarking | ⚠️ §3.1 stats done (B4); forecasting/what-if/benchmarking pending | `11-prediction-and-calculation.md` |
 | 12 | Multi-LLM orchestration | ❌ Not started, extends existing Groq/HF pattern | `12-llm-orchestration.md` |

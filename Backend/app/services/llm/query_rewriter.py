@@ -2,7 +2,7 @@
 
 The raw user query is a poor search query: it carries chat phrasing, glued-on
 clarification answers ("query - option - option"), and no retrieval strategy.
-This module reframes it into 1-3 clean search queries before any HTTP happens.
+This module reframes it into 1-4 clean search queries before any HTTP happens.
 
 Generic by design: no per-topic rules live here. The only standing strategy is
 source diversity - when the question seeks opinions, experiences, rankings, or
@@ -38,6 +38,25 @@ def is_time_sensitive_query(text: str) -> bool:
     return bool(text and TIME_SENSITIVE_RE.search(text))
 
 
+# Explicit external-context request cues (specs/07 FR4). Deliberately a
+# modest, generic phrase list -- not a topic/company whitelist. Any
+# question can trigger this regardless of what it's about.
+EXTERNAL_CONTEXT_RE = re.compile(
+    r"\b(check the news|check live|search the web|look (this |it )?up online|"
+    r"what'?s happening (in|with) the (news|market)|current market|"
+    r"latest news on|what are people saying|check online|"
+    r"compare (this|that|it) to the (news|market))\b",
+    re.IGNORECASE,
+)
+
+
+def wants_external_context(text: str) -> bool:
+    """Deterministic gate for specs/07 FR4: true when the raw query text
+    is explicitly asking for live/external information, independent of
+    the current source_scope selector."""
+    return bool(text and EXTERNAL_CONTEXT_RE.search(text))
+
+
 # Clarification-merge scaffolding ("original [clarification answer: X - Y -
 # Z]") is meant for the LLM prompt, not a search engine. Sent verbatim, its
 # brackets/colons make it read as bot/scraper traffic -- observed directly:
@@ -71,7 +90,7 @@ REWRITE_SYSTEM_PROMPT = """You frame web-search queries. You do NOT answer the u
 
 You receive a chat message (possibly with appended clarification answers joined
 by " - ") and optional prior context. Extract what to search for and return
-1-3 short search queries as JSON:
+1-4 short search queries as JSON:
 
 {"queries": ["primary query", "optional second angle"], "entities": ["named things"], "time_sensitive": false}
 
@@ -79,7 +98,7 @@ Rules (all generic, no topic special-casing):
 - Strip chat phrasing ("can you tell me", "please", "show in chart form") and
   merge any appended clarification answers into the intent (they refine it).
 - Keep named entities, numbers, comparisons, and time bounds verbatim.
-- Expand to at most 3 queries only when genuinely different angles help
+- Expand to at most 4 queries only when genuinely different angles help
   (e.g. a general angle plus a discussion/experience angle).
 - When the question seeks opinions, experiences, rankings, controversies, or
   fast-moving facts, make one variant target community discussion with a
@@ -91,7 +110,7 @@ Rules (all generic, no topic special-casing):
 - Never invent entities, dates, or numbers not present in the message.
 - Return ONLY the JSON object, no other text."""
 
-MAX_REWRITE_QUERIES = 3
+MAX_REWRITE_QUERIES = 4
 
 
 def _coerce_rewrite_payload(payload: Any, raw_query: str) -> dict:

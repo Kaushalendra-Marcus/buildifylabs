@@ -300,6 +300,11 @@ _INDICATOR_TOKENS = frozenset({
     # Generic descriptor nouns (never entities on their own, any domain).
     "size", "length", "level", "levels", "type", "types", "range",
     "count", "amount", "value", "values", "duration", "limit", "limits",
+    # Generic comparison scaffolding (never entities on their own, any
+    # domain): "compare cost of top models ... output prize" ghosted
+    # "Cost Of Top" and "Output Prize Both" as comparable entities.
+    "top", "tops", "input", "inputs", "output", "outputs",
+    "prize", "prizes", "both", "either", "neither",
 })
 
 

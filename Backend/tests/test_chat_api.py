@@ -508,3 +508,68 @@ class TestQuota:
             assert "window" in resp.json()["detail"]
         finally:
             set_active(TEST_ID)
+
+
+class TestExternalContextClarification:
+    def test_own_data_scope_with_external_request_asks_clarification(
+        self, client, seed, monkeypatch
+    ):
+        mock_llms(monkeypatch)
+        resp = client.post(
+            "/chat",
+            json={
+                "query": "check the news on fuel prices this month",
+                "source_scope": "own_data",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["clarification"] is not None
+        assert (
+            body["clarification"]["question"]
+            == "Want me to also check live sources for this one?"
+        )
+        assert body["clarification"]["options"] == [
+            "Yes, check live sources too",
+            "No, just my data",
+        ]
+        assert body["confidence"] == 0.0
+
+    def test_own_data_scope_plain_question_does_not_clarify(
+        self, client, seed, monkeypatch
+    ):
+        mock_llms(monkeypatch)
+        resp = client.post(
+            "/chat",
+            json={"query": "What is the average revenue?", "source_scope": "own_data"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["clarification"] is None
+
+    def test_external_context_yes_reply_triggers_live_search(
+        self, client, seed, monkeypatch
+    ):
+        mock_llms(monkeypatch)
+        first = client.post(
+            "/chat",
+            json={
+                "query": "check the news on fuel prices this month",
+                "source_scope": "own_data",
+            },
+        )
+        assert first.status_code == 200
+        assert first.json()["clarification"] is not None
+
+        called = {}
+
+        async def fake_search(query, company_name=None, prior_clarification=None, **kwargs):
+            called["yes"] = True
+            return ["Live result for yes"]
+
+        monkeypatch.setattr("app.routes.chat.search_web", fake_search)
+        second = client.post(
+            "/chat",
+            json={"query": "Yes, check live sources too", "source_scope": "own_data"},
+        )
+        assert second.status_code == 200
+        assert called.get("yes") is True

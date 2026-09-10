@@ -16,7 +16,7 @@ fallbacks), with a flag endpoint (`POST /chat/flag`) feeding it;
 ask-don't-guess prompt path, with an anti-repeat backstop so a follow-up
 never gets the same question twice.
 
-MVP `source_scope` = `own_data` only; `live_web`/`both` are deferred to B7.
+`live_web`/`both` are implemented (live-web retrieval via `search_web`) and exercised by `test_live_web_scope_uses_retrieved_web_context`.
 """
 import asyncio
 import json
@@ -53,11 +53,14 @@ from app.services.llm.groq_service import generate_response
 from app.services.web_search import search_web
 from app.config import get_settings
 from app.services.llm.langchain_pipeline import (
+    ClarificationRequest,
     PipelineOutput,
+    _same_question as _is_repeat_clarification,
     fallback_output,
     plan_tools,
     run_pipeline,
 )
+from app.services.llm.query_rewriter import wants_external_context
 from app.services.llm.sql_generator import (
     SQL_SYSTEM_PROMPT,
     build_data_schema,
@@ -76,6 +79,8 @@ DATA_PREVIEW_MAX_ROWS = 50
 # Prior-turn digest budget: enough rows for follow-ups ("chart that") without
 # bloating the prompt.
 PRIOR_DATA_MAX_ROWS = 8
+
+EXTERNAL_CONTEXT_CLARIFICATION_QUESTION = "Want me to also check live sources for this one?"
 
 
 def _thread_id_for(request) -> str:
@@ -280,19 +285,6 @@ async def _answer_request(
             except Exception as exc:
                 logger.warning(f"Stage callback failed: {exc}")
 
-    # For own_data or both, require user-uploaded data. Live web can work without it.
-    if request.source_scope in ("own_data", "both"):
-        if not await _user_has_data(db, user.id):
-            output = fallback_output(
-                reason=(
-                    "You haven't uploaded any data yet - add a CSV file to get "
-                    "started, then ask me a question about it."
-                )
-            )
-            return await _log_and_return(
-                db, user.id, request.query, output, time.monotonic() - started
-            )
-
     # SQL text first (its result feeds execution); execution and live search
     # then run concurrently - the two slow I/Os overlap instead of stacking.
     # Prior-turn context loads before either branch: it is a cheap DB read
@@ -320,16 +312,81 @@ async def _answer_request(
             logger.warning(f"Clarification merge failed: {exc}")
             plan_query = request.query
 
+    # specs/07 FR4: a "Yes, check live sources too" quick-pick answer arrives
+    # as a plain user message with scope still "own_data" (frontend doesn't
+    # flip the selector) -- treat this turn as "both" for evidence gathering
+    # only. request.source_scope itself is never mutated (logged as asked).
+    effective_scope = (
+        "both"
+        if (request.query or "").strip() == "Yes, check live sources too"
+        else request.source_scope
+    )
+
+    # Kill switch (specs/07 Phase 6): instant off-switch for the Tavily
+    # free-tier quota, independent of a redeploy. When false, live_web/both
+    # answer honestly from own_data only, never a silent full failure.
+    from app.config import get_settings as _get_chat_settings
+
+    if effective_scope in ("live_web", "both") and not _get_chat_settings().ENABLE_LIVE_WEB_SCOPE:
+        logger.info("Live-web scope requested but ENABLE_LIVE_WEB_SCOPE is false; using own_data only.")
+        effective_scope = "own_data"
+
+    # specs/07 FR4: selector says own_data but the words ask for the web --
+    # clarify, never silently ignore or silently override. Anti-repeat uses
+    # the same _same_question convention as the pipeline's judge backstop
+    # (exact + difflib fuzzy), so the follow-up "Yes..." turn never loops.
+    try:
+        _is_repeat = bool(
+            prior_clarification
+            and _is_repeat_clarification(
+                prior_clarification, EXTERNAL_CONTEXT_CLARIFICATION_QUESTION
+            )
+        )
+    except Exception:
+        _is_repeat = bool(
+            prior_clarification == EXTERNAL_CONTEXT_CLARIFICATION_QUESTION
+        )
+    if (
+        request.source_scope == "own_data"
+        and wants_external_context(plan_query)
+        and not _is_repeat
+    ):
+        output = PipelineOutput(
+            answer="", visuals=[], insights=[], summary="",
+            root_causes=[], recommendations=[], news_context=[],
+            anomalies=[], confidence=0.0,
+            clarification=ClarificationRequest(
+                question=EXTERNAL_CONTEXT_CLARIFICATION_QUESTION,
+                options=["Yes, check live sources too", "No, just my data"],
+            ),
+        )
+        return await _log_and_return(
+            db, user.id, request.query, output, time.monotonic() - started
+        )
+
+    # For own_data or both, require user-uploaded data. Live web can work without it.
+    if effective_scope in ("own_data", "both"):
+        if not await _user_has_data(db, user.id):
+            output = fallback_output(
+                reason=(
+                    "You haven't uploaded any data yet - add a CSV file to get "
+                    "started, then ask me a question about it."
+                )
+            )
+            return await _log_and_return(
+                db, user.id, request.query, output, time.monotonic() - started
+            )
+
     # Judge-directed tool routing starts now so its fast planning call
     # overlaps the SQL-generation LLM call below. plan_tools never raises
     # ([] = no opinion -> deterministic dispatch), so awaiting it is safe.
     plan_task = None
-    if request.source_scope in ("live_web", "both"):
+    if effective_scope in ("live_web", "both"):
         live_settings = get_settings()
         plan_task = asyncio.create_task(
             plan_tools(
                 plan_query,
-                source_scope=request.source_scope,
+                source_scope=effective_scope,
                 company_name=request.company_name,
                 prior_clarification=prior_clarification,
                 has_tavily_key=bool(live_settings.WEB_SEARCH_API_KEY),
@@ -337,7 +394,7 @@ async def _answer_request(
             )
         )
 
-    if request.source_scope in ("own_data", "both"):
+    if effective_scope in ("own_data", "both"):
         table_name = user_data_table_name(user.id)
         columns = await get_table_columns(db, table_name)
         schema = build_data_schema(table_name, columns)
@@ -374,7 +431,7 @@ async def _answer_request(
             return _Sentinel
 
     async def _search_branch():
-        if request.source_scope not in ("live_web", "both"):
+        if effective_scope not in ("live_web", "both"):
             return None
         planned = await plan_task if plan_task is not None else None
         try:
@@ -517,7 +574,7 @@ async def _answer_request(
             db_data=rows,
             computed_numbers=computed,
             news_context=news_context,
-            source_scope=request.source_scope,
+            source_scope=effective_scope,
             company_name=request.company_name,
             prior_clarification=prior_clarification,
             prior_data=prior_data,
