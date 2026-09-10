@@ -1826,36 +1826,61 @@ def _bind_figure(
     return candidate
 
 
-def _figure_label(figure: dict, max_len: int = 40) -> str:
-    """Human-readable chart label for a cited figure.
+def _figure_label(
+    figure: dict, max_len: int = 32, queried_entities: Optional[list] = None
+) -> str:
+    """Chart label = resolved chart entity (attributed datum).
 
-    Prefers the bound entity name (short, accurate). Falls back to the
-    sentence within the ~200-char context window that actually contains
-    the figure's own matched text -- a blind context[:N] prefix slice
-    frequently lands in an unrelated clause from earlier in the window
-    (the window starts ~120 chars BEFORE the match), producing labels like
-    "vancements in personalized medicine." that describe a different
-    figure entirely.
+    Prefers the bound entity name, then a queried entity mentioned near the
+    figure, then the nearest product phrase — always a WHO from the
+    evidence. Falls back to the figure's own cited text, never a sentence
+    fragment ("Buy", "This", "vancements in ..."). Callers building bars
+    filter out figures with no resolvable entity first.
     """
-    entity = figure.get("entity")
-    if entity:
-        label = str(entity).strip()
-        if label:
-            return label[:max_len]
-    context = str(figure.get("context", "") or "")
-    match_text = str(figure.get("text", "") or "")
-    target = context
-    if context:
-        sentences = re.split(r"(?<=[.!?])\s+", context)
-        found = None
-        if match_text:
-            for sentence in sentences:
-                if match_text in sentence:
-                    found = sentence
-                    break
-        target = found if found is not None else (sentences[-1] if sentences else context)
-    target = target.strip()
-    return (target or context)[:max_len]
+    resolved = _resolve_chart_entity(figure or {}, queried_entities or [])
+    if resolved:
+        label = " ".join(str(resolved).split())
+        if len(label) > max_len:
+            cut = label[:max_len]
+            snap = cut.rfind(" ")
+            label = (cut[:snap] if snap > max_len - 12 else cut).strip()
+        return label
+    return str((figure or {}).get("text", "") or "").strip()[:max_len]
+
+
+def _attributed_pool(figures: list, query: str) -> tuple:
+    """Chartable pool: budget-filtered figures with a resolved entity,
+    deduped by entity (first occurrence wins). Returns (figures,
+    {id(figure): entity}, queried_entities). Shared by the bar gate and
+    the outer pre-check so both judge the same pool."""
+    queried_entities: list = []
+    try:
+        if decompose_comparison_query is not None and query:
+            queried_entities = (
+                decompose_comparison_query(query) or {}
+            ).get("entities", []) or []
+    except Exception:
+        queried_entities = []
+    pool = _apply_budget_constraint(figures, query or "")
+    attributed: list = []
+    seen_entities: set = set()
+    for fig in pool:
+        try:
+            ent = _resolve_chart_entity(fig, queried_entities)
+        except Exception:
+            ent = None
+        if not ent:
+            continue
+        key = ent.strip().lower()
+        if key in seen_entities:
+            continue
+        seen_entities.add(key)
+        attributed.append((fig, ent))
+    return (
+        [fig for fig, _ in attributed],
+        {id(fig): ent for fig, ent in attributed},
+        queried_entities,
+    )
 
 
 def _figures_table_visual(figures: list) -> Optional[VisualOutput]:
@@ -1942,7 +1967,13 @@ def _figures_bar_visual(
         # Fail-closed: eligibility check unavailable -> no comparison bar.
         logger.warning("Figure eligibility check failed, blocking bar: %s", exc)
         return None
-    candidates = _figure_chart_groups(pool)
+    # Attributed-datum gate: every bar must name its WHO (resolved entity).
+    # Unattributed figures stay citable in the figures table only.
+    pool_figs, entities_by_id, _ = _attributed_pool(pool, query or "")
+    if len(pool_figs) < 2:
+        logger.info("Figures bar blocked: fewer than 2 attributed figures.")
+        return None
+    candidates = _figure_chart_groups(pool_figs)
     if not candidates:
         return None
     # Prefer the largest group whose metrics agree; a group with
