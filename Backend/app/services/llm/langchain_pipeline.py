@@ -4168,7 +4168,23 @@ def ensure_visuals(
                 # Fail-closed: validation unavailable -> strip charts.
                 logger.warning("Provenance validation failed, stripping charts: %s", exc)
                 output.visuals, _ = _strip_comparison_visuals(output.visuals)
-        return output
+        # Visual guarantee, part 2: a real chart that already survived
+        # validation covers the "at least one chart" bar, so stop here
+        # rather than risk a near-duplicate. But the common case is the
+        # narration model proposing only metric/insight cards of its own
+        # (no graph/comparison) -- previously that alone caused an
+        # unconditional early return here, silently skipping ALL of the
+        # richer synthesis below (comparison/bar charts, sources tables,
+        # timelines) even when real, eligible evidence existed for them.
+        # Falling through instead lets that synthesis ADD to (never
+        # replace) whatever the model already proposed, so answers land
+        # with multiple grounded visuals by default instead of just
+        # whatever single card the model happened to draft.
+        if any(
+            getattr(v, "visual_type", "") in ("graph", "comparison")
+            for v in output.visuals
+        ):
+            return output
     if gate.get("applies") and gate.get("blocked"):
         logger.info("Historical comparison blocked: %s", gate.get("blocked_reason", "")[:160])
         # Blocked comparisons get sources only (honest, not a chart).

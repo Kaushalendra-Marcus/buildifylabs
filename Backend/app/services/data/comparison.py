@@ -2662,6 +2662,24 @@ _FIGURE_METRIC_PATTERNS: List[Tuple[str, re.Pattern]] = [
     ("price", re.compile(r"\b(price|prices|share\s*price|close|closing)\b", re.IGNORECASE)),
     ("profit", re.compile(r"\b(profit\w*|margin|net\s*income|earnings|ebitda)\b", re.IGNORECASE)),
     ("market_cap", re.compile(r"\b(market\s*cap|marketcap)\b", re.IGNORECASE)),
+    # "Market size" phrasing ("the market was valued at $X billion",
+    # "market size, share & forecast", "industry is projected to reach...")
+    # is the single most common metric cue in industry/sector research
+    # reports, yet was entirely absent from this list -- every such figure
+    # fell through with metric=None ("missing metric (WHAT unknown)" in
+    # is_figure_comparison_eligible), so market-size comparisons could
+    # never produce a comparison/bar chart even with clean, cited,
+    # same-currency numbers on both sides. Ordered after market_cap so a
+    # literal "market cap" mention still wins that more specific label.
+    (
+        "market_size",
+        re.compile(
+            r"\bmarket\s*(size|sizing|value|valued|worth|share)\b"
+            r"|\b(market|industry)\s+(was|is|reached|stood\s+at|"
+            r"projected|expected|estimated|forecast(ed)?)\b",
+            re.IGNORECASE,
+        ),
+    ),
 ]
 
 
@@ -2694,7 +2712,31 @@ def figure_entity_label(context: str, entities: Sequence[str]) -> Optional[str]:
     """Which queried entity (if any) a figure context mentions."""
     lowered = (context or "").lower()
     for entity in entities or []:
-        if entity and str(entity).lower() in lowered:
+        if not entity:
+            continue
+        name = str(entity).lower()
+        if name in lowered:
+            return str(entity)
+    # Second pass, generic-noun-stripped: a broad sector/industry entity
+    # ("AI industry", "artificial industry", "the medical market") almost
+    # never appears verbatim in a source snippet -- sources name the
+    # specific thing ("AI in Healthcare Market", "medical devices market"),
+    # not the user's generic phrasing. Stripping trailing generic nouns and
+    # retrying lets that core word still bind instead of the entity being
+    # dropped as "insufficient validated evidence" on every industry-level
+    # comparison. Guarded to >=3 chars so this never falls back to a bare
+    # 1-2 letter acronym ("ai", "it") matching as a substring of unrelated
+    # words.
+    for entity in entities or []:
+        if not entity:
+            continue
+        core = re.sub(
+            r"\b(industry|industries|sector|sectors|market|markets|the|global)\b",
+            "",
+            str(entity).lower(),
+        )
+        core = " ".join(core.split())
+        if len(core) >= 3 and core in lowered:
             return str(entity)
     return None
 

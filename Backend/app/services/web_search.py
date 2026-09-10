@@ -13,6 +13,7 @@ with per-URL/per-text dedupe. Never raises to /chat.
 import asyncio
 import html
 import logging
+import random
 import re
 import time
 from dataclasses import dataclass, field
@@ -1317,34 +1318,67 @@ async def _tavily_search(
     return triples
 
 
+# DDG's HTML endpoint bot-checks on UA + request pattern. A plain
+# "BuildifyLabs/1.0" UA (used for our JSON API calls elsewhere) is an easy
+# bot signal; a realistic browser UA/Accept-Language cuts the 202 rate
+# noticeably without doing anything deceptive beyond what any browser sends.
+_DDG_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+# One-off 202 challenge pages are common and often transient (rate-limit
+# window, not a durable block), so a couple of short, jittered retries
+# recover a real result far more often than failing straight to zero
+# evidence. Bounded small so a stuck block still fails fast overall.
+_DDG_MAX_ATTEMPTS = 3
+_DDG_RETRY_BASE_SECONDS = 0.5
+
+
 async def _ddg_search(
     client: httpx.AsyncClient, query_item: str, settings
 ) -> list[tuple]:
     """Returns (text, url, provider, published_date, score) tuples from merged
     title/snippet pairs. DDG carries no dates/scores (None, None)."""
-    response = await client.get(
-        f"https://html.duckduckgo.com/html/?q={quote_plus(query_item)}",
-        headers=_HEADERS,
-    )
-    # DDG answers bot-suspect traffic with 202 + a JS challenge page.
-    # raise_for_status() passes on 202, and the parser would feed on challenge
-    # HTML and return zero pairs — a silent empty-evidence failure (seen live:
-    # "202 Accepted" in logs, no snippets, honest-but-wrong "could not
-    # locate" downstream). Treat any non-200 as a provider failure so the
-    # merge path logs it and the other provider carries the request.
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"DuckDuckGo returned HTTP {response.status_code} "
-            f"(expected 200; challenge/captcha pages carry no results)."
+    last_status: Optional[int] = None
+    for attempt in range(_DDG_MAX_ATTEMPTS):
+        response = await client.get(
+            f"https://html.duckduckgo.com/html/?q={quote_plus(query_item)}",
+            headers=_DDG_HEADERS,
         )
-    response.raise_for_status()
-    parser = _DuckDuckGoParser()
-    parser.feed(response.text)
-    parser.close()
-    return [
-        (text, url, "DuckDuckGo", None, None)
-        for text, url in parser.pairs[: settings.WEB_SEARCH_MAX_RESULTS]
-    ]
+        # DDG answers bot-suspect traffic with 202 + a JS challenge page.
+        # raise_for_status() passes on 202, and the parser would feed on
+        # challenge HTML and return zero pairs — a silent empty-evidence
+        # failure (seen live: "202 Accepted" in logs, no snippets,
+        # honest-but-wrong "could not locate" downstream). Treat any non-200
+        # as a provider failure so the merge path logs it and the other
+        # provider carries the request.
+        if response.status_code == 200:
+            response.raise_for_status()
+            parser = _DuckDuckGoParser()
+            parser.feed(response.text)
+            parser.close()
+            return [
+                (text, url, "DuckDuckGo", None, None)
+                for text, url in parser.pairs[: settings.WEB_SEARCH_MAX_RESULTS]
+            ]
+        last_status = response.status_code
+        if attempt < _DDG_MAX_ATTEMPTS - 1:
+            delay = _DDG_RETRY_BASE_SECONDS * (2 ** attempt)
+            delay += random.uniform(0, _DDG_RETRY_BASE_SECONDS)
+            logger.info(
+                "DuckDuckGo returned HTTP %s for %r (attempt %d/%d); retrying in %.2fs.",
+                last_status, query_item, attempt + 1, _DDG_MAX_ATTEMPTS, delay,
+            )
+            await asyncio.sleep(delay)
+    raise RuntimeError(
+        f"DuckDuckGo returned HTTP {last_status} after {_DDG_MAX_ATTEMPTS} attempts "
+        f"(expected 200; challenge/captcha pages carry no results)."
+    )
 
 
 def _coerce_triple(triple: tuple) -> tuple[str, str, str, Optional[str], Any]:
