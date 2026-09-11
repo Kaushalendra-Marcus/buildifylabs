@@ -12,7 +12,7 @@ from .grounding import *  # noqa: F401,F403
 from .guarantee import *  # noqa: F401,F403
 from .run import *  # noqa: F401,F403
 from app.config import get_settings  # noqa: F401
-from app.services.llm.groq_service import generate_response  # noqa: F401
+from app.services.llm.groq_service import generate_response, stream_response  # noqa: F401
 
 __all__ = [
     "CHART_INTENT_RE",
@@ -87,6 +87,7 @@ __all__ = [
     "_drop_sources_table_visuals",
     "_evidence_inventory",
     "_evidence_numbers",
+    "_extract_answer_prefix",
     "_fail_closed_gate",
     "_fallback_subject",
     "_figure_chart_group_key",
@@ -107,6 +108,7 @@ __all__ = [
     "_market_graph_visual",
     "_narrate",
     "_narrate_prose_rescue",
+    "_narrate_streaming",
     "_nearest_count_noun",
     "_nearest_product_phrase",
     "_normalize_text",
@@ -182,6 +184,7 @@ __all__ = [
     "resolve_tool_plan",
     "run_pipeline",
     "sanitize_citations",
+    "stream_response",
     "validate_calculation_inputs",
     "validate_comparison",
     "validate_historical_coverage",

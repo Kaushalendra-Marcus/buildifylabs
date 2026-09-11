@@ -16,6 +16,19 @@ async def call_llm(*args: Any, **kwargs: Any) -> Any:
     return await _shim.generate_response(*args, **kwargs)
 
 
+async def call_llm_stream(*args: Any, **kwargs: Any) -> Any:
+    """Yield streaming content deltas via the public shim namespace.
+
+    Same indirection as `call_llm` (an async generator, so callers use
+    `async for`): tests patch `stream_response` on
+    `app.services.llm.langchain_pipeline` and production resolves the same
+    object the shim re-exports from `groq_service`.
+    """
+    from app.services.llm import langchain_pipeline as _shim
+    async for chunk in _shim.stream_response(*args, **kwargs):
+        yield chunk
+
+
 def call_history_gate(*args: Any, **kwargs: Any) -> Any:
     from app.services.llm import langchain_pipeline as _shim
     return _shim._historical_comparison_gate(*args, **kwargs)

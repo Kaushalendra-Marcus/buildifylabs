@@ -294,3 +294,79 @@ async def generate_response(
 
     logger.warning(f"All Groq keys exhausted, last error: {last_error}")
     return await hf_fallback(prompt, system_prompt)
+
+
+async def stream_response(
+    prompt: str,
+    system_prompt: str = "You are a helpful AI assistant.",
+    model: Optional[str] = None,
+    temperature: float = 0.3,
+    max_tokens: int = 512,
+):
+    """Yield raw content deltas (`str`) as the model generates them.
+
+    Streaming transport for answer prose (e.g. narration): callers accumulate
+    the chunks and parse/validate the complete text exactly as they would a
+    non-streamed reply, so the final contract is identical — only the
+    perceived latency changes. Deliberately sends no `response_format`
+    (prose-JSON mode): prompts already demand JSON-only and `extract_json()`
+    recovers prose-wrapped JSON, which keeps this working on any model,
+    strict-schema or not. Tries each healthy key once in rotation order;
+    raises the last error when every key fails (callers fall back to the
+    non-streamed `generate_response` path). The HF fallback does not stream.
+    """
+    selected_model = model or settings.GROQ_MODEL
+
+    if not settings.groq_api_keys:
+        raise RuntimeError("No Groq keys configured for streaming")
+
+    last_error: Optional[Exception] = None
+    for key in _healthy_keys():
+        try:
+            client = _clients.get(key)
+            if client is None:
+                # Module-global AsyncGroq (not a local import) so tests can
+                # patch groq_service.AsyncGroq at the _install seam.
+                client = AsyncGroq(api_key=key)
+                _clients[key] = client
+            stream = await client.chat.completions.create(
+                model=selected_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=True,
+            )
+            yielded_any = False
+            async for chunk in stream:
+                try:
+                    delta = chunk.choices[0].delta.content
+                except (AttributeError, IndexError):
+                    continue
+                if delta:
+                    yielded_any = True
+                    yield delta
+            if not yielded_any:
+                raise RuntimeError("Groq stream returned no content")
+            return
+        except Exception as e:
+            last_error = e
+            kind = _classify_key_error(e)
+            logger.warning(
+                "Groq stream failed (%s, model=%s): %s",
+                kind,
+                selected_model,
+                _error_detail(e),
+            )
+            if kind == "model_not_found":
+                raise RuntimeError(
+                    f"Configured Groq model '{selected_model}' was not found or is unavailable. "
+                    "Update GROQ_MODEL in Backend/.env."
+                ) from e
+            if kind == "unauthorized":
+                _bad_keys.add(key)
+            continue
+
+    raise RuntimeError(f"All Groq keys exhausted for streaming: {last_error}")

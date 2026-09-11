@@ -4,7 +4,7 @@ Compatibility shim: implementation lives in app/services/llm/pipeline/ (one focu
 """
 from app.services.llm.pipeline import *  # noqa: F401,F403
 from app.config import get_settings  # noqa: F401
-from app.services.llm.groq_service import generate_response  # noqa: F401
+from app.services.llm.groq_service import generate_response, stream_response  # noqa: F401
 import difflib  # noqa: F401 (kept: part of the pre-split module surface)
 import json  # noqa: F401 (kept: part of the pre-split module surface)
 import logging

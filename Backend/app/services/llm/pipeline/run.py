@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence
 from pydantic import ValidationError
 from app.config import get_settings
 
-from .shared import call_history_gate, call_llm, call_research_completeness, has_research_completeness
+from .shared import call_history_gate, call_llm, call_llm_stream, call_research_completeness, has_research_completeness
 from .models import Decision, PipelineOutput, SOURCE_SCOPES, VisualOutput
 from .prompts import CHART_INTENT_RE, PROSE_RESCUE_SYSTEM_PROMPT, SYSTEM_PROMPT
 from .deps import build_research_plan, build_trace, clarification_asks_for_researchable_data, evidence_driven_confidence, format_runtime_trace, must_not_clarify, reconcile_judge_tools
@@ -1077,6 +1077,97 @@ async def run_pipeline(
         )
 
 
+def _extract_answer_prefix(partial_json: str) -> str:
+    """Best-effort current value of the top-level `"answer"` string in partial JSON.
+
+    Streaming narration accumulates raw JSON text chunk by chunk; this pulls
+    out whatever of the `answer` prose has arrived so far so it can render
+    live. Handles JSON string escapes (`\"`, `\\`, `\n`, `\uXXXX`, …) and an
+    unterminated trailing literal (stops at end-of-input). Returns `""` when
+    no `"answer"` string has started yet. Pure, never raises.
+    """
+    try:
+        match = re.search(r'"answer"\s*:\s*"', partial_json)
+        if not match:
+            return ""
+        text = partial_json[match.end():]
+        out: list[str] = []
+        i = 0
+        _SIMPLE_ESCAPES = {
+            '"': '"', "\\": "\\", "/": "/",
+            "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t",
+        }
+        while i < len(text):
+            char = text[i]
+            if char == '"':
+                break  # terminated string value
+            if char != "\\":
+                out.append(char)
+                i += 1
+                continue
+            # Escape sequence: need at least one more char.
+            if i + 1 >= len(text):
+                break  # incomplete trailing backslash
+            nxt = text[i + 1]
+            if nxt in _SIMPLE_ESCAPES:
+                out.append(_SIMPLE_ESCAPES[nxt])
+                i += 2
+            elif nxt == "u":
+                hex_part = text[i + 2:i + 6]
+                if len(hex_part) < 4 or not all(
+                    c in "0123456789abcdefABCDEF" for c in hex_part
+                ):
+                    break  # incomplete \u escape
+                out.append(chr(int(hex_part, 16)))
+                i += 6
+            else:
+                # Unknown escape: keep the char literally, stay in sync.
+                out.append(nxt)
+                i += 2
+        return "".join(out)
+    except Exception:
+        return ""
+
+
+async def _narrate_streaming(
+    prompt: str,
+    system_prompt: str,
+    model: Optional[str],
+    on_token: Callable[[str], Awaitable[None]],
+) -> str:
+    """Stream narration deltas, forwarding growing `answer` prose to `on_token`.
+
+    Returns the complete accumulated text for the normal parse + validate
+    path. A failing token callback is logged and skipped (never breaks the
+    narration); an empty/failed stream raises so the caller falls back to
+    the non-streamed call.
+    """
+    accumulated: list[str] = []
+    emitted = ""
+    async for delta in call_llm_stream(
+        prompt=prompt,
+        system_prompt=system_prompt,
+        model=model,
+        temperature=0.2,
+        max_tokens=2000,
+    ):
+        if not delta:
+            continue
+        accumulated.append(delta)
+        current = _extract_answer_prefix("".join(accumulated))
+        if len(current) > len(emitted):
+            new_text = current[len(emitted):]
+            emitted = current
+            try:
+                await on_token(new_text)
+            except Exception as exc:
+                logger.warning(f"Token callback failed: {exc}")
+    full = "".join(accumulated).strip()
+    if not full:
+        raise RuntimeError("streaming narration returned no content")
+    return full
+
+
 async def _narrate(
     user_query: str,
     db_data: Sequence[dict],
@@ -1356,8 +1447,10 @@ def _evidence_inventory(
 __all__ = [
     "_attempt_validation_repair",
     "_evidence_inventory",
+    "_extract_answer_prefix",
     "_narrate",
     "_narrate_prose_rescue",
+    "_narrate_streaming",
     "evidence_confidence_cap",
     "log_runtime_trace",
     "run_pipeline",
