@@ -78,6 +78,7 @@ __all__ = [
     "_apply_budget_constraint",
     "_attach_history_provenance",
     "_attributed_pool",
+    "_attempt_validation_repair",
     "_bind_figure",
     "_clean_chart_phrase",
     "_column_roles",

@@ -1269,3 +1269,85 @@ class TestPricingComparisonVisuals:
         kinds = [v.visual_type for v in output.visuals]
         assert "graph" not in kinds
         assert "comparison" not in kinds
+
+
+class TestValidationRepair:
+    """Phase 2 (reliability hardening): one targeted repair retry for narration
+    payloads that fail Pydantic validation, before the existing fallback."""
+
+    def test_invalid_then_valid_repairs_to_corrected_output(self, monkeypatch):
+        import json
+
+        prompts: list[str] = []
+        calls = {"n": 0}
+        invalid = _pipeline_json(confidence=1.4)
+        valid = _pipeline_json(answer="Repaired answer.", confidence=0.7)
+
+        async def fake(prompt, system_prompt, temperature=0.2, max_tokens=512, **kwargs):
+            prompts.append(prompt)
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return {
+                    "content": json.dumps(_decision_json()),
+                    "source": "groq",
+                    "usage": None,
+                }
+            if calls["n"] == 2:
+                return {"content": json.dumps(invalid), "source": "groq", "usage": None}
+            return {"content": json.dumps(valid), "source": "groq", "usage": None}
+
+        monkeypatch.setattr(pipeline_mod, "generate_response", fake)
+
+        output = asyncio.run(run_pipeline(user_query="q", db_data=ROWS))
+        assert output.answer == "Repaired answer."
+        assert output.confidence == 0.7
+        # The repair prompt carries the specific validation error, not a
+        # generic "try again".
+        assert len(prompts) == 3
+        assert "failed validation" in prompts[2]
+        assert "confidence" in prompts[2].lower()
+
+    def test_repair_failure_falls_through_to_existing_fallback(self, monkeypatch):
+        import json
+
+        async def fake(prompt, system_prompt, temperature=0.2, max_tokens=512, **kwargs):
+            if "plain sentences" in system_prompt:
+                return {"content": "   ", "source": "groq", "usage": None}
+            return {
+                "content": json.dumps(_pipeline_json(confidence=9.9)),
+                "source": "groq",
+                "usage": None,
+            }
+
+        monkeypatch.setattr(pipeline_mod, "generate_response", fake)
+
+        output = asyncio.run(run_pipeline(user_query="q", db_data=[{}]))
+        assert output.confidence == 0.0
+        assert output.visuals == []
+
+    def test_happy_path_call_count_unchanged(self, monkeypatch):
+        # The repair is failure-path only: a successful narration costs exactly
+        # one judge call + one narration call, never a hidden extra call.
+        import json
+
+        calls = {"n": 0}
+
+        async def fake(prompt, system_prompt, temperature=0.2, max_tokens=512, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return {
+                    "content": json.dumps(_decision_json()),
+                    "source": "groq",
+                    "usage": None,
+                }
+            return {
+                "content": json.dumps(_pipeline_json()),
+                "source": "groq",
+                "usage": None,
+            }
+
+        monkeypatch.setattr(pipeline_mod, "generate_response", fake)
+
+        output = asyncio.run(run_pipeline(user_query="q", db_data=[{"revenue": 1}]))
+        assert output.answer
+        assert calls["n"] == 2

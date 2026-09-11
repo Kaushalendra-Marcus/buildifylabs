@@ -573,3 +573,83 @@ class TestExternalContextClarification:
         )
         assert second.status_code == 200
         assert called.get("yes") is True
+
+
+class TestSqlSelfCorrection:
+    """Phase 3 (reliability hardening): one bounded SQL retry with the real
+    error + real schema fed back, instead of an immediate rephrase ask."""
+
+    BAD_SQL = f"SELECT nonexistent_column FROM {USER_TABLE} LIMIT 100"
+
+    def test_sql_error_triggers_one_retry_and_succeeds(
+        self, client, seed, monkeypatch
+    ):
+        sql_calls = {"n": 0}
+
+        async def sql_fake(prompt, system_prompt, temperature=0.3, max_tokens=512, **kwargs):
+            sql_calls["n"] += 1
+            content = self.BAD_SQL if sql_calls["n"] == 1 else HAPPY_SQL
+            return {"content": content, "source": "groq", "usage": None}
+
+        monkeypatch.setattr("app.routes.chat.generate_response", sql_fake)
+        monkeypatch.setattr(
+            "app.services.llm.langchain_pipeline.generate_response",
+            _pipeline_fake(PIPELINE_JSON),
+        )
+        resp = client.post(
+            "/chat",
+            json={"query": "What is the average revenue?", "source_scope": "own_data"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["answer"]
+        assert body["visuals"]
+        assert USER_TABLE in body["sql_query"]
+        assert "nonexistent_column" not in body["sql_query"]
+        assert sql_calls["n"] == 2
+
+    def test_sql_error_retry_also_fails_returns_honest_fallback(
+        self, client, seed, monkeypatch
+    ):
+        sql_calls = {"n": 0}
+
+        async def sql_fake(prompt, system_prompt, temperature=0.3, max_tokens=512, **kwargs):
+            sql_calls["n"] += 1
+            return {"content": self.BAD_SQL, "source": "groq", "usage": None}
+
+        monkeypatch.setattr("app.routes.chat.generate_response", sql_fake)
+        monkeypatch.setattr(
+            "app.services.llm.langchain_pipeline.generate_response",
+            _pipeline_fake(PIPELINE_JSON),
+        )
+        resp = client.post(
+            "/chat",
+            json={"query": "What is the average revenue?", "source_scope": "own_data"},
+        )
+        # The retry must not mask a genuinely bad question: today's exact
+        # graceful fallback stands, and the retry stays bounded (no loop).
+        assert resp.status_code == 200
+        assert "Couldn't run the query" in resp.json()["answer"]
+        assert sql_calls["n"] == 2
+
+    def test_sql_success_on_first_try_never_triggers_retry(
+        self, client, seed, monkeypatch
+    ):
+        sql_calls = {"n": 0}
+
+        async def sql_fake(prompt, system_prompt, temperature=0.3, max_tokens=512, **kwargs):
+            sql_calls["n"] += 1
+            return {"content": HAPPY_SQL, "source": "groq", "usage": None}
+
+        monkeypatch.setattr("app.routes.chat.generate_response", sql_fake)
+        monkeypatch.setattr(
+            "app.services.llm.langchain_pipeline.generate_response",
+            _pipeline_fake(PIPELINE_JSON),
+        )
+        resp = client.post(
+            "/chat",
+            json={"query": "What is the average revenue?", "source_scope": "own_data"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["answer"]
+        assert sql_calls["n"] == 1

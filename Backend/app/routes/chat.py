@@ -289,12 +289,17 @@ async def _answer_request(
     # then run concurrently - the two slow I/Os overlap instead of stacking.
     # Prior-turn context loads before either branch: it is a cheap DB read
     # that both the tool planner and the pipeline need.
+    # Capture the PK upfront: later evidence-branch rollbacks expire the ORM
+    # User object, and any subsequent `user.id` access would lazy-load (sync
+    # IO in async context -> MissingGreenlet 500) instead of the intended
+    # logged fallback. The captured value is identical on the happy path.
+    user_id = user.id
     rows: list = []
     cleaned_sql = None
     table_name = None
     thread_id = _thread_id_for(request)
     prior_clarification, prior_data, prior_research_state, prior_query = (
-        await _load_prior_context(db, user.id, thread_id)
+        await _load_prior_context(db, user_id, thread_id)
     )
 
     # Phase 3: a clarification reply is a fragment of the ORIGINAL research
@@ -361,12 +366,12 @@ async def _answer_request(
             ),
         )
         return await _log_and_return(
-            db, user.id, request.query, output, time.monotonic() - started
+            db, user_id, request.query, output, time.monotonic() - started
         )
 
     # For own_data or both, require user-uploaded data. Live web can work without it.
     if effective_scope in ("own_data", "both"):
-        if not await _user_has_data(db, user.id):
+        if not await _user_has_data(db, user_id):
             output = fallback_output(
                 reason=(
                     "You haven't uploaded any data yet - add a CSV file to get "
@@ -374,7 +379,7 @@ async def _answer_request(
                 )
             )
             return await _log_and_return(
-                db, user.id, request.query, output, time.monotonic() - started
+                db, user_id, request.query, output, time.monotonic() - started
             )
 
     # Judge-directed tool routing starts now so its fast planning call
@@ -395,7 +400,7 @@ async def _answer_request(
         )
 
     if effective_scope in ("own_data", "both"):
-        table_name = user_data_table_name(user.id)
+        table_name = user_data_table_name(user_id)
         columns = await get_table_columns(db, table_name)
         schema = build_data_schema(table_name, columns)
         # Canonical query (P0#1): SQL uses plan_query (clarification-merged
@@ -414,13 +419,64 @@ async def _answer_request(
     sql_error: Optional[str] = None
 
     async def _execute_branch():
-        nonlocal sql_error
+        nonlocal sql_error, cleaned_sql
         try:
             assert table_name is not None and cleaned_sql is not None
             return await execute_sql(cleaned_sql, db, table_name)
         except InvalidQueryError:
             return _Sentinel
         except HTTPException as http_exc:
+            # SQL self-correction (one bounded retry): a 422 (hallucinated
+            # column/table name) gets exactly one targeted regeneration with
+            # the real database error + real schema fed back to the model.
+            # The repaired query goes through sanitize_sql + assert_user_scoped
+            # inside execute_sql unchanged — zero additional trust, just a
+            # second chance at something safe AND correct. Never a loop;
+            # a second failure keeps today's exact fallback path below.
+            # Internal resilience only (plain logger.info, no user-facing
+            # research_notes disclosure).
+            if http_exc.status_code == 422 and table_name is not None:
+                logger.info(
+                    f"SQL execution failed (422), attempting one repair: "
+                    f"{http_exc.detail}"
+                )
+                try:
+                    real_columns = await get_table_columns(db, table_name)
+                    repair_prompt = build_sql_prompt(
+                        plan_query,
+                        build_data_schema(table_name, real_columns),
+                    ) + (
+                        "\n\nYour previous query failed with this database error:\n"
+                        f"{http_exc.detail}\n"
+                        "Return a corrected query using only the exact column "
+                        "names listed above."
+                    )
+                    repaired_raw = await generate_response(
+                        prompt=repair_prompt,
+                        system_prompt=SQL_SYSTEM_PROMPT,
+                        temperature=0.2,
+                        max_tokens=512,
+                    )
+                    repaired_sql = clean_sql_response(
+                        repaired_raw.get("content") or ""
+                    )
+                    try:
+                        rows = await execute_sql(repaired_sql, db, table_name)
+                        # Traceability: the response reflects what ran.
+                        cleaned_sql = repaired_sql
+                        logger.info("SQL repair succeeded.")
+                        return rows
+                    except InvalidQueryError:
+                        logger.info(
+                            "SQL repair returned the INVALID_QUERY sentinel; "
+                            "using the fallback path."
+                        )
+                    except HTTPException as retry_exc:
+                        logger.info(
+                            f"SQL repair also failed: {retry_exc.detail}"
+                        )
+                except Exception as repair_exc:
+                    logger.info(f"SQL repair attempt failed: {repair_exc}")
             # SQL safety/tenant errors (422/403) are logged fallbacks
             # (P1#27), never unlogged escapes.
             sql_error = str(http_exc.detail or "query rejected")
@@ -445,7 +501,7 @@ async def _answer_request(
             request.company_name,
             prior_clarification=prior_clarification,
             planned_tools=planned,
-            user_id=str(user.id),
+            user_id=str(user_id),
             thread_id=thread_id,
             timeframe_label=_tf,
         )
@@ -478,7 +534,7 @@ async def _answer_request(
         _rs.update({"canonical_query": plan_query, "thread_id": thread_id})
         output.research_state = _rs
         return await _log_and_return(
-            db, user.id, plan_query, output, time.monotonic() - started
+            db, user_id, plan_query, output, time.monotonic() - started
         )
     if exec_result is _Sentinel:
         # specs/05 §5.3 + §6: the sentinel short-circuits to a graceful message,
@@ -497,7 +553,7 @@ async def _answer_request(
         _rs0.update({"canonical_query": plan_query, "thread_id": thread_id})
         output.research_state = _rs0
         return await _log_and_return(
-            db, user.id, plan_query, output, time.monotonic() - started
+            db, user_id, plan_query, output, time.monotonic() - started
         )
     rows = exec_result
 
@@ -617,7 +673,7 @@ async def _answer_request(
     # not turn a valid response into an unrelated 500 where avoidable.
     try:
         return await _log_and_return(
-            db, user.id, plan_query, output, time.monotonic() - started
+            db, user_id, plan_query, output, time.monotonic() - started
         )
     except Exception as log_exc:
         logger.error(f"QueryLogs write failed, returning unlogged answer: {log_exc}")

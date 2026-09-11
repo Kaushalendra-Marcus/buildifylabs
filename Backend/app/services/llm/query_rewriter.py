@@ -16,12 +16,27 @@ as before the rewrite step existed.
 import json
 import logging
 import re
-from typing import Any, Optional
+from typing import Any, List, Optional
 
-from app.services.llm.groq_service import generate_response
+from pydantic import BaseModel, Field
+
+from app.services.llm.groq_service import _to_strict_schema, generate_response
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+class RewriteOutput(BaseModel):
+    """Structured shape of the query-framing reply (1–4 search queries)."""
+
+    queries: List[str] = Field(default_factory=list)
+    entities: List[str] = Field(default_factory=list)
+    time_sensitive: bool = False
+
+
+# Strict-schema payload for the rewriter, built once (Groq constrained
+# decoding — see judge.py for fallback behavior).
+_REWRITE_STRICT_SCHEMA = _to_strict_schema(RewriteOutput)
 
 # Time-sensitive intent: the model has no recency signal without this, so
 # "latest/current/this week" questions need topic="news" + time_range upstream.
@@ -166,7 +181,7 @@ async def rewrite_search_queries(
             model=get_settings().groq_fast_model,
             temperature=0.0,
             max_tokens=300,
-            json_mode=True,
+            json_schema={"name": "rewrite_queries", "schema": _REWRITE_STRICT_SCHEMA},
         )
         content = (result.get("content") or "").strip()
         if not content:

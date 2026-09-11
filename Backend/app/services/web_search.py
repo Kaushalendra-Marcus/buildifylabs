@@ -417,12 +417,16 @@ class _DuckDuckGoParser(HTMLParser):
         self._kind = ""
         self._capture_tag = ""
         self._source_url = ""
-        self._pending: Optional[tuple[str, str]] = None
+        # NOTE: named _pending_pair (not _pending) — HTMLParser itself uses
+        # _pending internally (a list) in close(), so shadowing it breaks
+        # super().close() on Python 3.12+ with
+        # "AttributeError: 'tuple' object has no attribute 'clear'".
+        self._pending_pair: Optional[tuple[str, str]] = None
 
     def _flush_pending(self) -> None:
-        if self._pending is not None:
-            self.pairs.append(self._pending)
-            self._pending = None
+        if self._pending_pair is not None:
+            self.pairs.append(self._pending_pair)
+            self._pending_pair = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
         classes = dict(attrs).get("class", "") or ""
@@ -439,7 +443,7 @@ class _DuckDuckGoParser(HTMLParser):
             self._capture_tag = tag
             # Snippets are often bare divs; fall back to the block's title URL.
             self._source_url = dict(attrs).get("href", "") or (
-                self._pending[1] if self._pending else ""
+                self._pending_pair[1] if self._pending_pair else ""
             )
 
     def handle_data(self, data: str) -> None:
@@ -453,11 +457,11 @@ class _DuckDuckGoParser(HTMLParser):
                 text = html.unescape(text)
                 if self._kind == "title":
                     self._flush_pending()
-                    self._pending = (text, self._source_url)
+                    self._pending_pair = (text, self._source_url)
                 else:
-                    if self._pending is not None:
-                        title, url = self._pending
-                        self._pending = None
+                    if self._pending_pair is not None:
+                        title, url = self._pending_pair
+                        self._pending_pair = None
                         self.pairs.append(
                             (f"{title} — {text}", self._source_url or url)
                         )

@@ -39,6 +39,40 @@ _bad_keys: set[str] = set()
 _no_json_transport: dict[str, float] = {}
 _JSON_TRANSPORT_COOLDOWN_S = 600.0
 
+# Models confirmed to support Groq's strict json_schema structured outputs
+# (constrained decoding — 100% schema adherence). Confirm against
+# https://console.groq.com/docs/structured-outputs before adding a model;
+# an unlisted model silently falls back to json_object below, never errors.
+_STRICT_SCHEMA_MODELS = {"openai/gpt-oss-20b", "openai/gpt-oss-120b"}
+
+
+def _to_strict_schema(pydantic_model) -> dict:
+    """Convert a Pydantic v2 model's JSON schema into Groq strict-mode shape.
+
+    Groq's `strict: true` mode requires every object to set
+    `additionalProperties: false` and list every property as `required`
+    (Optional fields stay present-but-nullable, not absent). Pydantic v2's
+    raw `model_json_schema()` output does not guarantee either, so walk the
+    generated schema (including nested `$defs`) and force both. One helper,
+    reused by every structured call site (judge / narration / rewriter).
+    """
+    raw = pydantic_model.model_json_schema()
+
+    def _fix(node) -> None:
+        if isinstance(node, dict):
+            props = node.get("properties")
+            if isinstance(props, dict):
+                node["additionalProperties"] = False
+                node["required"] = sorted(props.keys())
+            for value in node.values():
+                _fix(value)
+        elif isinstance(node, list):
+            for item in node:
+                _fix(item)
+
+    _fix(raw)
+    return raw
+
 
 def _reset_key_state() -> None:
     """Test seam: drop cached clients/rotation so settings overrides apply."""
@@ -138,22 +172,40 @@ async def generate_response(
     temperature: float = 0.3,
     max_tokens: int = 512,
     json_mode: bool = False,
+    json_schema: Optional[dict] = None,   # NEW: {"name": ..., "schema": {...}}
 ) -> dict:
     """Plain-text by default; `json_mode=True` forces Groq's JSON-object mode
-    for structured calls (judge/narration/rewriter). The HF fallback takes no
-    such flag and simply answers, so JSON callers must still validate/parse
-    defensively. Requires the word "JSON" in the messages (all our JSON
-    prompts have it)."""
+    for structured calls (judge/narration/rewriter). Pass `json_schema` for
+    Groq's schema-constrained decoding (`json_schema`/`strict: true`) on models
+    in `_STRICT_SCHEMA_MODELS`; any other model silently falls back to
+    `json_object` (when `json_mode` is also set) or plain text. The HF fallback
+    takes no such flag and simply answers, so JSON callers must still
+    validate/parse defensively. Requires the word "JSON" in the messages (all
+    our JSON prompts have it)."""
     selected_model = model or settings.GROQ_MODEL
 
     if not settings.groq_api_keys:
         return await hf_fallback(prompt, system_prompt)
 
+    use_strict_schema = (
+        bool(json_schema)
+        and selected_model in _STRICT_SCHEMA_MODELS
+        and not _json_transport_disabled(selected_model)
+    )
     use_json_transport = bool(json_mode) and not _json_transport_disabled(
         selected_model
     )
     extra: dict = {}
-    if use_json_transport:
+    if use_strict_schema:
+        extra["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": json_schema["name"],
+                "strict": True,
+                "schema": json_schema["schema"],
+            },
+        }
+    elif use_json_transport:
         extra["response_format"] = {"type": "json_object"}
 
     last_error: Optional[Exception] = None
@@ -186,14 +238,16 @@ async def generate_response(
                 # instructed in the prompt. Retry the same key without that
                 # optional transport constraint before rotating credentials.
                 # A 400 on the JSON transport also trips the circuit breaker
-                # so later calls skip the doomed attempt outright.
+                # so later calls skip the doomed attempt outright. The same
+                # breaker gates strict-schema mode (use_strict_schema checks
+                # _json_transport_disabled too) — no second mechanism.
                 if (
                     kind == "error"
-                    and json_mode
+                    and (json_mode or use_strict_schema)
                     and getattr(e, "status_code", None) == 400
                 ):
                     _disable_json_transport(selected_model)
-                if kind == "error" and use_json_transport and getattr(e, "status_code", None) == 400:
+                if kind == "error" and (use_json_transport or use_strict_schema) and getattr(e, "status_code", None) == 400:
                     try:
                         response = await client.chat.completions.create(
                             model=selected_model,

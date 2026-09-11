@@ -10,8 +10,14 @@ from .shared import call_llm
 from .models import Decision, default_decision
 from .prompts import DECISION_SYSTEM_PROMPT, PLAN_SYSTEM_PROMPT
 from .prompting import extract_json
+from app.services.llm.groq_service import _to_strict_schema
 
 logger = logging.getLogger(__name__)
+
+# Strict-schema payload for the sufficiency judge, built once from the
+# Decision contract (Groq constrained decoding — 100% schema adherence on
+# supported models, clean json_object/plain fallback otherwise).
+_DECISION_STRICT_SCHEMA = _to_strict_schema(Decision)
 
 
 
@@ -60,7 +66,7 @@ async def judge_sufficiency(
                 model=get_settings().groq_fast_model,
                 temperature=0.0 if attempt == 0 else 0.3,
                 max_tokens=800,
-                json_mode=True,
+                json_schema={"name": "decision", "schema": _DECISION_STRICT_SCHEMA},
             )
             content = (result.get("content") or "").strip()
             if not content:

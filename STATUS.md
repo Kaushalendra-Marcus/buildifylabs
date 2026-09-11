@@ -3,6 +3,9 @@
 Tracks one-task-at-a-time progress against
 [`implementation-plan-master.md`](./implementation-plan-master.md). Source of truth for product
 requirements is `specs/`; re-read only the relevant plan/phase before each run.
+`STATUS.md` (uppercase, repo root) is the single status file.
+
+Every status update must rewrite `## Blocked / deferred`, `## Tests / verification (this run)`, `## Last updated`, and `## What's after` to match the current repo state — these are a living snapshot, not a log; `## Completed tasks` is the only append-only section.
 
 Legend: ✅ completed · ⚠️ partial · ⛔ blocked · ⏸ deferred/paused
 
@@ -16,12 +19,30 @@ question in-session) and the core loop has real-user evidence.
 
 ## Completed tasks
 
+- **Reliability hardening Phase 3 — SQL self-correction loop** — done, test-verified (backend **649 tests**, all green, up from 646; frontend untouched — **124 tests**):
+  - `app/routes/chat.py::_execute_branch`: on `HTTPException` 422 (hallucinated column/table), exactly one repair — real columns via `get_table_columns` + real error fed back through `build_sql_prompt`/`generate_response`/`clean_sql_response`, re-executed through unchanged `sanitize_sql` + `assert_user_scoped` (zero additional trust); success updates `cleaned_sql` so `sql_query`/`data_preview` reflect what ran; second failure keeps today's exact sentinel → graceful-fallback path. Internal `logger.info` only, no user-facing disclosure. `executor.py` safety logic untouched.
+  - Load-bearing fix found by the new tests: evidence-branch rollbacks expire the ORM `User`, so post-rollback `user.id` lazy-loads crashed with `MissingGreenlet` (500) instead of the honest fallback — `_answer_request` now captures `user_id = user.id` upfront and uses it throughout (identical on the happy path).
+  - Tests: `TestSqlSelfCorrection` in `tests/test_chat_api.py` (3 tests: bad-column → one retry → successful `PipelineOutput` with corrected `sql_query`, 2 SQL calls; both-calls-bad → today's graceful fallback, 2 calls, no loop/masking; first-try success → 1 call, zero happy-path overhead). Existing `assert_user_scoped`/`sanitize_sql` suites unchanged.
+  - Files: `Backend/app/routes/chat.py`, `Backend/tests/test_chat_api.py`.
+
+- **Reliability hardening Phase 2 — validation-error repair retry** — done, test-verified (backend **646 tests**, all green, up from 643; frontend untouched — **124 tests**):
+  - `pipeline/run.py`: new `_attempt_validation_repair()` (one bounded follow-up: original prompt + exact Pydantic error, same `json_schema` settings, same parse/validate path; returns validated `PipelineOutput` or `None`, never raises); `_narrate()` catches `ValidationError`, tries one repair, re-raises on further failure so `run_pipeline`'s `except ValidationError` still falls through to today's exact `_rescue_or_fallback`. Happy-path call count unchanged (repair runs only on validation failure).
+  - Tests: `TestValidationRepair` in `tests/test_pipeline_contract.py` (3 tests: invalid→valid repairs + repair prompt carries the specific error text; both-calls-invalid falls through to the existing fallback; happy path stays at 2 calls).
+  - Files: `Backend/app/services/llm/pipeline/run.py`, `Backend/app/services/llm/pipeline/__init__.py`, `Backend/tests/test_pipeline_contract.py`.
+
+- **Reliability hardening Phase 1 — Groq structured outputs (strict json_schema mode)** — done, test-verified (backend **643 tests**, all green, up from 638; frontend `npm test` all green — **124 tests**, untouched):
+  - `groq_service.py`: `_STRICT_SCHEMA_MODELS` allowlist (`openai/gpt-oss-20b`, `openai/gpt-oss-120b`); `generate_response(..., json_schema={"name", "schema"})` requests `json_schema`/`strict: true` on supported models, falls back to `json_object` (or plain when `json_mode` unset) otherwise; existing `_disable_json_transport` breaker extended to gate strict mode too (no second mechanism); `_to_strict_schema()` post-processes Pydantic v2 schemas (`additionalProperties: false` + full `required`, incl. nested `$defs`).
+  - Call sites now pass strict schemas built once: judge (`Decision`), narration (`PipelineOutput`), rewriter (`RewriteOutput`); `plan_tools` intentionally unchanged (`json_mode`).
+  - Tests: new `tests/test_groq_service.py` (5 tests: strict shape on supported model, `json_object` fallback + plain fallback on unsupported models, breaker disables strict during cooldown, schema post-processing helper).
+  - Files: `Backend/app/services/llm/groq_service.py`, `Backend/app/services/llm/pipeline/judge.py`, `Backend/app/services/llm/pipeline/run.py`, `Backend/app/services/llm/query_rewriter.py`, `Backend/tests/test_groq_service.py` (new).
+
 - **Codebase scalability — split the two giant single-file modules into focused packages** — done, test-verified (backend **638 tests**, all green, unchanged; frontend `npm test` all green — **124 tests**, untouched; zero behavior change, pure move):
   - `langchain_pipeline.py` (6,523 lines) → `app/services/llm/pipeline/` (12 modules, biggest `run.py` 1,300): `models` (contracts), `prompts` (prompts/intent regexes), `deps` (guarded comparison imports, verbatim), `judge` (sufficiency judge + tool routing), `prompting` (prompt assembly/citations), `figures` (figure extraction/binding), `visuals` (component builders), `grounding` (number grounding/provenance), `history` (comparison gate + what-if), `guarantee` (`ensure_visuals`), `run` (`run_pipeline`), `shared` (shim indirection, see below). Old path kept as a 15-line shim (`langchain_pipeline.py`) — every existing import works.
   - `comparison.py` (3,370 lines) → `app/services/data/comparison/` (7 modules, biggest `evidence.py` 1,695): `symbols`, `entities`, `timeframe`, `currency`, `plans`, `figures`, `evidence`. Old dotted path resolves to the package with an identical surface (regular packages shadow same-named files; unreachable shim file removed).
   - Test-patch compatibility preserved without touching any test: 4 names patched by tests (`generate_response` ×20, `_historical_comparison_gate` ×2, `_visual_numbers_grounded` ×1, `check_research_completeness` ×1) resolve through `pipeline/shared.py` forwarders at call time; production objects unchanged. Verified: module `dir()` surfaces byte-identical to pre-split (snapshot-compared), function identity holds (`shim.X is pkg.mod.X`).
   - Method: AST-based verbatim move (order/duplicates/comments preserved), auto-wired sibling imports with cycle detection (one real cycle found + fixed: typing-cue regexes live with `classify_entity_type` in `symbols.py`), per-module `__all__` so private helpers stay importable.
   - Files: deleted `Backend/app/services/data/comparison.py`, rewrote `Backend/app/services/llm/langchain_pipeline.py` as shim, new `pipeline/` (12 files) + `comparison/` (7 files + `__init__`). No logic edits, no test edits, no frontend changes.
+  - Follow-on note (merged from `status.md`, now deleted): fix bugs in the small module that owns them; keep the `shared.py` forwarder pattern for any name tests patch on the shim; `web_search.py` (2,512 lines) is the next split candidate if it keeps growing — same recipe applies.
 
 - **Visual-empty fix — phantom-entity gate no longer swallows snippet visuals + no-text-charts rule** — done, test-verified (backend **638 tests**, all green, up from 634; frontend `npm test` all green — **124 tests**, untouched):
   - Root cause (production screenshot: pricing comparison, correct prose, zero component visuals, ASCII bars in text): `decompose_comparison_query` ghosted "Cost Of Top"/"Output Prize Both" as entities → comparison gate applied → validated-history branch found no history and returned a naked answer before figure synthesis ever ran; plus no prompt rule forbade ASCII charts.
@@ -414,23 +435,27 @@ question in-session) and the core loop has real-user evidence.
 
 ## What's after
 
-F0–F5 completed foundations, auth, the workspace shell, the four message types, the seven visual
-components, and the composer + ambient controls; **F6 completed the last immediate frontend phase** —
-the empty-thread states (guest / registered + no files / registered + files), the no-data question
-messaging, and the inline thinking indicator. Backend B0–B4 (auth/quota/upload/chat core loop) is
-done. **All immediate/MVP scope is complete — this is the 🚩 CHECKPOINT.** Next: **define the
-"worth continuing" bar** (e.g. % of first-time users asking a 2nd question in-session) and **put
-the core loop in front of real users** (`specs/00` §7) — no POST-CHECKPOINT phase (B5+ / F7+)
-starts until there's real-user evidence.
+F0–F6 (foundations, auth, workspace shell, message types, seven visual components, composer +
+ambient controls, remaining states) and backend B0–B4 (auth/quota/upload/chat core loop) are
+done — this was the 🚩 CHECKPOINT (`specs/00` §7: define a "worth continuing" bar, e.g. % of
+first-time users asking a 2nd question in-session, and put the core loop in front of real users
+before any POST-CHECKPOINT phase). Note: that bar was never formally defined, and
+POST-CHECKPOINT-adjacent work has shipped anyway (B7 evidence hardening Phases 0–6, 4-query
+framing + whole-pool budgeting + 5-URL deep reads + 7-visual ceiling, visual-empty production
+fix, pipeline package split, and this reliability-hardening pass) — proceeding on the explicit
+decision that hardening the core loop does not wait on the real-user gate; the gate still applies
+to net-new product scope (payments, document-QA retrieval, multi-LLM cascade). Next: define the
+"worth continuing" bar and put the core loop in front of real users.
 
 ## Blocked / deferred
 
 - **Spec-01 completeness (single-use reset tokens; resend-verification endpoint)** — ⏸ decided OUT
   of B0 at execution (plan: "decide in/out at execution"; known-gaps, not on critical path).
 - **Phase B9 payments / F7 upgrade UI** — ⏸ paused (`specs/03`).
-- **Phases B5–B8, F7–F9** — 🔴 post-checkpoint (`specs/00` §7); do not start before real-user checkpoint.
-- **B4 → frontend F8 live source-scope** — 🔴 gated on check B7.
-- **B7 `source_scope` beyond `own_data`** — needs Pinecone+Redis (`specs/07`).
+- **PDF/XLSX unstructured document QA** (parse → chunk → embed → Pinecone → retrieve → synthesize;
+  `specs/04`/`specs/08`) — ⏸ deferred, separate multi-week architecture initiative, not bundled
+  with retrieval hardening. CSV upload → per-user table → NL→SQL path is the working scope.
+- **Multi-LLM provider cascade** (`specs/12`) — ⏸ deferred, separate architecture decision.
 
 ## Important decisions
 
@@ -484,67 +509,16 @@ starts until there's real-user evidence.
 
 ## Tests / verification (this run)
 
-**Backend** — `pytest` run from `Backend/` — **149 tests, all green** (temp venv `/tmp/opencode/blvenv`,
-Python 3.12; `conftest.py` supplies dummy env vars incl. `GROQ_API_KEY`/`HF_API_KEY` so no `.env`
-is needed; no pytest-asyncio — each async scenario runs via `asyncio.run`):
+**Backend** — `python3 -m pytest` run from `Backend/` on 2026-09-11 — **649 passed**
+(Python 3.12; `conftest.py` supplies dummy env vars so no `.env` is needed; async scenarios run
+via `asyncio.run`). Includes Phases 1–3 (+5 `test_groq_service.py`, +3 `TestValidationRepair`,
++3 `TestSqlSelfCorrection`) on top of the 638 baseline (which itself needed one
+`_DuckDuckGoParser._pending` → `_pending_pair` green-fix for a `HTMLParser` internal collision
+on Python 3.12).
 
-- **B1–B3 modules (unchanged):** auth, quota (incl. `synchronize_session=False` atomic UPDATE now
-  exercised by `/chat`), upload validator/parser/files e2e — all still pass.
-- **`test_stats.py`** (new): `compute_statistics` — averages/totals/mins/maxs on numeric cols
-  (`id` excluded), totals ratios, period-over-period growth %, `<2` periods → no `growth_pct`,
-  ISO-string and `datetime` date drivers, NaN/empty/header-only inputs.
-- **`test_pipeline_contract.py`** (new): 7 `visual_type`s + `props` (no `chart_data`); bounded
-  `confidence`; `clarification` mode; SYSTEM_PROMPT hedged-language + 7-type teaching; 50-row
-  truncation with summarizing note; `run_pipeline` fallbacks (bad JSON / empty visuals / exception →
-  fallback with `reason`); mutable-default regression.
-- **`test_chat_api.py`** (new, file-backed SQLite + seed users/tables, monkeypatched `generate_response`):
-  happy `/chat` loop returns `PipelineOutput` with SQL + data_preview; clarification mode;
-  `INVALID_QUERY` → graceful fallback still logged; non-`own_data` scope fallback; no-uploaded-data
-  response; flag own answer lands on the `QueryLogs` row; flagging another user's log → 404; quota
-  429 on window exhaustion and on lifetime cap.
-- **Migration check:** `alembic heads` = `b4code0000` (chain `9eec775a77e0 → b1code0000 → b3code0000 → b4code0000`).
-
-**Frontend (F1–F6)** — from `Frontend/`: `npm run build` (tsc -b + vite build) ✅, `npm run lint` ✅,
-`npm test` ✅ (**65 tests**, up from 56), `npm run dev` boots on **http://localhost:5173** ✅.
-Vitest harness (`vitest.config.ts`, jsdom, `src/test/setup.ts` with jest-dom + explicit RTL cleanup +
-ResizeObserver stub for Recharts):
-`visuals.test.ts` (7 types), `token-storage.test.ts` (access in memory / refresh persisted / clear),
-`App.test.tsx` (routing guards: unauthenticated → sign-in; authenticated → F2 shell with rail +
-stream + New chat + badge), `auth-screens.test.tsx` (10 tests), `PlanBadge.test.tsx` (labels +
-unknown-plan fallback), `ChatWorkspace.test.tsx` (3 tests — desktop rail open by default;
-narrow <768px collapsed by default + overlay toggle; narrow overlay opens via header toggle;
-matchMedia stubbed since jsdom lacks it), **`MessageStream.test.tsx`** (16 tests — the four
-`specs/14` §4 message types + the F5 §5.6 system notices + §5.7 cold start + the F6 §6 states:
-user bubble + file chip above; normal answer w/ visual grid + graph-wide span + collapsed insights
-strip + trust footer + news row; insights expand; "Show the query" reveals SQL + preview table; flag
-hits the live `/chat/flag` write path; flag disabled with tooltip when no query log; clarification
-pill tap sends verbatim; fallback notice + no trust footer; window-exhausted notice w/ reset
-countdown; lifetime cap card + contact form; form POSTs `/contact` + thanks; cold-start named state
-(with the user message present, as the composer really appends it first); **inline thinking
-indicator under the user message, distinct from cold start; no-data fallback → no-data messaging;
-generic fallback kept when the user has data**),
-**`VisualCard.test.tsx`** (8 tests — the plain type→component lookup renders each of the 7 types
-inline: metric value + change badge, graph line/bar/pie/area, table with sticky headers, comparison
-value/delta/group bars, insight text+context, alert level styling, status pill; unknown type degrades
-to the fallback), **`Composer.test.tsx`** (7 — §5.1 auto-grow + real placeholder, §5.2 scope
-segments default/persist + gated hint, §5.3 upload absent for guests + popover size hint, §5.4 send
-disabled only when empty + Enter sends, §5.6 window-429 → notice + input stays enabled, lifetime-429
-→ lifetime card notice), **`UploadPopover.test.tsx`** (3 — list w/ status chips + failed reason,
-3MB/10MB caps by plan, upload via picker + active-file), **`QuotaChip.test.tsx`** (3 — §5.5 "N of 4
-left" + live "· resets in", low-warning state, no countdown before first question),
-**`EmptyThread.test.tsx`** (6 — the F6 §6 empty-thread states: guest question invite + NO upload
-affordance + hasData false; registered+no-files upload invite; popover opens from the invite;
-upload flips to the question invite; registered+files invites a question + hasData true; the
-MessageStream wiring shows it on a zero-message thread).
+**Frontend** — `npm test -- --run` run from `Frontend/` on 2026-09-11 — **21 test files,
+124 tests, all passed** (Vitest + RTL, jsdom).
 
 ## Last updated
 
-2026-08-09 (**F6 complete — remaining states in `src/features/chat/messages/`**): `EmptyThread`
-(guest → question invite with no upload affordance at all; registered + no files → "Add a CSV,
-PDF, or spreadsheet to get started" with the UploadPopover one tap away; registered + files →
-question invite; live `GET /files` check feeds the chat store's new `hasData` flag),
-`NoDataMessage` (a fallback while the user provably has no data routes through the 07 edge-case-2
-no-data messaging, not the generic empty), `ThinkingIndicator` (small inline bouncing-dots indicator
-under the in-flight user message, distinct from the cold-start card), plus the `MessageStream` empty
-branch — via `chat-store.hasData`/`setHasData` and `message-stream.css`; 9 new tests (65 total);
-see `git diff` for the exact change set)
+2026-09-11 (Reliability hardening Phases 0–3 complete: doc hygiene, strict json_schema outputs, validation repair retry, SQL self-correction loop; live counts backend 649 / frontend 124).

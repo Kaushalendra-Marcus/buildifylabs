@@ -17,8 +17,13 @@ from .judge import judge_sufficiency
 from .history import _fail_closed_gate, compute_structured_what_if, is_what_if_query
 from .grounding import apply_narration_contract, build_validated_evidence_state, drop_ungrounded_visuals_evidence, is_visual_stale_for_query, plan_visuals_from_evidence
 from .guarantee import ensure_visuals
+from app.services.llm.groq_service import _to_strict_schema
 
 logger = logging.getLogger(__name__)
+
+# Strict-schema payload for narration, built once from the PipelineOutput
+# contract (Groq constrained decoding — see judge.py for fallback behavior).
+_PIPELINE_STRICT_SCHEMA = _to_strict_schema(PipelineOutput)
 
 
 
@@ -1134,7 +1139,7 @@ async def _narrate(
         model=narration_model,
         temperature=0.2,
         max_tokens=2000,
-        json_mode=True,
+        json_schema={"name": "pipeline_output", "schema": _PIPELINE_STRICT_SCHEMA},
     )
 
     raw_output = (result.get("content") or "").strip()
@@ -1148,14 +1153,72 @@ async def _narrate(
             model=narration_model,
             temperature=0.3,
             max_tokens=2000,
-            json_mode=True,
+            json_schema={"name": "pipeline_output", "schema": _PIPELINE_STRICT_SCHEMA},
         )
         raw_output = (result.get("content") or "").strip()
     logger.info(f"LLM source used: {result.get('source', 'unknown')}")
 
     parsed = normalize_pipeline_payload(extract_json(raw_output))
 
-    return PipelineOutput(**parsed)
+    try:
+        return PipelineOutput(**parsed)
+    except ValidationError as ve:
+        # Retry-with-clarification (one bounded repair, failure path only):
+        # feed Pydantic's exact error back for one targeted fix. Success
+        # returns the corrected output; any further failure re-raises so the
+        # caller falls through to today's exact _rescue_or_fallback.
+        logger.warning(f"Narration validation failed, attempting one repair: {ve}")
+        repaired = await _attempt_validation_repair(
+            original_prompt=prompt,
+            system_prompt=SYSTEM_PROMPT,
+            raw_output=raw_output,
+            validation_error=str(ve),
+            model=narration_model,
+        )
+        if repaired is not None:
+            return repaired
+        raise
+
+
+async def _attempt_validation_repair(
+    original_prompt: str,
+    system_prompt: str,
+    raw_output: str,
+    validation_error: str,
+    model: Optional[str] = None,
+) -> Optional[PipelineOutput]:
+    """One targeted repair for a narration payload that failed validation.
+
+    Sends the original prompt plus the exact validation error back (not a
+    blind re-ask), reusing the same json_schema settings as the original
+    call. Bounded to a single call — never a loop. Returns the validated
+    PipelineOutput on success, None on any further failure (caught, logged,
+    never raised); the caller falls through to today's exact fallback either
+    way. Happy-path call count is unchanged (this runs only on ValidationError).
+    """
+    try:
+        repair_prompt = (
+            f"{original_prompt}\n\nYour previous response failed validation: "
+            f"{validation_error}. Return corrected JSON only, fixing exactly "
+            "what's described above — do not change anything that wasn't flagged."
+        )
+        result = await call_llm(
+            prompt=repair_prompt,
+            system_prompt=system_prompt,
+            model=model,
+            temperature=0.2,
+            max_tokens=2000,
+            json_schema={"name": "pipeline_output", "schema": _PIPELINE_STRICT_SCHEMA},
+        )
+        repaired_raw = (result.get("content") or "").strip()
+        if not repaired_raw:
+            return None
+        # Same parse + validate as the happy path — no duplicated logic.
+        parsed = normalize_pipeline_payload(extract_json(repaired_raw))
+        return PipelineOutput(**parsed)
+    except Exception as exc:
+        logger.warning(f"Validation repair attempt failed: {exc}")
+        return None
 
 
 async def _narrate_prose_rescue(
@@ -1291,6 +1354,7 @@ def _evidence_inventory(
     }
 
 __all__ = [
+    "_attempt_validation_repair",
     "_evidence_inventory",
     "_narrate",
     "_narrate_prose_rescue",
