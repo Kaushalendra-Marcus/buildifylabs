@@ -1,0 +1,26 @@
+/* ThemeToggle — icon button matching the header icon-button language
+ * (token borders, accent hover). Tokens only; follows the app theme. */
+.theme-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-default);
+}
+
+.theme-toggle:hover {
+  color: var(--accent);
+  background: var(--fill-hover);
+  border-color: var(--border-strong);
+}
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

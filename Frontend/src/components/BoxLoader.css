@@ -1,13 +1,13 @@
 /* BoxLoader — Uiverse 3D blocks (Admin12121), namespaced + re-skinned.
- * Palette: amber blocks on the dark card surface. The mask curtains must
- * match the surface they sit on (process-card → #131312). */
+ * Palette: amber blocks on the card surface. The mask curtains must
+ * match the surface they sit on (process-card → card token). */
 
 .bl-boxloader {
   --bl-box-duration: 3s;
   --bl-box-primary: rgba(255, 191, 72, 1);
   --bl-box-primary-light: #e89b2e;
   --bl-box-primary-rgba: rgba(255, 191, 72, 0);
-  --bl-box-mask: #131312;
+  --bl-box-mask: var(--surface-card);
   width: 200px;
   height: 320px;
   position: relative;

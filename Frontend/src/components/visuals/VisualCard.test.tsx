@@ -65,6 +65,48 @@ describe('VisualCard — type→component lookup (F4)', () => {
     expect(screen.getByText('60.0%')).toBeInTheDocument()
   })
 
+  it('reads the pie ramp from the theme tokens, falling back to the dark ramp', () => {
+    document.documentElement.style.setProperty('--chart-pie-1', '#123456')
+    try {
+      const { container, unmount } = render(
+        <VisualCard
+          visual={{
+            visual_type: 'graph',
+            title: 'Split',
+            props: {
+              chart_type: 'pie',
+              labels: ['Enterprise API', 'Other'],
+              datasets: [{ name: 'Revenue', values: [40, 60] }],
+            },
+          }}
+        />,
+      )
+      const swatches = container.querySelectorAll('.visual-donut__legend li i')
+      expect(swatches[0]).toHaveStyle({ background: '#123456' })
+      unmount()
+    } finally {
+      document.documentElement.style.removeProperty('--chart-pie-1')
+    }
+
+    // No token (or jsdom without one): the dark ramp keeps old snapshots green.
+    render(
+      <VisualCard
+        visual={{
+          visual_type: 'graph',
+          title: 'Split',
+          props: {
+            chart_type: 'pie',
+            labels: ['Enterprise API', 'Other'],
+            datasets: [{ name: 'Revenue', values: [40, 60] }],
+          },
+        }}
+      />,
+    )
+    expect(
+      document.querySelectorAll('.visual-donut__legend li i')[0],
+    ).toHaveStyle({ background: '#ffbf48' })
+  })
+
   it('renders a GraphCard for graph across line, bar, pie and area', () => {
     const chartTypes = ['line', 'bar', 'pie', 'area'] as const
     for (const chart_type of chartTypes) {

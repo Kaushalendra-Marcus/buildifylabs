@@ -19,6 +19,13 @@ question in-session) and the core loop has real-user evidence.
 
 ## Completed tasks
 
+- **Whole-app light/dark mode with user toggle** — done, test-verified (frontend **139 tests**, all green, up from 130; `npm run build` + `npm run lint` clean; backend untouched — **658 tests**):
+  - Mechanism: `<html data-theme>` (`light`/`dark` explicit, absent = follow OS) driven by a persisted `theme-store` (`system` default) + `index.html` pre-paint guard; root tokens carry both themes (`color-scheme` included); new interaction tokens (`--border-*`, `--fill-*`, `--overlay-backdrop`, `--on-accent`, `--chart-pie-1..6`).
+  - Workspace + auth surfaces: forced-dark intelligence blocks now apply dark-only (light inherits root light tokens, blue accent); ~35 white-alpha literals → theme tokens; on-accent text, BoxLoader masks, route-guards loading screen, and the pie ramp (token-read with fallback) all follow the theme; charts re-render on switch.
+  - Toggle (`ThemeToggle`, Sun/Moon) in the app header and on auth screens; scope note: the marketing landing page keeps its art-directed dark design by intent.
+  - Tests: 9 new (store 6, toggle 2, pie token ramp 1).
+  - Files: `Frontend/src/index.css`, `Frontend/index.html`, `Frontend/src/App.tsx`, `Frontend/src/lib/theme-store.ts` (+ test), `Frontend/src/components/ThemeToggle.tsx` (+ test/css), `Frontend/src/features/chat/ChatHeader.tsx`, `Frontend/src/features/auth/AuthLayout.tsx` + `auth.css` + `route-guards.css`, `Frontend/src/features/chat/chat-workspace.css` + `composer.css` + `message-stream.css`, `Frontend/src/components/BoxLoader.tsx`/`.css`, `Frontend/src/components/visuals/GraphCard.tsx`, `Frontend/src/components/visuals/VisualCard.test.tsx`.
+
 - **Answer token streaming — narration prose streams live, visuals land with the result** — done, test-verified (backend **658 tests**, all green, up from 649; frontend **130 tests**, all green, up from 124; `npm run build` + `npm run lint` clean):
   - Backend: new `groq_service.stream_response()` delta generator (key rotation, no `response_format` prose-JSON mode so it works on any model; raises → callers fall back); `shared.call_llm_stream` shim forwarder + `stream_response` re-exported through `pipeline/__init__` and the `langchain_pipeline` shim; `_extract_answer_prefix()` incremental JSON-string decoder; `_narrate(..., on_token)` streams first-attempt prose then runs the exact same parse + validate + repair path (stream failure → silent non-streamed fallback; backstop re-narrations stay non-streamed); `run_pipeline`/`_answer_request` thread `on_token`; `/chat/stream` emits `{"text": delta}` events before the final `{"result"}`; unary `/chat` unchanged.
   - Frontend: `sendQuery(body, onStage?, onText?)` handles `text` events; store gains transient `streamingText` (+append/clear, never persisted, cleared on submit/result/new-chat); Composer wires `onText`; MessageStream renders the live prose block (`AnswerProse` + blinking cursor, citations plain mid-stream, `prefers-reduced-motion` respected).
@@ -522,9 +529,9 @@ streaming tests) on top of the 638 baseline (which itself needed one
 `_DuckDuckGoParser._pending` → `_pending_pair` green-fix for a `HTMLParser` internal collision
 on Python 3.12).
 
-**Frontend** — `npm test -- --run` run from `Frontend/` on 2026-09-11 — **21 test files,
-130 tests, all passed** (Vitest + RTL, jsdom); `npm run build` ✅, `npm run lint` ✅.
+**Frontend** — `npm test -- --run` run from `Frontend/` on 2026-09-12 — **21 test files,
+139 tests, all passed** (Vitest + RTL, jsdom); `npm run build` ✅, `npm run lint` ✅.
 
 ## Last updated
 
-2026-09-11 (Answer token streaming complete: live narration prose over `/chat/stream` text events with unchanged final contract; live counts backend 658 / frontend 130).
+2026-09-12 (Whole-app light/dark mode with persisted toggle complete; live counts backend 658 / frontend 139).

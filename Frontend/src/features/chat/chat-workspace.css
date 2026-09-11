@@ -17,6 +17,7 @@
   overflow: hidden;
   background: var(--surface-page);
   color: var(--text-primary);
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 }
 
 /* ---------- Header (56px) ---------- */
@@ -147,7 +148,7 @@ a.chat-header__brand:hover .chat-header__brand-name {
   flex-direction: column;
   gap: 2px;
   background: var(--surface-raised);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-default);
   border-radius: 12px;
   box-shadow: var(--elevation-raised);
   padding: 6px;
@@ -192,7 +193,7 @@ a.chat-header__brand:hover .chat-header__brand-name {
 
 .account-menu__divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--fill-hover);
   margin: 6px 4px;
 }
 
@@ -259,7 +260,7 @@ a.chat-header__brand:hover .chat-header__brand-name {
 .account-dialog-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--overlay-backdrop);
   border: none;
   padding: 0;
   cursor: default;
@@ -271,7 +272,7 @@ a.chat-header__brand:hover .chat-header__brand-name {
   max-height: min(560px, calc(100dvh - 64px));
   overflow-y: auto;
   background: var(--surface-raised);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-default);
   border-radius: 14px;
   box-shadow: var(--elevation-raised);
   padding: 18px;
@@ -392,7 +393,7 @@ a.chat-header__brand:hover .chat-header__brand-name {
   justify-content: space-between;
   gap: 10px;
   background: var(--surface-page);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
   padding: 8px 10px;
 }
@@ -556,12 +557,17 @@ a.chat-header__brand:hover .chat-header__brand-name {
 }
 
 /* ---------- Intelligence theme (workspace scope) ----------
- * Forces the /app workspace into the dark amber "intelligence" look shared
- * with the landing page: near-black surfaces, amber accent, mono eyebrows.
- * Scoped to `.chat-workspace` so auth screens and the landing page keep
- * their own theming. No purple anywhere by design. */
+ * The /app workspace wears the dark amber "intelligence" look shared
+ * with the landing page — but only in dark mode. In light mode the
+ * workspace inherits the root light tokens (blue accent) so every
+ * hairline, fill, and chart stays legible: all literal white-alpha
+ * colors below are theme tokens (`--border-*`, `--fill-*`, `--on-accent`)
+ * with ink-based light values (see `src/index.css`). The two selectors
+ * below mirror the root mechanism: explicit `data-theme="dark"`, or no
+ * stored choice + a dark OS. No purple anywhere by design.
+ * `--font-mono` is theme-independent and lives on the base rule above. */
 
-.chat-workspace {
+:root[data-theme='dark'] .chat-workspace {
   --surface-page: #0a0a0b;
   --surface-card: #131312;
   --surface-raised: #1c1b18;
@@ -577,9 +583,32 @@ a.chat-header__brand:hover .chat-header__brand-name {
   --danger: #f87171;
   --warning: #f59e0b;
 
-  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --on-accent: #14100a;
 
   color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .chat-workspace {
+    --surface-page: #0a0a0b;
+    --surface-card: #131312;
+    --surface-raised: #1c1b18;
+    --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --elevation-raised: 0 8px 28px rgba(0, 0, 0, 0.55);
+
+    --text-primary: #fafaf9;
+    --text-secondary: #d6d3d1;
+    --text-muted: #8f8a83;
+
+    --accent: #ffbf48;
+    --success: #4ade80;
+    --danger: #f87171;
+    --warning: #f59e0b;
+
+    --on-accent: #14100a;
+
+    color-scheme: dark;
+  }
 }
 
 /* Logo tile — the fox mark (public/logo.png, square face on black). The
@@ -613,7 +642,7 @@ a.chat-header__brand:hover .chat-header__brand-name {
   padding: 0 20px;
   gap: 14px;
   background: var(--surface-page);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-subtle);
   box-shadow: none;
 }
 
@@ -640,13 +669,13 @@ a.chat-header__brand:hover .chat-header__brand-name {
   flex: none;
   width: 1px;
   height: 22px;
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--fill-active);
 }
 
 .chat-header__new-chat {
   color: var(--text-secondary);
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--border-strong);
 }
 
 .chat-header__new-chat:hover {
@@ -663,7 +692,7 @@ a.chat-header__brand:hover .chat-header__brand-name {
   font-weight: 400;
   color: var(--text-muted);
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border-default);
   border-radius: 8px;
   padding: 6px 10px;
   white-space: nowrap;
@@ -685,7 +714,7 @@ a.chat-header__brand:hover .chat-header__brand-name {
   gap: 8px;
   max-width: 200px;
   padding: 4px 12px 4px 4px;
-  border-color: rgba(255, 255, 255, 0.16);
+  border-color: var(--border-strong);
 }
 
 .account-menu__avatar {
@@ -711,14 +740,14 @@ a.chat-header__brand:hover .chat-header__brand-name {
 
 .account-menu__menu {
   background: var(--surface-raised);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border-default);
 }
 
 /* ---------- History rail (intelligence) ---------- */
 
 .history-rail {
   background: var(--surface-page);
-  border-right-color: rgba(255, 255, 255, 0.08);
+  border-right-color: var(--border-subtle);
 }
 
 .history-rail__body {
@@ -785,7 +814,7 @@ a.chat-header__brand:hover .chat-header__brand-name {
 .history-rail__footer {
   flex: none;
   padding: 12px 16px 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .history-rail__footer .account-menu__trigger {

@@ -32,6 +32,27 @@
   --danger: #dc2626;
   --warning: #d97706;
 
+  /* Hairlines + washes — ink alphas on light (dark theme overrides below).
+   * Tiers absorb the legacy near-identical literals (.09 → subtle, .10 →
+   * default, .14 → strong); deltas are sub-perceptual by design. */
+  --border-subtle: rgba(28, 25, 23, 0.1);
+  --border-default: rgba(28, 25, 23, 0.16);
+  --border-strong: rgba(28, 25, 23, 0.26);
+  --fill-hover: rgba(28, 25, 23, 0.05);
+  --fill-active: rgba(28, 25, 23, 0.09);
+  --overlay-backdrop: rgba(28, 25, 23, 0.45);
+
+  /* Text on an accent fill (dark-on-amber vs white-on-blue). */
+  --on-accent: #ffffff;
+
+  /* Pie/donut ramp — light-background-readable warm ramp. */
+  --chart-pie-1: #b45309;
+  --chart-pie-2: #be4a1d;
+  --chart-pie-3: #d97706;
+  --chart-pie-4: #78716c;
+  --chart-pie-5: #57534e;
+  --chart-pie-6: #292524;
+
   /* Type scale — nothing below 12px (specs/14 §7) */
   --font-size-xs: 12px;
   --font-size-caption: 13px;
@@ -43,6 +64,7 @@
 
   color: var(--text-primary);
   background: var(--surface-page);
+  color-scheme: light;
   font-family: var(--font-family);
   font-size: var(--font-size-body);
   line-height: 1.5;
@@ -52,9 +74,47 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Same roles, dark values — contrast on both themes (specs/14 cross-cutting) */
+/* Dark theme — explicit choice (`<html data-theme="dark">`, set by the
+ * theme store + index.html FOUC guard). Same roles, dark values. */
+:root[data-theme='dark'] {
+  --surface-page: #121212;
+  --surface-card: #1c1c1c;
+  --surface-raised: #262626;
+  --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --elevation-raised: 0 4px 12px rgba(0, 0, 0, 0.5);
+
+  --text-primary: #f5f5f4;
+  --text-secondary: #d6d3d1;
+  --text-muted: #a8a29e;
+
+  --accent: #60a5fa;
+  --success: #4ade80;
+  --danger: #f87171;
+  --warning: #fbbf24;
+
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-default: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --fill-hover: rgba(255, 255, 255, 0.08);
+  --fill-active: rgba(255, 255, 255, 0.12);
+  --overlay-backdrop: rgba(0, 0, 0, 0.6);
+
+  --on-accent: #ffffff;
+
+  --chart-pie-1: #ffbf48;
+  --chart-pie-2: #c96a24;
+  --chart-pie-3: #8f8a83;
+  --chart-pie-4: #5f5a53;
+  --chart-pie-5: #403b36;
+  --chart-pie-6: #2e2a26;
+
+  color-scheme: dark;
+}
+
+/* System default — no explicit choice stored: follow the OS. Same dark
+ * values as above (plain CSS has no shared-block mechanism). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --surface-page: #121212;
     --surface-card: #1c1c1c;
     --surface-raised: #262626;
@@ -69,6 +129,24 @@
     --success: #4ade80;
     --danger: #f87171;
     --warning: #fbbf24;
+
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --border-default: rgba(255, 255, 255, 0.12);
+    --border-strong: rgba(255, 255, 255, 0.16);
+    --fill-hover: rgba(255, 255, 255, 0.08);
+    --fill-active: rgba(255, 255, 255, 0.12);
+    --overlay-backdrop: rgba(0, 0, 0, 0.6);
+
+    --on-accent: #ffffff;
+
+    --chart-pie-1: #ffbf48;
+    --chart-pie-2: #c96a24;
+    --chart-pie-3: #8f8a83;
+    --chart-pie-4: #5f5a53;
+    --chart-pie-5: #403b36;
+    --chart-pie-6: #2e2a26;
+
+    color-scheme: dark;
   }
 }
 

@@ -6,11 +6,15 @@
  * viewports get the form alone. Non-auth routes never render this layout.
  */
 import { Outlet } from 'react-router-dom';
+import { ThemeToggle } from '../../components/ThemeToggle';
 import './auth.css';
 
 export function AuthLayout() {
   return (
     <div className="auth-page">
+      <div className="auth-theme-toggle">
+        <ThemeToggle />
+      </div>
       <div className="auth-split">
         <aside className="auth-art" aria-label="BuildifyLabs illustration">
           <img

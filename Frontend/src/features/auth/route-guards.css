@@ -1,7 +1,6 @@
 /* Route guards (F1) — the loading screen shown while the session is being
- * established/re-established on app load (useTokenRefresh), in the platform
- * dark theme with the shared goo loader. Self-contained (always dark) so it
- * reads the same on every route, guarded or not. */
+ * established/re-established on app load (useTokenRefresh), with the shared
+ * goo loader. Follows the app theme via the root tokens. */
 .route-loading {
   flex: 1;
   min-height: 100svh;
@@ -11,12 +10,11 @@
   justify-content: center;
   gap: 20px;
   padding: 24px;
-  background: #0a0a0b;
-  color-scheme: dark;
+  background: var(--surface-page);
 }
 
 .route-loading__text {
   margin: 0;
   font-size: 13px;
-  color: #a8a29e;
+  color: var(--text-muted);
 }

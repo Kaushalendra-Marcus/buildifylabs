@@ -23,6 +23,7 @@ import {
 } from 'recharts';
 import type { GraphProps } from '../../lib/schemas/visuals';
 import { formatCompactNumber } from '../../lib/format';
+import { useEffectiveTheme } from '../../lib/theme-store';
 
 const DATASET_COLORS = [
   'var(--accent)',
@@ -31,8 +32,9 @@ const DATASET_COLORS = [
   'var(--danger)',
 ];
 
-/** Donut ramp: brand amber first, then ember, then receding warm neutrals. */
-const PIE_COLORS = [
+/** Donut ramp fallbacks (dark theme) — live values come from the
+ * `--chart-pie-*` tokens so the ramp follows the theme. */
+const PIE_COLOR_FALLBACKS = [
   '#ffbf48',
   '#c96a24',
   '#8f8a83',
@@ -40,6 +42,29 @@ const PIE_COLORS = [
   '#403b36',
   '#2e2a26',
 ];
+
+/** Theme-aware pie slice color: reads `--chart-pie-N` at render (reactive —
+ * a theme switch re-renders via the store), falling back to the dark ramp
+ * when the token is unavailable (e.g. jsdom tests). */
+function pieColor(index: number): string {
+  const slot = (index % PIE_COLOR_FALLBACKS.length) + 1;
+  try {
+    if (
+      typeof window === 'undefined' ||
+      typeof window.getComputedStyle !== 'function' ||
+      typeof document === 'undefined'
+    ) {
+      return PIE_COLOR_FALLBACKS[index % PIE_COLOR_FALLBACKS.length];
+    }
+    const value = window
+      .getComputedStyle(document.documentElement)
+      .getPropertyValue(`--chart-pie-${slot}`)
+      .trim();
+    return value || PIE_COLOR_FALLBACKS[index % PIE_COLOR_FALLBACKS.length];
+  } catch {
+    return PIE_COLOR_FALLBACKS[index % PIE_COLOR_FALLBACKS.length];
+  }
+}
 
 const TOOLTIP_STYLE = {
   background: 'var(--surface-raised)',
@@ -74,6 +99,9 @@ function buildRows(props: GraphProps): Row[] {
 export function GraphCard({ props }: { props: GraphProps }) {
   const { chart_type, labels, datasets } = props;
   const data = buildRows(props);
+  // Re-render on any theme change (explicit choice or OS-driven) so the
+  // baked pie ramp follows it; everything else here is live CSS vars.
+  useEffectiveTheme();
 
   if (chart_type === 'pie') {
     const pieData = labels.map((label, index) => ({
@@ -99,7 +127,7 @@ export function GraphCard({ props }: { props: GraphProps }) {
                 {pieData.map((slice, index) => (
                   <Cell
                     key={slice.name}
-                    fill={PIE_COLORS[index % PIE_COLORS.length]}
+                    fill={pieColor(index)}
                   />
                 ))}
               </Pie>
@@ -118,7 +146,7 @@ export function GraphCard({ props }: { props: GraphProps }) {
             <li key={slice.name}>
               <i
                 aria-hidden="true"
-                style={{ background: PIE_COLORS[index % PIE_COLORS.length] }}
+                style={{ background: pieColor(index) }}
               />
               <span className="visual-donut__legend-name">{slice.name}</span>
               <span className="visual-donut__legend-value">

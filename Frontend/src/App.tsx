@@ -13,6 +13,7 @@
  * token on app load (in-memory access token, F0 decision).
  */
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { useEffect } from 'react';
 import { AuthLayout } from './features/auth/AuthLayout';
 import { ForgotPasswordScreen } from './features/auth/ForgotPasswordScreen';
 import { ResetPasswordScreen } from './features/auth/ResetPasswordScreen';
@@ -23,9 +24,18 @@ import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen';
 import { ChatWorkspace } from './features/chat/ChatWorkspace';
 import { LandingPage } from './features/landing/LandingPage';
 import { useTokenRefresh } from './hooks/useTokenRefresh';
+import { applyTheme, useThemeStore } from './lib/theme-store';
 
 function AppRoutes() {
   useTokenRefresh();
+  const theme = useThemeStore((state) => state.theme);
+
+  // Whole-app theme: reflect the stored choice onto `<html data-theme>`.
+  // `system` stores no attribute, so the CSS `prefers-color-scheme`
+  // fallback (plus the index.html pre-paint guard) tracks the OS alone.
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   return (
     <Routes>

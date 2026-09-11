@@ -1,4 +1,21 @@
-# Answer Token Streaming — Run Status (this run)
+# Whole-App Light/Dark Mode — Run Status (this run)
+
+Persisted light/dark toggle (`system` default = follow OS) across auth screens + `/app`
+workspace, via `<html data-theme>` + dual-theme tokens. Landing page keeps its art-directed
+dark design by intent. Canonical living state is `STATUS.md` (uppercase).
+
+## Completed
+
+- [x] **Theme mechanism** (`index.css` dual-theme tokens incl. `--border-*`/`--fill-*`/`--overlay-backdrop`/`--on-accent`/`--chart-pie-1..6`; `theme-store.ts` persisted `system` default; `App.tsx` applicator; `index.html` pre-paint guard)
+- [x] **Workspace + auth theming** (forced-dark blocks gated dark-only; ~35 literals → tokens; BoxLoader masks, route-guards, pie ramp follow theme; toggle in `ChatHeader` + `AuthLayout`)
+- [x] **Tests**: 9 new (store 6, toggle 2, pie ramp 1); full suites green (see below)
+
+## Verification (this run, live)
+
+- Frontend: `npm test -- --run` from `Frontend/` — **139 passed** (up from 130); `npm run build` ✅, `npm run lint` ✅
+- Backend: untouched this run — **658 passed** (unchanged)
+
+---
 
 `POST /chat/stream` already sent stage pings, but the answer itself arrived all at once at the
 end. Now narration prose streams as SSE `text` deltas while generating; the final structured

@@ -1,14 +1,15 @@
 /**
  * ChatHeader (F2) — the 56px shell header (specs/14 §3): logo tile, plan
- * badge, "new chat", plus the rail-toggle affordance for the collapsible
- * history rail. The account menu lives in the history-rail footer; the quota
- * chip lives in the composer footer (ambient, next to the scope selector).
- * Styled with the F0 design tokens, forced to the dark intelligence theme by
- * the `.chat-workspace` scope.
+ * badge, theme toggle, "new chat", plus the rail-toggle affordance for the
+ * collapsible history rail. The account menu lives in the history-rail
+ * footer; the quota chip lives in the composer footer (ambient, next to the
+ * scope selector). Styled with the F0 design tokens, wearing the
+ * intelligence theme in dark mode (see the `.chat-workspace` scope).
  */
 import { Menu, PanelLeft, Plus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { PlanBadge } from '../../components/PlanBadge';
+import { ThemeToggle } from '../../components/ThemeToggle';
 import { useAuth } from '../../hooks/useAuth';
 import { useChatStore } from './chat-store';
 
@@ -46,6 +47,7 @@ export function ChatHeader({ railOpen, onToggleRail }: ChatHeaderProps) {
       <span className="chat-header__spacer" />
 
       {user && <PlanBadge plan={user.plan} />}
+      <ThemeToggle />
       <span className="chat-header__divider" aria-hidden="true" />
       <button type="button" className="chat-header__new-chat" onClick={newChat}>
         <Plus size={16} aria-hidden="true" />
