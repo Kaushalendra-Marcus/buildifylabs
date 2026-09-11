@@ -115,4 +115,48 @@ describe('sendQuery stream', () => {
       vi.unstubAllGlobals()
     }
   })
+
+  it('forwards text deltas to onText in order, then resolves the result', async () => {
+    const deltas: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        sseResponse([
+          JSON.stringify({ stage: 'narrating' }),
+          JSON.stringify({ text: 'Streamed ' }),
+          JSON.stringify({ text: 'answer.' }),
+          JSON.stringify({ result: OUTPUT }),
+        ]),
+      ),
+    )
+    try {
+      const output = await sendQuery(
+        { query: 'how is revenue?' },
+        undefined,
+        (delta) => deltas.push(delta),
+      )
+      expect(deltas).toEqual(['Streamed ', 'answer.'])
+      expect(output).toEqual(OUTPUT)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('ignores text events when no onText handler is given', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        sseResponse([
+          JSON.stringify({ text: 'unseen' }),
+          JSON.stringify({ result: OUTPUT }),
+        ]),
+      ),
+    )
+    try {
+      const output = await sendQuery({ query: 'q' })
+      expect(output).toEqual(OUTPUT)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })

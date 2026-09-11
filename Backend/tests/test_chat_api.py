@@ -464,6 +464,48 @@ class TestChatStream:
         kinds = [visual["visual_type"] for visual in results[0]["visuals"]]
         assert "table" in kinds
 
+    def test_stream_emits_answer_text_before_result(self, client, seed, monkeypatch):
+        import json as jsonlib
+
+        # Narration streams its JSON in chunks: the client must see {"text"}
+        # prose deltas first, then the identical prose inside {"result"}.
+        full = jsonlib.dumps(PIPELINE_JSON)
+        chunks = [full[:20], full[20:60], full[60:]]
+
+        async def fake_stream(**kwargs):
+            for chunk in chunks:
+                yield chunk
+
+        monkeypatch.setattr(
+            "app.services.llm.langchain_pipeline.stream_response", fake_stream
+        )
+        monkeypatch.setattr(
+            "app.routes.chat.generate_response", _sql_fake(HAPPY_SQL)
+        )
+        monkeypatch.setattr(
+            "app.services.llm.langchain_pipeline.generate_response",
+            _pipeline_fake(PIPELINE_JSON),
+        )
+        resp = client.post(
+            "/chat/stream", json={"query": "What is the average revenue?"}
+        )
+        assert resp.status_code == 200
+
+        events = [
+            jsonlib.loads(line[len("data: "):])
+            for line in resp.text.splitlines()
+            if line.startswith("data: ")
+        ]
+        texts = [event["text"] for event in events if "text" in event]
+        results = [event["result"] for event in events if "result" in event]
+        assert len(texts) >= 2
+        assert len(results) == 1
+        # Post-narration grounding may append notes (exclusion disclosure),
+        # so the streamed prose is a prefix of — never different from — the
+        # final answer.
+        assert results[0]["answer"].startswith("".join(texts))
+        assert "".join(texts) == PIPELINE_JSON["answer"]
+
 
 class TestFlagEndpoint:
     def test_flag_own_answer_lands_on_query_log(self, client, seed, monkeypatch):

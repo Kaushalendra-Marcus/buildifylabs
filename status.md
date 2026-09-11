@@ -1,3 +1,23 @@
+# Answer Token Streaming — Run Status (this run)
+
+`POST /chat/stream` already sent stage pings, but the answer itself arrived all at once at the
+end. Now narration prose streams as SSE `text` deltas while generating; the final structured
+result (visuals included) is unchanged. Canonical living state is `STATUS.md` (uppercase).
+
+## Completed
+
+- [x] **Backend streaming transport** (`groq_service.py`: `stream_response()` delta generator, key rotation, prose-JSON mode; `shared.call_llm_stream` shim forwarder; re-exported via `pipeline/__init__` + `langchain_pipeline` shim)
+- [x] **Incremental answer extraction + narration wiring** (`pipeline/run.py`: `_extract_answer_prefix()`, `_narrate(..., on_token)` with identical parse/validate/repair + silent non-stream fallback, first-attempt-only streaming; `run_pipeline`/`_answer_request` thread `on_token`; `/chat/stream` emits `{"text"}` before `{"result"}`; unary `/chat` unchanged)
+- [x] **Frontend live rendering** (`api/chat.ts` `onText`; store transient `streamingText`; Composer wiring + clear; MessageStream live prose block with cursor, reduced-motion respected; `message-stream.css`)
+- [x] **Tests**: backend 9 new, frontend 6 new (+2 Composer assertions updated); full suites green (see below)
+
+## Verification (this run, live)
+
+- Backend: `python3 -m pytest` from `Backend/` — **658 passed** (up from 649)
+- Frontend: `npm test -- --run` from `Frontend/` — **130 passed** (up from 124); `npm run build` ✅, `npm run lint` ✅
+
+---
+
 # Reliability Hardening — Run Status (this run)
 
 Implementation of `implementation-plan-reliability-hardening.md`, Phases 0–3, followed literally in order.

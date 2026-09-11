@@ -45,4 +45,21 @@ describe('chat thread persistence', () => {
     expect(storedMessages().length).toBeLessThanOrEqual(50)
     expect(useChatStore.getState().messages.length).toBe(60)
   })
+
+  it('accumulates streaming text deltas and clears them', () => {
+    expect(useChatStore.getState().streamingText).toBeNull()
+    useChatStore.getState().appendStreamingText('Revenue ')
+    useChatStore.getState().appendStreamingText('grew 5%.')
+    expect(useChatStore.getState().streamingText).toBe('Revenue grew 5%.')
+    useChatStore.getState().clearStreamingText()
+    expect(useChatStore.getState().streamingText).toBeNull()
+  })
+
+  it('never persists the streaming text', () => {
+    useChatStore.getState().addUserMessage('q?')
+    useChatStore.getState().appendStreamingText('partial prose')
+
+    const raw = localStorage.getItem(STORAGE_KEY) as string
+    expect(raw).not.toContain('partial prose')
+  })
 })

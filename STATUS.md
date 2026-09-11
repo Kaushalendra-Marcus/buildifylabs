@@ -19,6 +19,12 @@ question in-session) and the core loop has real-user evidence.
 
 ## Completed tasks
 
+- **Answer token streaming — narration prose streams live, visuals land with the result** — done, test-verified (backend **658 tests**, all green, up from 649; frontend **130 tests**, all green, up from 124; `npm run build` + `npm run lint` clean):
+  - Backend: new `groq_service.stream_response()` delta generator (key rotation, no `response_format` prose-JSON mode so it works on any model; raises → callers fall back); `shared.call_llm_stream` shim forwarder + `stream_response` re-exported through `pipeline/__init__` and the `langchain_pipeline` shim; `_extract_answer_prefix()` incremental JSON-string decoder; `_narrate(..., on_token)` streams first-attempt prose then runs the exact same parse + validate + repair path (stream failure → silent non-streamed fallback; backstop re-narrations stay non-streamed); `run_pipeline`/`_answer_request` thread `on_token`; `/chat/stream` emits `{"text": delta}` events before the final `{"result"}`; unary `/chat` unchanged.
+  - Frontend: `sendQuery(body, onStage?, onText?)` handles `text` events; store gains transient `streamingText` (+append/clear, never persisted, cleared on submit/result/new-chat); Composer wires `onText`; MessageStream renders the live prose block (`AnswerProse` + blinking cursor, citations plain mid-stream, `prefers-reduced-motion` respected).
+  - Tests: backend 9 (stream transport 4, extraction + narration streaming/fallback 4, SSE text-events e2e 1); frontend 6 (api text forwarding 2, store accumulate/clear/no-persist 2, streaming render + cleared-state 2; 2 Composer call-shape assertions updated for the new arg).
+  - Files: `Backend/app/services/llm/groq_service.py`, `.../pipeline/shared.py`, `.../pipeline/__init__.py`, `.../langchain_pipeline.py`, `.../pipeline/run.py`, `Backend/app/routes/chat.py`, `Backend/tests/test_groq_service.py`, `Backend/tests/test_pipeline_contract.py`, `Backend/tests/test_chat_api.py`, `Frontend/src/api/chat.ts`, `Frontend/src/api/chat.test.ts`, `Frontend/src/features/chat/chat-store.ts`, `Frontend/src/features/chat/chat-persist.test.ts`, `Frontend/src/features/chat/Composer.tsx`, `Frontend/src/features/chat/Composer.test.tsx`, `Frontend/src/features/chat/MessageStream.tsx`, `Frontend/src/features/chat/MessageStream.test.tsx`, `Frontend/src/features/chat/message-stream.css`.
+
 - **Reliability hardening Phase 3 — SQL self-correction loop** — done, test-verified (backend **649 tests**, all green, up from 646; frontend untouched — **124 tests**):
   - `app/routes/chat.py::_execute_branch`: on `HTTPException` 422 (hallucinated column/table), exactly one repair — real columns via `get_table_columns` + real error fed back through `build_sql_prompt`/`generate_response`/`clean_sql_response`, re-executed through unchanged `sanitize_sql` + `assert_user_scoped` (zero additional trust); success updates `cleaned_sql` so `sql_query`/`data_preview` reflect what ran; second failure keeps today's exact sentinel → graceful-fallback path. Internal `logger.info` only, no user-facing disclosure. `executor.py` safety logic untouched.
   - Load-bearing fix found by the new tests: evidence-branch rollbacks expire the ORM `User`, so post-rollback `user.id` lazy-loads crashed with `MissingGreenlet` (500) instead of the honest fallback — `_answer_request` now captures `user_id = user.id` upfront and uses it throughout (identical on the happy path).
@@ -509,16 +515,16 @@ to net-new product scope (payments, document-QA retrieval, multi-LLM cascade). N
 
 ## Tests / verification (this run)
 
-**Backend** — `python3 -m pytest` run from `Backend/` on 2026-09-11 — **649 passed**
+**Backend** — `python3 -m pytest` run from `Backend/` on 2026-09-11 — **658 passed**
 (Python 3.12; `conftest.py` supplies dummy env vars so no `.env` is needed; async scenarios run
-via `asyncio.run`). Includes Phases 1–3 (+5 `test_groq_service.py`, +3 `TestValidationRepair`,
-+3 `TestSqlSelfCorrection`) on top of the 638 baseline (which itself needed one
+via `asyncio.run`). Includes reliability hardening Phases 1–3 plus answer token streaming (+9
+streaming tests) on top of the 638 baseline (which itself needed one
 `_DuckDuckGoParser._pending` → `_pending_pair` green-fix for a `HTMLParser` internal collision
 on Python 3.12).
 
 **Frontend** — `npm test -- --run` run from `Frontend/` on 2026-09-11 — **21 test files,
-124 tests, all passed** (Vitest + RTL, jsdom).
+130 tests, all passed** (Vitest + RTL, jsdom); `npm run build` ✅, `npm run lint` ✅.
 
 ## Last updated
 
-2026-09-11 (Reliability hardening Phases 0–3 complete: doc hygiene, strict json_schema outputs, validation repair retry, SQL self-correction loop; live counts backend 649 / frontend 124).
+2026-09-11 (Answer token streaming complete: live narration prose over `/chat/stream` text events with unchanged final contract; live counts backend 658 / frontend 130).

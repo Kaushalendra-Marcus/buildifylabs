@@ -228,7 +228,8 @@ async def chat_stream(
 ):
     """Same answer as POST /chat, streamed as server-sent events.
 
-    Events: `{"stage": "<name>"}` progress updates, then exactly one
+    Events: `{"stage": "<name>"}` progress updates, `{"text": "<delta>"}` answer
+    prose chunks as the narration generates them, then exactly one
     `{"result": <PipelineOutput JSON>}`. Quota runs in the dependency, so a
     429 arrives as a regular JSON error before any event (never mid-stream).
     """
@@ -237,9 +238,14 @@ async def chat_stream(
     async def on_stage(stage: str) -> None:
         await queue.put({"stage": stage})
 
+    async def on_token(text: str) -> None:
+        await queue.put({"text": text})
+
     async def run() -> None:
         try:
-            output = await _answer_request(db, user, request, on_stage=on_stage)
+            output = await _answer_request(
+                db, user, request, on_stage=on_stage, on_token=on_token
+            )
             await queue.put({"result": json.loads(output.model_dump_json())})
         except Exception as exc:  # pragma: no cover - _answer_request never raises
             logger.error(f"Stream flow crashed: {exc}")
@@ -269,12 +275,16 @@ async def _answer_request(
     user: User,
     request: ChatRequest,
     on_stage: Optional[Callable[[str], Awaitable[None]]] = None,
+    on_token: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> PipelineOutput:
     """Shared answer flow for POST /chat and POST /chat/stream.
 
     Evidence branches (scoped SQL execution vs live-web search) run
     concurrently; the pipeline then judges, narrates, and guarantees.
     Never raises: every failure path returns a logged PipelineOutput.
+    When `on_token` is given (stream endpoint only), narration prose is
+    forwarded chunk by chunk as it generates; the unary endpoint passes
+    nothing and behaves exactly as before.
     """
     started = time.monotonic()
 
@@ -645,6 +655,7 @@ async def _answer_request(
             research_notes=research_notes,
             prior_research_state=prior_research_state,
             plan_query=plan_query,
+            on_token=on_token,
         )
     except Exception as exc:
         # Never let the pipeline crash the request: fall back per specs/06 FR4.

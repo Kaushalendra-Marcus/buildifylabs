@@ -150,3 +150,98 @@ class TestToStrictSchema:
         nested = schema["$defs"]["_Nested"]
         assert nested["additionalProperties"] is False
         assert sorted(nested["required"]) == sorted(nested["properties"].keys())
+
+
+def _install_stream(monkeypatch, scripts, model="openai/gpt-oss-120b"):
+    """Fake AsyncGroq for streaming: {api_key: [chunk-list|Exception]}."""
+    captured: dict = {}
+
+    def _chunk_objects(chunks):
+        return [
+            SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=c))])
+            for c in chunks
+        ]
+
+    class _Completions:
+        def __init__(self, api_key):
+            self.api_key = api_key
+
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            action = scripts[self.api_key].pop(0)
+            if isinstance(action, Exception):
+                raise action
+
+            async def _gen():
+                for chunk in _chunk_objects(action):
+                    yield chunk
+
+            return _gen()
+
+    class _Client:
+        def __init__(self, api_key):
+            self.chat = SimpleNamespace(completions=_Completions(api_key))
+
+    async def _hf(prompt, system_prompt):
+        raise AssertionError("streaming must never touch the HF fallback")
+
+    monkeypatch.setattr(groq_mod, "AsyncGroq", _Client)
+    monkeypatch.setattr(groq_mod, "hf_fallback", _hf)
+    monkeypatch.setattr(
+        groq_mod,
+        "settings",
+        SimpleNamespace(
+            groq_api_keys=list(scripts.keys()),
+            GROQ_MODEL=model,
+            GROQ_FAST_MODEL=model,
+        ),
+    )
+    groq_mod._reset_key_state()
+    return captured
+
+
+async def _collect(gen):
+    return [chunk async for chunk in gen]
+
+
+class TestStreamResponse:
+    def test_yields_deltas_in_order_without_response_format(self, monkeypatch):
+        captured = _install_stream(monkeypatch, {"k1": [["Hel", "lo", " world"]]})
+        chunks = asyncio.run(
+            _collect(
+                groq_mod.stream_response(
+                    prompt="p", system_prompt="Return JSON.", model="openai/gpt-oss-120b"
+                )
+            )
+        )
+        assert chunks == ["Hel", "lo", " world"]
+        assert captured.get("stream") is True
+        # Prose-JSON mode: no response_format constraint on the stream.
+        assert "response_format" not in captured
+
+    def test_failed_key_fails_over_to_next_key(self, monkeypatch):
+        class _RateLimited(Exception):
+            status_code = 429
+
+        captured = _install_stream(
+            monkeypatch, {"k1": [_RateLimited("429")], "k2": [["fine"]]}
+        )
+        chunks = asyncio.run(
+            _collect(groq_mod.stream_response(prompt="p", system_prompt="s"))
+        )
+        assert chunks == ["fine"]
+        assert captured.get("stream") is True
+
+    def test_all_keys_down_raises(self, monkeypatch):
+        import pytest
+
+        _install_stream(monkeypatch, {"k1": [RuntimeError("down")]})
+        with pytest.raises(RuntimeError):
+            asyncio.run(_collect(groq_mod.stream_response(prompt="p", system_prompt="s")))
+
+    def test_empty_stream_raises(self, monkeypatch):
+        import pytest
+
+        _install_stream(monkeypatch, {"k1": [[]]})
+        with pytest.raises(RuntimeError):
+            asyncio.run(_collect(groq_mod.stream_response(prompt="p", system_prompt="s")))

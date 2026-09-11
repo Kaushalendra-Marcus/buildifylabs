@@ -105,6 +105,10 @@ interface ChatState {
    *  `visuals`, …) — the thinking indicator shows it while a send is
    *  in flight. Null when idle or when the stage is unknown. */
   pendingStage: string | null;
+  /** Incremental answer prose from the stream's `text` events — rendered
+   *  live while a send is in flight, replaced by the full result when it
+   *  arrives. Null when idle. Transient: never persisted. */
+  streamingText: string | null;
   /** Whether the user has at least one completed data file (F6, specs/14 §6):
    *  `null` = unknown (not yet checked), `true` = has data, `false` = none.
    *  Drives the empty-thread invite (registered + no files → invite an upload)
@@ -116,6 +120,8 @@ interface ChatState {
   addSystemNotice(kind: SystemNoticeKind, resetAt?: number | null, text?: string | null): void;
   setPending(pending: PendingKind | null): void;
   setPendingStage(stage: string | null): void;
+  appendStreamingText(delta: string): void;
+  clearStreamingText(): void;
   setActiveFileName(fileName: string | null): void;
   setHasData(hasData: boolean | null): void;
   clearChat(): void;
@@ -137,6 +143,7 @@ export const useChatStore = create<ChatState>()(
   activeConversationId: null,
   pending: null,
   pendingStage: null,
+  streamingText: null,
   activeFileName: null,
   hasData: null,
 
@@ -200,13 +207,18 @@ addUserMessage: (content, fileName = null) =>
 
   setPendingStage: (pendingStage) => set({ pendingStage }),
 
+  appendStreamingText: (delta) =>
+    set((state) => ({ streamingText: (state.streamingText ?? '') + delta })),
+
+  clearStreamingText: () => set({ streamingText: null }),
+
   setActiveFileName: (fileName) => set({ activeFileName: fileName }),
 
   setHasData: (hasData) => set({ hasData }),
 
-  clearChat: () => set({ messages: [], pending: null, pendingStage: null, activeConversationId: null }),
+  clearChat: () => set({ messages: [], pending: null, pendingStage: null, streamingText: null, activeConversationId: null }),
 
-  newChat: () => set({ messages: [], pending: null, activeConversationId: null }),
+  newChat: () => set({ messages: [], pending: null, pendingStage: null, streamingText: null, activeConversationId: null }),
 
   selectConversation: (id) => set({ activeConversationId: id }),
     }),

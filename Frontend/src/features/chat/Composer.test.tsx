@@ -118,6 +118,7 @@ describe('Composer (F5, specs/14 §5)', () => {
         source_scope: 'own_data',
       },
       expect.any(Function),
+      expect.any(Function),
     )
 
     const quota = useQuotaStore.getState()
@@ -148,6 +149,12 @@ describe('Composer (F5, specs/14 §5)', () => {
     expect(typeof onStage).toBe('function')
     onStage?.('judging')
     expect(useChatStore.getState().pendingStage).toBe('judging')
+
+    const onText = vi.mocked(sendQuery).mock.calls[0][2]
+    expect(typeof onText).toBe('function')
+    onText?.('live ')
+    onText?.('prose.')
+    expect(useChatStore.getState().streamingText).toBe('live prose.')
   })
 
   it('Enter (without Shift) also sends the draft', async () => {
@@ -162,6 +169,7 @@ describe('Composer (F5, specs/14 §5)', () => {
     )
     expect(sendQuery).toHaveBeenCalledWith(
       { query: 'Hello', source_scope: 'own_data' },
+      expect.any(Function),
       expect.any(Function),
     )
   })

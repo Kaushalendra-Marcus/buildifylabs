@@ -409,6 +409,32 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
       ).closest('.message--no-data'),
     ).toBeInTheDocument()
   })
+
+  it('renders live streaming prose while the answer generates', () => {
+    useChatStore.getState().addUserMessage('How did Q2 go?')
+    useChatStore.getState().setPending('thinking')
+    useChatStore.getState().appendStreamingText('Revenue grew ')
+    useChatStore.getState().appendStreamingText('5% this quarter.')
+
+    render(<MessageStream />)
+
+    const block = screen.getByRole('status', { name: 'Answer streaming' })
+    expect(block).toHaveClass('message--assistant-streaming')
+    expect(block).toHaveTextContent('Revenue grew 5% this quarter.')
+  })
+
+  it('renders no streaming block once the text is cleared', () => {
+    useChatStore.getState().addUserMessage('How did Q2 go?')
+    useChatStore.getState().setPending('thinking')
+    useChatStore.getState().appendStreamingText('partial')
+    useChatStore.getState().clearStreamingText()
+
+    render(<MessageStream />)
+
+    expect(
+      screen.queryByRole('status', { name: 'Answer streaming' }),
+    ).not.toBeInTheDocument()
+  })
 })
 
 describe('MessageStream — intelligence styling', () => {

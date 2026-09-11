@@ -11,6 +11,8 @@
 import { useChatStore } from './chat-store';
 import { UserMessage } from './messages/UserMessage';
 import { AssistantMessage } from './messages/AssistantMessage';
+import { AssistantIdentity } from './messages/AssistantIdentity';
+import { AnswerProse } from './messages/AnswerProse';
 import { SystemNotice } from './messages/SystemNotice';
 import { ColdStartNotice } from './messages/ColdStartNotice';
 import { ProcessRunning } from './messages/ProcessRunning';
@@ -22,6 +24,7 @@ export function MessageStream() {
   const messages = useChatStore((state) => state.messages);
   const pending = useChatStore((state) => state.pending);
   const pendingStage = useChatStore((state) => state.pendingStage);
+  const streamingText = useChatStore((state) => state.streamingText);
   const scope = useScopeStore((state) => state.scope);
 
   // F6 §6: no messages yet → the empty-thread invite (guest / no-files).
@@ -45,6 +48,18 @@ export function MessageStream() {
           }
           return <SystemNotice key={message.id} message={message} />;
         })}
+        {streamingText !== null && streamingText.length > 0 && (
+          <div
+            className="message message--assistant-streaming"
+            role="status"
+            aria-label="Answer streaming"
+          >
+            <AssistantIdentity />
+            {/* sourceCount 0: mid-stream citations stay plain text, never dead links. */}
+            <AnswerProse answer={streamingText} sourceCount={0} />
+            <span className="streaming-cursor" aria-hidden="true" />
+          </div>
+        )}
         {pending === 'cold-start' && <ColdStartNotice />}
         {(pending === 'searching' || pending === 'judging' || pending === 'thinking') && (
           <ProcessRunning liveWeb={scope === 'live_web'} stage={pending} serverStage={pendingStage} />

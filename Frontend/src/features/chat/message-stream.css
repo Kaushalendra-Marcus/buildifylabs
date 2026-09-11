@@ -1241,3 +1241,27 @@
   color: color-mix(in srgb, var(--text-muted) 60%, transparent);
   user-select: none;
 }
+
+/* ---------- Live streaming answer (prose arrives before the result) ---------- */
+
+.message--assistant-streaming .streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent);
+  animation: streaming-cursor-blink 1s steps(2, start) infinite;
+}
+
+@keyframes streaming-cursor-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message--assistant-streaming .streaming-cursor {
+    animation: none;
+  }
+}

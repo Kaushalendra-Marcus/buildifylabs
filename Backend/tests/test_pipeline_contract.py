@@ -1271,6 +1271,127 @@ class TestPricingComparisonVisuals:
         assert "comparison" not in kinds
 
 
+class TestNarrationStreaming:
+    """Token streaming: answer prose flows chunk by chunk while the final
+    parse + validate contract stays identical (same output as non-streamed)."""
+
+    def test_extract_answer_prefix_grows_with_chunks(self):
+        from app.services.llm.langchain_pipeline import _extract_answer_prefix
+
+        assert _extract_answer_prefix('{"ans') == ""
+        assert _extract_answer_prefix('{"answer": "Rev') == "Rev"
+        assert _extract_answer_prefix('{"answer": "Revenue grew 5%.", "conf') == (
+            "Revenue grew 5%."
+        )
+
+    def test_extract_answer_prefix_handles_escapes(self):
+        from app.services.llm.langchain_pipeline import _extract_answer_prefix
+
+        assert _extract_answer_prefix('{"answer": "A \\"quoted\\" word') == (
+            'A "quoted" word'
+        )
+        assert _extract_answer_prefix('{"answer": "line one\\nline two') == (
+            "line one\nline two"
+        )
+        # Incomplete trailing escape: stop before it, keep what's decoded.
+        assert _extract_answer_prefix('{"answer": "abc' + "\\") == "abc"
+        assert _extract_answer_prefix('{"answer": "abc' + "\\u00") == "abc"
+        assert _extract_answer_prefix('{"answer": "caf' + "\\u00e9 latt") == (
+            "café latt"
+        )
+
+    def test_narrate_streams_tokens_then_returns_validated_output(self, monkeypatch):
+        import json
+
+        import app.services.llm.pipeline.run as run_mod
+
+        payload = _pipeline_json(answer="Revenue grew 5%.", confidence=0.7)
+        full = json.dumps(payload)
+        chunks = [full[:15], full[15:40], full[40:]]
+
+        async def fake_stream(**kwargs):
+            for chunk in chunks:
+                yield chunk
+
+        tokens: list[str] = []
+
+        async def on_token(text: str) -> None:
+            tokens.append(text)
+
+        async def boom(**kwargs):
+            raise AssertionError("streamed narration must not call generate_response")
+
+        monkeypatch.setattr(run_mod, "call_llm_stream", fake_stream)
+        monkeypatch.setattr(pipeline_mod, "generate_response", boom)
+
+        async def scenario():
+            return await run_mod._narrate(
+                user_query="q",
+                db_data=ROWS,
+                computed_numbers=COMPUTED,
+                news_context=[],
+                source_scope="own_data",
+                company_name=None,
+                decision=Decision(decision="answer"),
+                prior_clarification=None,
+                prior_data=None,
+                market_data=[],
+                forbid_clarify=False,
+                on_token=on_token,
+            )
+
+        output = asyncio.run(scenario())
+        assert "".join(tokens) == "Revenue grew 5%."
+        assert output.answer == "Revenue grew 5%."
+        assert len(tokens) >= 2
+
+    def test_narrate_stream_failure_falls_back_to_non_streamed(self, monkeypatch):
+        import app.services.llm.pipeline.run as run_mod
+
+        async def failing_stream(**kwargs):
+            raise RuntimeError("stream down")
+            yield  # pragma: no cover — makes this an async generator
+
+        monkeypatch.setattr(run_mod, "call_llm_stream", failing_stream)
+
+        async def fake_generate(prompt, system_prompt, temperature=0.2, max_tokens=512, **kwargs):
+            import json
+
+            return {
+                "content": json.dumps(_pipeline_json(answer="Fell back.")),
+                "source": "groq",
+                "usage": None,
+            }
+
+        monkeypatch.setattr(pipeline_mod, "generate_response", fake_generate)
+
+        # on_token must be awaitable-callable; use a recording no-op.
+        seen: list[str] = []
+
+        async def on_token(text: str) -> None:
+            seen.append(text)
+
+        async def scenario2():
+            return await run_mod._narrate(
+                user_query="q",
+                db_data=ROWS,
+                computed_numbers=COMPUTED,
+                news_context=[],
+                source_scope="own_data",
+                company_name=None,
+                decision=Decision(decision="answer"),
+                prior_clarification=None,
+                prior_data=None,
+                market_data=[],
+                forbid_clarify=False,
+                on_token=on_token,
+            )
+
+        output = asyncio.run(scenario2())
+        assert output.answer == "Fell back."
+        assert seen == []
+
+
 class TestValidationRepair:
     """Phase 2 (reliability hardening): one targeted repair retry for narration
     payloads that fail Pydantic validation, before the existing fallback."""

@@ -68,6 +68,7 @@ async def run_pipeline(
     research_notes: Optional[list] = None,
     prior_research_state: Optional[Dict[str, Any]] = None,
     plan_query: Optional[str] = None,
+    on_token: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> PipelineOutput:
     """Decision-driven pipeline: judge -> narrate -> ground -> guarantee (specs/06).
 
@@ -87,7 +88,9 @@ async def run_pipeline(
     Deterministic numbers are always precomputed by the caller and passed in;
     this function only narrates them. Falls back to a low-confidence generic
     PipelineOutput (never raises) on any malformed/validation failure
-    (specs/06 FR4).
+    (specs/06 FR4). When `on_token` is given, the first narration streams its
+    answer prose chunk by chunk (same final contract); re-narrations stay
+    non-streamed.
     """
     if news_context is None:
         news_context = []
@@ -415,6 +418,8 @@ async def run_pipeline(
                 narrate_rows = prior_data.get("rows", []) or []
 
         await emit("narrating")
+        # Only the first narration streams: anti-loop re-narrations below run
+        # non-streamed so the client never sees two answers concatenated.
         output = await _narrate(
             user_query=plan_text,
             db_data=narrate_rows,
@@ -434,6 +439,7 @@ async def run_pipeline(
             price_history=price_history,
             financial_history=financial_history,
             comparison_gate=gate,
+            on_token=on_token,
         )
 
         if (
@@ -1082,9 +1088,10 @@ def _extract_answer_prefix(partial_json: str) -> str:
 
     Streaming narration accumulates raw JSON text chunk by chunk; this pulls
     out whatever of the `answer` prose has arrived so far so it can render
-    live. Handles JSON string escapes (`\"`, `\\`, `\n`, `\uXXXX`, …) and an
-    unterminated trailing literal (stops at end-of-input). Returns `""` when
-    no `"answer"` string has started yet. Pure, never raises.
+    live. Handles JSON string escapes (double-quote, backslash, newline and
+    friends, unicode escapes) and an unterminated trailing literal (stops at
+    end-of-input). Returns `""` when no `"answer"` string has started yet.
+    Pure, never raises.
     """
     try:
         match = re.search(r'"answer"\s*:\s*"', partial_json)
@@ -1187,6 +1194,7 @@ async def _narrate(
     price_history: Optional[list] = None,
     financial_history: Optional[list] = None,
     comparison_gate: Optional[Dict[str, Any]] = None,
+    on_token: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> PipelineOutput:
     """One narration call: prompt -> LLM -> validated PipelineOutput.
 
@@ -1194,6 +1202,12 @@ async def _narrate(
     prose is the highest-hallucination-risk evidence, so source_scope in
     ("live_web", "both") uses groq_strong_model while own-data keeps the
     default. Unconfigured strong model == default (no behavior change).
+
+    When `on_token` is given, the narration streams: answer prose is
+    forwarded chunk by chunk as it generates, and the accumulated text goes
+    through the exact same parse + validate + repair path below — the final
+    contract is identical, only perceived latency changes. Any streaming
+    failure silently falls back to the non-streamed call.
     """
     prompt = build_prompt(
         user_query,
@@ -1224,30 +1238,45 @@ async def _narrate(
     except Exception:
         narration_model = None
 
-    result = await call_llm(
-        prompt=prompt,
-        system_prompt=SYSTEM_PROMPT,
-        model=narration_model,
-        temperature=0.2,
-        max_tokens=2000,
-        json_schema={"name": "pipeline_output", "schema": _PIPELINE_STRICT_SCHEMA},
-    )
-
-    raw_output = (result.get("content") or "").strip()
+    result = None
+    raw_output: Optional[str] = None
+    if on_token is not None:
+        try:
+            raw_output = await _narrate_streaming(
+                prompt, SYSTEM_PROMPT, narration_model, on_token
+            )
+            logger.info("LLM source used: groq-stream")
+        except Exception as exc:
+            logger.warning(
+                f"Streaming narration failed, using non-streamed call: {exc}"
+            )
+            raw_output = None
     if not raw_output:
-        # Same transient-empty-completion rescue as the judge: one retry with
-        # slightly higher temperature before giving up on this narration.
-        logger.warning("Narration got empty content; retrying once.")
         result = await call_llm(
             prompt=prompt,
             system_prompt=SYSTEM_PROMPT,
             model=narration_model,
-            temperature=0.3,
+            temperature=0.2,
             max_tokens=2000,
             json_schema={"name": "pipeline_output", "schema": _PIPELINE_STRICT_SCHEMA},
         )
+
         raw_output = (result.get("content") or "").strip()
-    logger.info(f"LLM source used: {result.get('source', 'unknown')}")
+        if not raw_output:
+            # Same transient-empty-completion rescue as the judge: one retry with
+            # slightly higher temperature before giving up on this narration.
+            logger.warning("Narration got empty content; retrying once.")
+            result = await call_llm(
+                prompt=prompt,
+                system_prompt=SYSTEM_PROMPT,
+                model=narration_model,
+                temperature=0.3,
+                max_tokens=2000,
+                json_schema={"name": "pipeline_output", "schema": _PIPELINE_STRICT_SCHEMA},
+            )
+            raw_output = (result.get("content") or "").strip()
+    if result is not None:
+        logger.info(f"LLM source used: {result.get('source', 'unknown')}")
 
     parsed = normalize_pipeline_payload(extract_json(raw_output))
 

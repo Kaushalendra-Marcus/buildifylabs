@@ -68,6 +68,7 @@ export function Composer() {
       scope === 'live_web' ? 'searching' : coldStartSeen ? 'thinking' : 'cold-start';
     coldStartSeen = true;
     useChatStore.getState().setPending(pending);
+    useChatStore.getState().clearStreamingText();
     useChatStore
       .getState()
       .addUserMessage(text, useChatStore.getState().activeFileName);
@@ -88,6 +89,7 @@ export function Composer() {
       const output = await sendQuery(
         { query: text, source_scope: scope },
         (stage) => useChatStore.getState().setPendingStage(stage),
+        (delta) => useChatStore.getState().appendStreamingText(delta),
       );
       useQuotaStore.getState().recordQuestion();
       useChatStore.getState().addAssistantMessage(output);
@@ -110,6 +112,8 @@ export function Composer() {
           .addSystemNotice('error', null, getErrorMessage(caught));
       }
     } finally {
+      // The full result (or a notice) replaces the live prose — never show both.
+      useChatStore.getState().clearStreamingText();
       useChatStore.getState().setPending(null);
     }
   }
