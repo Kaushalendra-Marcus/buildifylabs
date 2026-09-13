@@ -322,55 +322,49 @@ export function LandingPage() {
                   )}
                   {demo.id === 'forecast' && (
                     <>
-                      <div className="bl-mock__row">
-                        <div className="bl-mock__metric">
-                          <span className="bl-mock__metric-value">+12%</span>
-                          <span className="bl-mock__metric-label">Projected QoQ</span>
-                        </div>
-                        <div className="bl-mock__chart-card">
+                      <div className="bl-mock__chart-card bl-mock__chart-card--top">
                           <svg className="bl-mock__spark-svg" viewBox="0 0 360 116" focusable="false">
-                            <line className="bl-mock__chart-grid" x1="38" y1="86" x2="350" y2="86" />
-                            <line className="bl-mock__chart-grid" x1="38" y1="53" x2="350" y2="53" />
-                            <line className="bl-mock__chart-grid" x1="38" y1="20" x2="350" y2="20" />
-                            <text className="bl-mock__chart-axis" x="32" y="90" textAnchor="end">$50k</text>
-                            <text className="bl-mock__chart-axis" x="32" y="57" textAnchor="end">$60k</text>
-                            <text className="bl-mock__chart-axis" x="32" y="24" textAnchor="end">$70k</text>
                             <polyline
                               className="bl-mock__spark-actual"
-                              points="38,81 115,72 192,59"
+                              points="24,86 104,76 184,60"
                             />
                             <polyline
                               className="bl-mock__spark-projected"
-                              points="192,59 269,48 346,33"
+                              points="184,60 264,48 344,30"
                             />
-                            <circle className="bl-mock__spark-dot" cx="38" cy="81" r="4" />
-                            <circle className="bl-mock__spark-dot" cx="115" cy="72" r="4" />
-                            <circle className="bl-mock__spark-dot" cx="192" cy="59" r="4" />
-                            <circle className="bl-mock__spark-dot" cx="269" cy="48" r="4" />
-                            <circle className="bl-mock__spark-dot" cx="346" cy="33" r="4" />
-                            <text className="bl-mock__chart-value-label" x="38" y="72" textAnchor="middle">$51.3k</text>
-                            <text className="bl-mock__chart-value-label" x="115" y="63" textAnchor="middle">$54.0k</text>
-                            <text className="bl-mock__chart-value-label" x="192" y="50" textAnchor="middle">$58.2k</text>
-                            <text className="bl-mock__chart-value-label" x="269" y="39" textAnchor="middle">$61.4k</text>
-                            <text className="bl-mock__chart-value-label" x="344" y="24" textAnchor="end">$66.0k</text>
-                            <text className="bl-mock__chart-axis" x="38" y="106" textAnchor="middle">Aug</text>
-                            <text className="bl-mock__chart-axis" x="115" y="106" textAnchor="middle">Sep</text>
-                            <text className="bl-mock__chart-axis" x="192" y="106" textAnchor="middle">Oct</text>
-                            <text className="bl-mock__chart-axis" x="269" y="106" textAnchor="middle">Nov</text>
-                            <text className="bl-mock__chart-axis" x="346" y="106" textAnchor="middle">Dec</text>
+                            <circle className="bl-mock__spark-dot" cx="24" cy="86" r="4" />
+                            <circle className="bl-mock__spark-dot" cx="104" cy="76" r="4" />
+                            <circle className="bl-mock__spark-dot" cx="184" cy="60" r="4" />
+                            <circle className="bl-mock__spark-dot" cx="264" cy="48" r="4" />
+                            <circle className="bl-mock__spark-dot" cx="344" cy="30" r="4" />
+                            <text className="bl-mock__chart-value-label" x="24" y="75" textAnchor="middle">$51.3k</text>
+                            <text className="bl-mock__chart-value-label" x="104" y="65" textAnchor="middle">$54.0k</text>
+                            <text className="bl-mock__chart-value-label" x="184" y="49" textAnchor="middle">$58.2k</text>
+                            <text className="bl-mock__chart-value-label" x="264" y="37" textAnchor="middle">$61.4k</text>
+                            <text className="bl-mock__chart-value-label" x="342" y="19" textAnchor="end">$66.0k</text>
+                            <text className="bl-mock__chart-axis" x="24" y="102" textAnchor="middle">Aug</text>
+                            <text className="bl-mock__chart-axis" x="104" y="102" textAnchor="middle">Sep</text>
+                            <text className="bl-mock__chart-axis" x="184" y="102" textAnchor="middle">Oct</text>
+                            <text className="bl-mock__chart-axis" x="264" y="102" textAnchor="middle">Nov</text>
+                            <text className="bl-mock__chart-axis" x="344" y="102" textAnchor="middle">Dec</text>
                           </svg>
                           <div className="bl-mock__spark-legend">
                             <span className="bl-mock__spark-legend--actual">Actual</span>
                             <span className="bl-mock__spark-legend--projected">Projected</span>
                           </div>
-                        </div>
                       </div>
-                      <div className="bl-mock__insights">
-                        <p className="bl-mock__insights-title">Possible factors</p>
-                        <ul>
-                          <li>West returning to its 4-week average</li>
-                          <li>Two paused wholesale accounts resuming</li>
-                        </ul>
+                      <div className="bl-mock__row">
+                        <div className="bl-mock__metric">
+                          <span className="bl-mock__metric-value">+12%</span>
+                          <span className="bl-mock__metric-label">Projected QoQ</span>
+                        </div>
+                        <div className="bl-mock__insights bl-mock__insights--fill">
+                          <p className="bl-mock__insights-title">Possible factors</p>
+                          <ul>
+                            <li>West returning to its 4-week average</li>
+                            <li>Two paused wholesale accounts resuming</li>
+                          </ul>
+                        </div>
                       </div>
                     </>
                   )}

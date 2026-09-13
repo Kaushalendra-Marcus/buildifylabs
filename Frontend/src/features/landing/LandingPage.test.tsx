@@ -116,7 +116,7 @@ describe('LandingPage', () => {
     const svg = panel.querySelector('.bl-mock__spark-svg')
     expect(svg).not.toBeNull()
     const svgText = svg?.textContent ?? ''
-    for (const label of ['$50k', '$70k', '$58.2k', '$66.0k', 'Aug', 'Dec']) {
+    for (const label of ['$51.3k', '$58.2k', '$66.0k', 'Aug', 'Dec']) {
       expect(svgText).toContain(label)
     }
     expect(svg?.querySelectorAll('circle').length).toBe(5)

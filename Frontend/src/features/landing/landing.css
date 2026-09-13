@@ -1065,10 +1065,26 @@
   padding: 12px 14px 10px;
 }
 
-.bl-mock__row > .bl-mock__chart-card {
+/* Forecast order: chart on top (centered, capped), then the score beside
+ * the factor lines. */
+.bl-mock__chart-card--top {
+  width: 100%;
+  max-width: 560px;
+  margin: 14px auto 0;
+}
+
+.bl-mock__insights--fill {
   flex: 1 1 0;
   min-width: 0;
   margin-top: 0;
+}
+
+/* Keep the metric box at its natural height, vertically centered against
+ * a taller chart. Desktop row only — stacked mobile keeps full stretch. */
+@media (min-width: 561px) {
+  .bl-mock__row > .bl-mock__metric {
+    align-self: center;
+  }
 }
 
 .bl-mock__spark-svg {
@@ -1079,12 +1095,9 @@
 
 .bl-mock__spark-svg text {
   font-family: var(--bl-mono);
-  font-size: 12px;
-}
-
-.bl-mock__chart-grid {
-  stroke: var(--bl-border);
-  stroke-width: 1;
+  /* Chart units, not page type: at the capped card width this renders
+   * ≈13–14px on desktop, matching body text. */
+  font-size: 10px;
 }
 
 .bl-mock__chart-axis {
@@ -1094,10 +1107,6 @@
 .bl-mock__chart-value-label {
   fill: var(--bl-secondary);
   font-weight: 700;
-  /* Knock out gridlines running behind a label. */
-  paint-order: stroke;
-  stroke: var(--bl-panel-2);
-  stroke-width: 4px;
 }
 
 .bl-mock__spark-actual,
