@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -87,5 +87,22 @@ describe('LandingPage', () => {
 
     await user.click(toggle)
     expect(['light', 'dark']).toContain(useThemeStore.getState().theme)
+  })
+
+  it('tabs the hero demo between three example answers', async () => {
+    const user = userEvent.setup()
+    renderLanding()
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs).toHaveLength(3)
+    const panel = screen.getByRole('tabpanel')
+    expect(within(panel).getByText('Why did revenue drop last week?')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Region compare' }))
+    expect(within(panel).getByText('Compare sales by region')).toBeInTheDocument()
+    expect(within(panel).getByText(/east leads the quarter/i)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Forecast' }))
+    expect(within(panel).getByText('Forecast next quarter')).toBeInTheDocument()
+    expect(within(panel).getByText(/pace suggests/i)).toBeInTheDocument()
   })
 })

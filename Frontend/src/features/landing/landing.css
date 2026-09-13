@@ -31,6 +31,8 @@
   --bl-dot: #3a3835;
   --bl-orb-amber: rgba(255, 191, 72, 0.13);
   --bl-orb-ember: rgba(190, 74, 29, 0.16);
+  --bl-up: #4ade80;
+  --bl-down: #f87171;
   --bl-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   min-height: 100svh;
   background: var(--bl-bg);
@@ -64,6 +66,8 @@
   --bl-dot: #3a3835;
   --bl-orb-amber: rgba(255, 191, 72, 0.13);
   --bl-orb-ember: rgba(190, 74, 29, 0.16);
+  --bl-up: #4ade80;
+  --bl-down: #f87171;
   color-scheme: dark;
 }
 
@@ -94,6 +98,8 @@
   --bl-dot: #d6d3d1;
   --bl-orb-amber: rgba(180, 83, 9, 0.1);
   --bl-orb-ember: rgba(154, 52, 18, 0.08);
+  --bl-up: #16a34a;
+  --bl-down: #dc2626;
   color-scheme: light;
 }
 

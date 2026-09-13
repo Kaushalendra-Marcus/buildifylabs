@@ -57,22 +57,19 @@ const SAMPLE_QUESTIONS = [
 ];
 
 interface DemoExample {
-  id: string;
+  id: 'revenue' | 'compare' | 'forecast';
   tab: string;
   title: string;
   question: string;
   answer: string;
-  metricValue: string;
-  metricLabel: string;
-  bars: string[];
-  tableHead: [string, string, string];
-  tableRows: [string, string, string][];
   trust: string;
 }
 
-/* Hero demo — three example answer types behind tabs (diagnose a drop,
- * compare segments, project forward). Static mock data, clearly a preview;
- * each shows the same answer anatomy: chart, table, trust footer. */
+/* Hero demo — three different example answer types behind tabs: a drop
+ * diagnosis (metric + bars + table), a head-to-head comparison (versus
+ * cards + share bars, no table), and a forecast (sparkline + hedged
+ * "possible factors", no table). Static mock data, clearly a preview —
+ * every answer still carries the trust footer. */
 const DEMO_EXAMPLES: DemoExample[] = [
   {
     id: 'revenue',
@@ -81,14 +78,6 @@ const DEMO_EXAMPLES: DemoExample[] = [
     question: 'Why did revenue drop last week?',
     answer:
       'Revenue fell 7.4% week over week, driven by the West region and two paused wholesale accounts.',
-    metricValue: '−7.4%',
-    metricLabel: 'WoW revenue',
-    bars: ['70%', '62%', '78%', '44%', '56%'],
-    tableHead: ['Region', 'Revenue', 'WoW'],
-    tableRows: [
-      ['West', '$44.7k', '−12.1%'],
-      ['East', '$51.3k', '−2.8%'],
-    ],
     trust: 'Show the query · Confidence 70% · Flag this answer',
   },
   {
@@ -98,15 +87,6 @@ const DEMO_EXAMPLES: DemoExample[] = [
     question: 'Compare sales by region',
     answer:
       'East leads the quarter at $51.3k, 15% ahead of West. North holds flat while South slipped on one lost account.',
-    metricValue: '+15%',
-    metricLabel: 'East vs West',
-    bars: ['88%', '72%', '58%', '40%', '64%'],
-    tableHead: ['Region', 'Revenue', 'Share'],
-    tableRows: [
-      ['East', '$51.3k', '34%'],
-      ['West', '$44.7k', '30%'],
-      ['North', '$28.9k', '19%'],
-    ],
     trust: 'Show the query · Confidence 74% · Flag this answer',
   },
   {
@@ -116,15 +96,6 @@ const DEMO_EXAMPLES: DemoExample[] = [
     question: 'Forecast next quarter',
     answer:
       'Pace suggests +12% quarter over quarter if West recovers to its 4-week average. A projection, not a fact.',
-    metricValue: '+12%',
-    metricLabel: 'Projected QoQ',
-    bars: ['35%', '48%', '60%', '74%', '88%'],
-    tableHead: ['Month', 'Projected', 'Growth'],
-    tableRows: [
-      ['Oct', '$58.2k', '+8%'],
-      ['Nov', '$61.4k', '+11%'],
-      ['Dec', '$66.0k', '+14%'],
-    ],
     trust: 'Show the query · Confidence 62% · Flag this answer',
   },
 ];
@@ -279,35 +250,110 @@ export function LandingPage() {
                 <p className="bl-mock__user">{demo.question}</p>
                 <div className="bl-mock__answer">
                   <p>{demo.answer}</p>
-                  <div className="bl-mock__row">
-                    <div className="bl-mock__metric">
-                      <span className="bl-mock__metric-value">{demo.metricValue}</span>
-                      <span className="bl-mock__metric-label">{demo.metricLabel}</span>
-                    </div>
-                    <div className="bl-mock__bars" aria-hidden="true">
-                      {demo.bars.map((height) => (
-                        <i key={height} style={{ height }} />
-                      ))}
-                    </div>
-                  </div>
-                  <table className="bl-mock__table">
-                    <thead>
-                      <tr>
-                        {demo.tableHead.map((head) => (
-                          <th key={head}>{head}</th>
+                  {demo.id === 'revenue' && (
+                    <>
+                      <div className="bl-mock__row">
+                        <div className="bl-mock__metric">
+                          <span className="bl-mock__metric-value">−7.4%</span>
+                          <span className="bl-mock__metric-label">WoW revenue</span>
+                        </div>
+                        <div className="bl-mock__bars" aria-hidden="true">
+                          <i style={{ height: '70%' }} />
+                          <i style={{ height: '62%' }} />
+                          <i style={{ height: '78%' }} />
+                          <i style={{ height: '44%' }} />
+                          <i style={{ height: '56%' }} />
+                        </div>
+                      </div>
+                      <table className="bl-mock__table">
+                        <thead>
+                          <tr>
+                            <th>Region</th>
+                            <th>Revenue</th>
+                            <th>WoW</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td>West</td>
+                            <td>$44.7k</td>
+                            <td>−12.1%</td>
+                          </tr>
+                          <tr>
+                            <td>East</td>
+                            <td>$51.3k</td>
+                            <td>−2.8%</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </>
+                  )}
+                  {demo.id === 'compare' && (
+                    <>
+                      <div className="bl-mock__versus">
+                        <div className="bl-mock__versus-card">
+                          <span className="bl-mock__versus-name">East</span>
+                          <span className="bl-mock__versus-value">$51.3k</span>
+                          <span className="bl-mock__versus-delta bl-mock__versus-delta--up">+8.2% QoQ</span>
+                        </div>
+                        <div className="bl-mock__versus-card">
+                          <span className="bl-mock__versus-name">West</span>
+                          <span className="bl-mock__versus-value">$44.7k</span>
+                          <span className="bl-mock__versus-delta bl-mock__versus-delta--down">−3.1% QoQ</span>
+                        </div>
+                      </div>
+                      <ul className="bl-mock__share" aria-label="Revenue share by region">
+                        {[
+                          { region: 'East', share: '34%' },
+                          { region: 'West', share: '30%' },
+                          { region: 'North', share: '19%' },
+                          { region: 'South', share: '17%' },
+                        ].map(({ region, share }) => (
+                          <li key={region} className="bl-mock__share-row">
+                            <span className="bl-mock__share-name">{region}</span>
+                            <span className="bl-mock__share-track" aria-hidden="true">
+                              <i className="bl-mock__share-fill" style={{ width: share }} />
+                            </span>
+                            <span className="bl-mock__share-pct">{share}</span>
+                          </li>
                         ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {demo.tableRows.map(([first, second, third]) => (
-                        <tr key={first}>
-                          <td>{first}</td>
-                          <td>{second}</td>
-                          <td>{third}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </ul>
+                    </>
+                  )}
+                  {demo.id === 'forecast' && (
+                    <>
+                      <div className="bl-mock__row">
+                        <div className="bl-mock__metric">
+                          <span className="bl-mock__metric-value">+12%</span>
+                          <span className="bl-mock__metric-label">Projected QoQ</span>
+                        </div>
+                        <div className="bl-mock__spark" aria-hidden="true">
+                          <svg className="bl-mock__spark-svg" viewBox="0 0 300 96" focusable="false">
+                            <polyline
+                              className="bl-mock__spark-actual"
+                              points="8,76 80,68 150,60 210,46"
+                            />
+                            <polyline
+                              className="bl-mock__spark-projected"
+                              points="210,46 255,32 292,20"
+                            />
+                            <circle className="bl-mock__spark-dot" cx="210" cy="46" r="4" />
+                          </svg>
+                          <div className="bl-mock__spark-legend">
+                            <span className="bl-mock__spark-legend--actual">Actual</span>
+                            <span className="bl-mock__spark-legend--projected">Projected</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="bl-mock__insights">
+                        <p className="bl-mock__insights-title">Possible factors</p>
+                        <ul>
+                          <li>West returning to its 4-week average</li>
+                          <li>Two paused wholesale accounts resuming</li>
+                        </ul>
+                      </div>
+                    </>
+                  )}
                   <p className="bl-mock__trust">
                     {demo.trust}
                   </p>
