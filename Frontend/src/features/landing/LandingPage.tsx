@@ -132,15 +132,17 @@ export function LandingPage() {
               </Link>
             </div>
 
-            {/* Glowing ask box — the supplied `#poda` element, amber-skinned */}
+            {/* Glowing ask box — the supplied `#poda` element, amber-skinned.
+                The halo lives inside `bl-ask__main` so it only ever covers
+                the input itself, never the hint text or CTAs above. */}
             <form className="bl-ask" onSubmit={submitAsk} role="search" aria-label="Try a question">
-              <div id="bl-ask-glow" className="bl-ask__halo" aria-hidden="true">
-                <div className="bl-ask__white" />
-                <div className="bl-ask__border" />
-                <div className="bl-ask__dark" />
-                <div className="bl-ask__glow" />
-              </div>
               <div className="bl-ask__main">
+                <div id="bl-ask-glow" className="bl-ask__halo" aria-hidden="true">
+                  <div className="bl-ask__white" />
+                  <div className="bl-ask__border" />
+                  <div className="bl-ask__dark" />
+                  <div className="bl-ask__glow" />
+                </div>
                 <Search size={18} className="bl-ask__search" aria-hidden="true" />
                 <label htmlFor={askId} className="bl-ask__label">
                   Ask a business question
