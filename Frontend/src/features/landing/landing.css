@@ -1,7 +1,11 @@
 /* Landing page (public `/`) — dark editorial theme shared by every section.
  * Structure mirrors maritime.sh / lantern.md / graphify.com; accent is the
  * amber/ember pair from the product loader (#ffbf48 / #be4a1d). No purple
- * anywhere on this page by design. All sizing stays at/above the 12px floor. */
+ * anywhere on this page by design. All sizing stays at/above the 12px floor.
+ *
+ * Theming: the page follows the whole-app theme (`<html data-theme>`, see
+ * `theme-store.ts`). Dark below is the art-directed default; the light
+ * overrides further down are a warm-paper variant of the same system. */
 
 .bl-landing {
   --bl-bg: #0a0a0b;
@@ -15,10 +19,113 @@
   --bl-ember: #be4a1d;
   --bl-amber-soft: rgba(255, 191, 72, 0.14);
   --bl-ember-soft: rgba(190, 74, 29, 0.22);
+  --bl-on-amber: #14100a;
+  --bl-nav-bg: rgba(10, 10, 11, 0.82);
+  --bl-grid-line: #201e1b;
+  --bl-input-bg: #0e0d0b;
+  --bl-input-text: #ffffff;
+  --bl-input-ph: #8f8a83;
+  --bl-bubble-bg: #2a241c;
+  --bl-bubble-border: rgba(255, 191, 72, 0.35);
+  --bl-track: #2b2823;
+  --bl-dot: #3a3835;
+  --bl-orb-amber: rgba(255, 191, 72, 0.13);
+  --bl-orb-ember: rgba(190, 74, 29, 0.16);
   --bl-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   min-height: 100svh;
   background: var(--bl-bg);
   color: var(--bl-text);
+  color-scheme: dark;
+}
+
+/* Explicit dark — same values as the base, so an explicit choice always
+ * wins over the OS fallback below regardless of cascade order. */
+:root[data-theme='dark'] .bl-landing {
+  --bl-bg: #0a0a0b;
+  --bl-panel: #131312;
+  --bl-panel-2: #171614;
+  --bl-border: rgba(255, 255, 255, 0.09);
+  --bl-text: #fafaf9;
+  --bl-secondary: #d6d3d1;
+  --bl-muted: #a8a29e;
+  --bl-amber: #ffbf48;
+  --bl-ember: #be4a1d;
+  --bl-amber-soft: rgba(255, 191, 72, 0.14);
+  --bl-ember-soft: rgba(190, 74, 29, 0.22);
+  --bl-on-amber: #14100a;
+  --bl-nav-bg: rgba(10, 10, 11, 0.82);
+  --bl-grid-line: #201e1b;
+  --bl-input-bg: #0e0d0b;
+  --bl-input-text: #ffffff;
+  --bl-input-ph: #8f8a83;
+  --bl-bubble-bg: #2a241c;
+  --bl-bubble-border: rgba(255, 191, 72, 0.35);
+  --bl-track: #2b2823;
+  --bl-dot: #3a3835;
+  --bl-orb-amber: rgba(255, 191, 72, 0.13);
+  --bl-orb-ember: rgba(190, 74, 29, 0.16);
+  color-scheme: dark;
+}
+
+/* Explicit light — warm paper variant of the same amber/ember system.
+ * Amber/ember deepen so text, icons, and focus rings keep contrast on
+ * white; solid amber buttons flip to white text (`--bl-on-amber`). */
+:root[data-theme='light'] .bl-landing {
+  --bl-bg: #fafaf9;
+  --bl-panel: #ffffff;
+  --bl-panel-2: #f5f4f0;
+  --bl-border: rgba(28, 25, 23, 0.12);
+  --bl-text: #1c1917;
+  --bl-secondary: #44403c;
+  --bl-muted: #78716c;
+  --bl-amber: #b45309;
+  --bl-ember: #9a3412;
+  --bl-amber-soft: rgba(180, 83, 9, 0.12);
+  --bl-ember-soft: rgba(154, 52, 18, 0.12);
+  --bl-on-amber: #ffffff;
+  --bl-nav-bg: rgba(255, 255, 255, 0.85);
+  --bl-grid-line: #e7e2d9;
+  --bl-input-bg: #ffffff;
+  --bl-input-text: #1c1917;
+  --bl-input-ph: #a8a29e;
+  --bl-bubble-bg: #fef3c7;
+  --bl-bubble-border: rgba(180, 83, 9, 0.35);
+  --bl-track: #e7e5e4;
+  --bl-dot: #d6d3d1;
+  --bl-orb-amber: rgba(180, 83, 9, 0.1);
+  --bl-orb-ember: rgba(154, 52, 18, 0.08);
+  color-scheme: light;
+}
+
+/* System default — no explicit choice stored: follow the OS into the same
+ * light variant. Dark OS keeps the base dark values above. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .bl-landing {
+    --bl-bg: #fafaf9;
+    --bl-panel: #ffffff;
+    --bl-panel-2: #f5f4f0;
+    --bl-border: rgba(28, 25, 23, 0.12);
+    --bl-text: #1c1917;
+    --bl-secondary: #44403c;
+    --bl-muted: #78716c;
+    --bl-amber: #b45309;
+    --bl-ember: #9a3412;
+    --bl-amber-soft: rgba(180, 83, 9, 0.12);
+    --bl-ember-soft: rgba(154, 52, 18, 0.12);
+    --bl-on-amber: #ffffff;
+    --bl-nav-bg: rgba(255, 255, 255, 0.85);
+    --bl-grid-line: #e7e2d9;
+    --bl-input-bg: #ffffff;
+    --bl-input-text: #1c1917;
+    --bl-input-ph: #a8a29e;
+    --bl-bubble-bg: #fef3c7;
+    --bl-bubble-border: rgba(180, 83, 9, 0.35);
+    --bl-track: #e7e5e4;
+    --bl-dot: #d6d3d1;
+    --bl-orb-amber: rgba(180, 83, 9, 0.1);
+    --bl-orb-ember: rgba(154, 52, 18, 0.08);
+    color-scheme: light;
+  }
 }
 
 .bl-landing a:focus-visible,
@@ -46,7 +153,7 @@
   align-items: center;
   gap: 16px;
   padding: 10px 12px 10px 16px;
-  background: rgba(10, 10, 11, 0.82);
+  background: var(--bl-nav-bg);
   backdrop-filter: blur(12px);
   border: 1px solid var(--bl-border);
   border-radius: 12px;
@@ -124,7 +231,7 @@
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
-  color: #14100a;
+  color: var(--bl-on-amber);
   background: var(--bl-amber);
   border-radius: 8px;
   padding: 8px 12px;
