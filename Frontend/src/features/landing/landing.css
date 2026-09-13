@@ -693,7 +693,7 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #3a3835;
+  background: var(--bl-dot);
 }
 
 .bl-mock__bar span:first-child {
