@@ -108,12 +108,18 @@ describe('LandingPage', () => {
     expect(within(panel).getByLabelText('Revenue share by region')).toBeInTheDocument()
     expect(panel.querySelector('.bl-mock__table')).toBeNull()
 
-    // Forecast: sparkline + hedged factors, no table.
+    // Forecast: full chart with axes, values, and months — no table.
     await user.click(screen.getByRole('tab', { name: 'Forecast' }))
     expect(within(panel).getByText('Forecast next quarter')).toBeInTheDocument()
     expect(within(panel).getByText(/pace suggests/i)).toBeInTheDocument()
     expect(within(panel).getByText('Possible factors')).toBeInTheDocument()
-    expect(panel.querySelector('.bl-mock__spark-svg')).not.toBeNull()
+    const svg = panel.querySelector('.bl-mock__spark-svg')
+    expect(svg).not.toBeNull()
+    const svgText = svg?.textContent ?? ''
+    for (const label of ['$50k', '$70k', '$58.2k', '$66.0k', 'Aug', 'Dec']) {
+      expect(svgText).toContain(label)
+    }
+    expect(svg?.querySelectorAll('circle').length).toBe(5)
     expect(panel.querySelector('.bl-mock__table')).toBeNull()
   })
 })

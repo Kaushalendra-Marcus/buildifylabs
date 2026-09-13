@@ -1055,20 +1055,56 @@
   color: var(--bl-secondary);
 }
 
-/* Forecast demo — sparkline trend + hedged insights strip. */
-.bl-mock__spark {
-  flex: 1;
-  min-height: 96px;
+/* Forecast demo — full chart card (axes, values, months) + hedged strip. */
+.bl-mock__chart-card {
+  margin-top: 14px;
   background: var(--bl-panel-2);
   border: 1px solid var(--bl-border);
   border-radius: 10px;
-  padding: 12px 14px 10px;
+  padding: 14px 16px 12px;
+}
+
+.bl-mock__chart-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.bl-mock__chart-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--bl-amber);
+}
+
+.bl-mock__chart-sub {
+  font-size: 12px;
+  color: var(--bl-muted);
 }
 
 .bl-mock__spark-svg {
   display: block;
   width: 100%;
-  height: 76px;
+  height: auto;
+}
+
+.bl-mock__spark-svg text {
+  font-family: var(--bl-mono);
+  font-size: 12px;
+}
+
+.bl-mock__chart-grid {
+  stroke: var(--bl-border);
+  stroke-width: 1;
+}
+
+.bl-mock__chart-axis {
+  fill: var(--bl-muted);
+}
+
+.bl-mock__chart-value-label {
+  fill: var(--bl-secondary);
+  font-weight: 700;
 }
 
 .bl-mock__spark-actual,
