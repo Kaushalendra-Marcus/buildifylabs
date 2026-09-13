@@ -270,6 +270,10 @@ export function LandingPage() {
                 the runway scrolls past, one slide per stretch. */}
             <div className="bl-demo-pin" ref={pinRef}>
               <div className="bl-demo-pin__stage">
+                <p className="bl-demo-pin__eyebrow">Scroll — watch it answer</p>
+                <h2 className="bl-demo-pin__title">
+                  Four questions. <span className="bl-hero__accent">Four traced answers.</span>
+                </h2>
                 <div className="bl-mock bl-reveal">
               <div className="bl-mock__bar" aria-hidden="true">
                 <span />

@@ -387,7 +387,7 @@
 .bl-hero {
   position: relative;
   overflow: clip;
-  padding: 96px 20px 64px;
+  padding: 96px 20px 48px;
 }
 
 .bl-hero__inner {
@@ -400,35 +400,56 @@
   align-items: center;
 }
 
-/* Pinned scroll slides — the stage sticks for one viewport while the
- * runway scrolls past (~40vh per slide, last slide landing just before
- * release). Safe with `position: sticky`: `.bl-hero` above uses
- * `overflow: clip`, which creates no scroll container. */
+/* Pinned scroll slides — the content-height stage sticks just under the
+ * nav while the runway scrolls past (~35vh per slide, last slide landing
+ * just before release). Top-aligned so no void opens above the header.
+ * Safe with `position: sticky`: `.bl-hero` above uses `overflow: clip`,
+ * which creates no scroll container. */
 .bl-demo-pin {
   position: relative;
   width: 100%;
-  height: 170vh;
+  height: 140vh;
 }
 
 .bl-demo-pin__stage {
   position: sticky;
-  top: 0;
-  min-height: 100svh;
+  top: 76px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 84px 20px 32px;
+  justify-content: flex-start;
+  padding: 8px 20px 0;
+}
+
+.bl-demo-pin__eyebrow {
+  margin: 0 0 8px;
+  font-family: var(--bl-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--bl-amber);
+}
+
+.bl-demo-pin__title {
+  margin: 0 0 16px;
+  max-width: 22ch;
+  text-align: center;
+  font-size: clamp(22px, 2.8vw, 30px);
+  line-height: 1.12;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  color: var(--bl-text);
 }
 
 .bl-demo-pin__stage > .bl-mock {
-  width: min(880px, 100%);
+  width: min(920px, 100%);
   margin-top: 0;
 }
 
 /* No pinning on small screens (the stacked mock can outgrow the
- * viewport) or for reduced motion: plain static block instead. */
-@media (max-width: 700px), (prefers-reduced-motion: reduce) {
+ * viewport), short viewports (a taller-than-screen stage would clip),
+ * or for reduced motion: plain static block instead. */
+@media (max-width: 700px), (max-height: 700px), (prefers-reduced-motion: reduce) {
   .bl-demo-pin {
     height: auto;
   }
@@ -906,10 +927,10 @@
 }
 
 .bl-mock__body {
-  padding: 20px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 
 .bl-mock__user {
@@ -935,8 +956,8 @@
 
 .bl-mock__row {
   display: flex;
-  gap: 16px;
-  margin-top: 14px;
+  gap: 12px;
+  margin-top: 10px;
 }
 
 .bl-mock__metric {
@@ -949,7 +970,7 @@
   background: var(--bl-panel-2);
   border: 1px solid var(--bl-border);
   border-radius: 10px;
-  padding: 14px 16px;
+  padding: 12px 14px;
 }
 
 .bl-mock__metric-value {
@@ -968,11 +989,11 @@
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  min-height: 96px;
+  min-height: 84px;
   background: var(--bl-panel-2);
   border: 1px solid var(--bl-border);
   border-radius: 10px;
-  padding: 12px 14px;
+  padding: 10px 12px;
 }
 
 .bl-mock__bars i {
@@ -1035,7 +1056,7 @@
 
 .bl-mock__table {
   width: 100%;
-  margin-top: 14px;
+  margin-top: 10px;
   border-collapse: collapse;
   font-size: 13px;
 }
@@ -1055,7 +1076,7 @@
 }
 
 .bl-mock__trust {
-  margin: 12px 0 0;
+  margin: 10px 0 0;
   font-size: 12px;
   color: var(--bl-muted);
 }
@@ -1065,7 +1086,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-  margin-top: 14px;
+  margin-top: 10px;
 }
 
 .bl-mock__versus-card {
@@ -1104,12 +1125,12 @@
 }
 
 .bl-mock__share {
-  margin: 14px 0 0;
+  margin: 10px 0 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .bl-mock__share-row {
@@ -1152,7 +1173,7 @@
   background: var(--bl-panel-2);
   border: 1px solid var(--bl-border);
   border-radius: 10px;
-  padding: 12px 14px 10px;
+  padding: 10px 12px 8px;
 }
 
 /* Forecast order: chart on top (centered, capped), then the score beside
@@ -1328,7 +1349,7 @@
 }
 
 .bl-mock__legend {
-  margin: 14px 0 0;
+  margin: 10px 0 0;
   padding: 0;
   list-style: none;
   display: flex;
@@ -1372,11 +1393,11 @@
 }
 
 .bl-mock__insights {
-  margin-top: 14px;
+  margin-top: 10px;
   background: var(--bl-panel-2);
   border: 1px solid var(--bl-border);
   border-radius: 10px;
-  padding: 12px 14px;
+  padding: 10px 12px;
 }
 
 .bl-mock__insights-title {
@@ -1421,7 +1442,7 @@
 .bl-audience {
   max-width: 1120px;
   margin: 0 auto;
-  padding: 40px 20px 80px;
+  padding: 28px 20px 80px;
 }
 
 .bl-audience__caption {
