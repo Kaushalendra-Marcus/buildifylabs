@@ -77,4 +77,5 @@ Canonical living state is `STATUS.md` (uppercase) — this file is the per-run l
 ## Explicitly out of scope (per plan §4)
 
 - Sandboxed Python/pandas code-execution path (separate initiative)
+
 - Dedicated hallucination-detection / fact-checking LLM pass (not recommended; deterministic grounding + retries cover it)
