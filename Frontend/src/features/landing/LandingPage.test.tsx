@@ -89,20 +89,31 @@ describe('LandingPage', () => {
     expect(['light', 'dark']).toContain(useThemeStore.getState().theme)
   })
 
-  it('tabs the hero demo between three example answers', async () => {
+  it('tabs the hero demo between three different example layouts', async () => {
     const user = userEvent.setup()
     renderLanding()
     const tabs = screen.getAllByRole('tab')
     expect(tabs).toHaveLength(3)
     const panel = screen.getByRole('tabpanel')
-    expect(within(panel).getByText('Why did revenue drop last week?')).toBeInTheDocument()
 
+    // Diagnose-a-drop: metric + bars + data table.
+    expect(within(panel).getByText('Why did revenue drop last week?')).toBeInTheDocument()
+    expect(within(panel).getByText('WoW')).toBeInTheDocument()
+    expect(panel.querySelector('.bl-mock__table')).not.toBeNull()
+
+    // Head-to-head comparison: versus cards + share bars, no table.
     await user.click(screen.getByRole('tab', { name: 'Region compare' }))
     expect(within(panel).getByText('Compare sales by region')).toBeInTheDocument()
     expect(within(panel).getByText(/east leads the quarter/i)).toBeInTheDocument()
+    expect(within(panel).getByLabelText('Revenue share by region')).toBeInTheDocument()
+    expect(panel.querySelector('.bl-mock__table')).toBeNull()
 
+    // Forecast: sparkline + hedged factors, no table.
     await user.click(screen.getByRole('tab', { name: 'Forecast' }))
     expect(within(panel).getByText('Forecast next quarter')).toBeInTheDocument()
     expect(within(panel).getByText(/pace suggests/i)).toBeInTheDocument()
+    expect(within(panel).getByText('Possible factors')).toBeInTheDocument()
+    expect(panel.querySelector('.bl-mock__spark-svg')).not.toBeNull()
+    expect(panel.querySelector('.bl-mock__table')).toBeNull()
   })
 })

@@ -970,6 +970,198 @@
   color: var(--bl-muted);
 }
 
+/* Compare demo — head-to-head versus cards + proportional share bars. */
+.bl-mock__versus {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.bl-mock__versus-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bl-panel-2);
+  border: 1px solid var(--bl-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.bl-mock__versus-name {
+  font-family: var(--bl-mono);
+  font-size: 12px;
+  color: var(--bl-muted);
+}
+
+.bl-mock__versus-value {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--bl-text);
+}
+
+.bl-mock__versus-delta {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.bl-mock__versus-delta--up {
+  color: var(--bl-up);
+}
+
+.bl-mock__versus-delta--down {
+  color: var(--bl-down);
+}
+
+.bl-mock__share {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bl-mock__share-row {
+  display: grid;
+  grid-template-columns: 64px 1fr 44px;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.bl-mock__share-name {
+  color: var(--bl-secondary);
+}
+
+.bl-mock__share-track {
+  display: block;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bl-track);
+  overflow: hidden;
+}
+
+.bl-mock__share-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--bl-ember), var(--bl-amber));
+}
+
+.bl-mock__share-pct {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--bl-secondary);
+}
+
+/* Forecast demo — sparkline trend + hedged insights strip. */
+.bl-mock__spark {
+  flex: 1;
+  min-height: 96px;
+  background: var(--bl-panel-2);
+  border: 1px solid var(--bl-border);
+  border-radius: 10px;
+  padding: 12px 14px 10px;
+}
+
+.bl-mock__spark-svg {
+  display: block;
+  width: 100%;
+  height: 76px;
+}
+
+.bl-mock__spark-actual,
+.bl-mock__spark-projected {
+  fill: none;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.bl-mock__spark-actual {
+  stroke: var(--bl-amber);
+}
+
+.bl-mock__spark-projected {
+  stroke: var(--bl-muted);
+  stroke-dasharray: 6 5;
+}
+
+.bl-mock__spark-dot {
+  fill: var(--bl-amber);
+}
+
+.bl-mock__spark-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 6px;
+  font-family: var(--bl-mono);
+  font-size: 12px;
+  color: var(--bl-muted);
+}
+
+.bl-mock__spark-legend--actual::before,
+.bl-mock__spark-legend--projected::before {
+  content: '';
+  display: inline-block;
+  width: 18px;
+  border-top: 3px solid var(--bl-amber);
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.bl-mock__spark-legend--projected::before {
+  border-top-color: var(--bl-muted);
+  border-top-style: dashed;
+}
+
+.bl-mock__insights {
+  margin-top: 14px;
+  background: var(--bl-panel-2);
+  border: 1px solid var(--bl-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.bl-mock__insights-title {
+  margin: 0 0 8px;
+  font-family: var(--bl-mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--bl-muted);
+}
+
+.bl-mock__insights ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--bl-secondary);
+}
+
+.bl-mock__insights li {
+  position: relative;
+  padding-left: 18px;
+}
+
+.bl-mock__insights li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--bl-amber);
+}
+
 /* ---------- Audience (who it's for — never fake customer logos) ---------- */
 
 .bl-audience {
