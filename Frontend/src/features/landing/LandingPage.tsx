@@ -322,43 +322,47 @@ export function LandingPage() {
                   )}
                   {demo.id === 'forecast' && (
                     <>
-                      <div className="bl-mock__chart-card">
-                        <div className="bl-mock__chart-head">
-                          <span className="bl-mock__chart-value">+12%</span>
-                          <span className="bl-mock__chart-sub">Projected QoQ · Q4</span>
+                      <div className="bl-mock__row">
+                        <div className="bl-mock__metric">
+                          <span className="bl-mock__metric-value">+12%</span>
+                          <span className="bl-mock__metric-label">Projected QoQ</span>
                         </div>
-                        <svg className="bl-mock__spark-svg" viewBox="0 0 360 168" focusable="false">
-                          <line className="bl-mock__chart-grid" x1="42" y1="133" x2="350" y2="133" />
-                          <line className="bl-mock__chart-grid" x1="42" y1="24" x2="350" y2="24" />
-                          <text className="bl-mock__chart-axis" x="36" y="137" textAnchor="end">$50k</text>
-                          <text className="bl-mock__chart-axis" x="36" y="28" textAnchor="end">$70k</text>
-                          <polyline
-                            className="bl-mock__spark-actual"
-                            points="42,126 118,111 194,88"
-                          />
-                          <polyline
-                            className="bl-mock__spark-projected"
-                            points="194,88 270,71 346,46"
-                          />
-                          <circle className="bl-mock__spark-dot" cx="42" cy="126" r="4" />
-                          <circle className="bl-mock__spark-dot" cx="118" cy="111" r="4" />
-                          <circle className="bl-mock__spark-dot" cx="194" cy="88" r="4" />
-                          <circle className="bl-mock__spark-dot" cx="270" cy="71" r="4" />
-                          <circle className="bl-mock__spark-dot" cx="346" cy="46" r="4" />
-                          <text className="bl-mock__chart-value-label" x="42" y="116" textAnchor="middle">$51.3k</text>
-                          <text className="bl-mock__chart-value-label" x="118" y="101" textAnchor="middle">$54.0k</text>
-                          <text className="bl-mock__chart-value-label" x="194" y="78" textAnchor="middle">$58.2k</text>
-                          <text className="bl-mock__chart-value-label" x="270" y="61" textAnchor="middle">$61.4k</text>
-                          <text className="bl-mock__chart-value-label" x="344" y="36" textAnchor="end">$66.0k</text>
-                          <text className="bl-mock__chart-axis" x="42" y="160" textAnchor="middle">Aug</text>
-                          <text className="bl-mock__chart-axis" x="118" y="160" textAnchor="middle">Sep</text>
-                          <text className="bl-mock__chart-axis" x="194" y="160" textAnchor="middle">Oct</text>
-                          <text className="bl-mock__chart-axis" x="270" y="160" textAnchor="middle">Nov</text>
-                          <text className="bl-mock__chart-axis" x="346" y="160" textAnchor="middle">Dec</text>
-                        </svg>
-                        <div className="bl-mock__spark-legend">
-                          <span className="bl-mock__spark-legend--actual">Actual</span>
-                          <span className="bl-mock__spark-legend--projected">Projected</span>
+                        <div className="bl-mock__chart-card">
+                          <svg className="bl-mock__spark-svg" viewBox="0 0 360 116" focusable="false">
+                            <line className="bl-mock__chart-grid" x1="38" y1="86" x2="350" y2="86" />
+                            <line className="bl-mock__chart-grid" x1="38" y1="53" x2="350" y2="53" />
+                            <line className="bl-mock__chart-grid" x1="38" y1="20" x2="350" y2="20" />
+                            <text className="bl-mock__chart-axis" x="32" y="90" textAnchor="end">$50k</text>
+                            <text className="bl-mock__chart-axis" x="32" y="57" textAnchor="end">$60k</text>
+                            <text className="bl-mock__chart-axis" x="32" y="24" textAnchor="end">$70k</text>
+                            <polyline
+                              className="bl-mock__spark-actual"
+                              points="38,81 115,72 192,59"
+                            />
+                            <polyline
+                              className="bl-mock__spark-projected"
+                              points="192,59 269,48 346,33"
+                            />
+                            <circle className="bl-mock__spark-dot" cx="38" cy="81" r="4" />
+                            <circle className="bl-mock__spark-dot" cx="115" cy="72" r="4" />
+                            <circle className="bl-mock__spark-dot" cx="192" cy="59" r="4" />
+                            <circle className="bl-mock__spark-dot" cx="269" cy="48" r="4" />
+                            <circle className="bl-mock__spark-dot" cx="346" cy="33" r="4" />
+                            <text className="bl-mock__chart-value-label" x="38" y="72" textAnchor="middle">$51.3k</text>
+                            <text className="bl-mock__chart-value-label" x="115" y="63" textAnchor="middle">$54.0k</text>
+                            <text className="bl-mock__chart-value-label" x="192" y="50" textAnchor="middle">$58.2k</text>
+                            <text className="bl-mock__chart-value-label" x="269" y="39" textAnchor="middle">$61.4k</text>
+                            <text className="bl-mock__chart-value-label" x="344" y="24" textAnchor="end">$66.0k</text>
+                            <text className="bl-mock__chart-axis" x="38" y="106" textAnchor="middle">Aug</text>
+                            <text className="bl-mock__chart-axis" x="115" y="106" textAnchor="middle">Sep</text>
+                            <text className="bl-mock__chart-axis" x="192" y="106" textAnchor="middle">Oct</text>
+                            <text className="bl-mock__chart-axis" x="269" y="106" textAnchor="middle">Nov</text>
+                            <text className="bl-mock__chart-axis" x="346" y="106" textAnchor="middle">Dec</text>
+                          </svg>
+                          <div className="bl-mock__spark-legend">
+                            <span className="bl-mock__spark-legend--actual">Actual</span>
+                            <span className="bl-mock__spark-legend--projected">Projected</span>
+                          </div>
                         </div>
                       </div>
                       <div className="bl-mock__insights">

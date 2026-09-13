@@ -1055,31 +1055,20 @@
   color: var(--bl-secondary);
 }
 
-/* Forecast demo — full chart card (axes, values, months) + hedged strip. */
+/* Forecast demo — compact trend chart (axes, values, months) + hedged strip.
+ * Lives in the same side-by-side row as the other tabs' visuals so all
+ * three examples stand equally tall. */
 .bl-mock__chart-card {
-  margin-top: 14px;
   background: var(--bl-panel-2);
   border: 1px solid var(--bl-border);
   border-radius: 10px;
-  padding: 14px 16px 12px;
+  padding: 12px 14px 10px;
 }
 
-.bl-mock__chart-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-
-.bl-mock__chart-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--bl-amber);
-}
-
-.bl-mock__chart-sub {
-  font-size: 12px;
-  color: var(--bl-muted);
+.bl-mock__row > .bl-mock__chart-card {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-top: 0;
 }
 
 .bl-mock__spark-svg {
@@ -1105,6 +1094,10 @@
 .bl-mock__chart-value-label {
   fill: var(--bl-secondary);
   font-weight: 700;
+  /* Knock out gridlines running behind a label. */
+  paint-order: stroke;
+  stroke: var(--bl-panel-2);
+  stroke-width: 4px;
 }
 
 .bl-mock__spark-actual,
