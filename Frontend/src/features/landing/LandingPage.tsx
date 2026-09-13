@@ -56,10 +56,85 @@ const SAMPLE_QUESTIONS = [
   'Forecast next quarter',
 ];
 
+interface DemoExample {
+  id: string;
+  tab: string;
+  title: string;
+  question: string;
+  answer: string;
+  metricValue: string;
+  metricLabel: string;
+  bars: string[];
+  tableHead: [string, string, string];
+  tableRows: [string, string, string][];
+  trust: string;
+}
+
+/* Hero demo — three example answer types behind tabs (diagnose a drop,
+ * compare segments, project forward). Static mock data, clearly a preview;
+ * each shows the same answer anatomy: chart, table, trust footer. */
+const DEMO_EXAMPLES: DemoExample[] = [
+  {
+    id: 'revenue',
+    tab: 'Revenue drop',
+    title: 'revenue question',
+    question: 'Why did revenue drop last week?',
+    answer:
+      'Revenue fell 7.4% week over week, driven by the West region and two paused wholesale accounts.',
+    metricValue: '−7.4%',
+    metricLabel: 'WoW revenue',
+    bars: ['70%', '62%', '78%', '44%', '56%'],
+    tableHead: ['Region', 'Revenue', 'WoW'],
+    tableRows: [
+      ['West', '$44.7k', '−12.1%'],
+      ['East', '$51.3k', '−2.8%'],
+    ],
+    trust: 'Show the query · Confidence 70% · Flag this answer',
+  },
+  {
+    id: 'compare',
+    tab: 'Region compare',
+    title: 'region comparison',
+    question: 'Compare sales by region',
+    answer:
+      'East leads the quarter at $51.3k, 15% ahead of West. North holds flat while South slipped on one lost account.',
+    metricValue: '+15%',
+    metricLabel: 'East vs West',
+    bars: ['88%', '72%', '58%', '40%', '64%'],
+    tableHead: ['Region', 'Revenue', 'Share'],
+    tableRows: [
+      ['East', '$51.3k', '34%'],
+      ['West', '$44.7k', '30%'],
+      ['North', '$28.9k', '19%'],
+    ],
+    trust: 'Show the query · Confidence 74% · Flag this answer',
+  },
+  {
+    id: 'forecast',
+    tab: 'Forecast',
+    title: 'forecast',
+    question: 'Forecast next quarter',
+    answer:
+      'Pace suggests +12% quarter over quarter if West recovers to its 4-week average. A projection, not a fact.',
+    metricValue: '+12%',
+    metricLabel: 'Projected QoQ',
+    bars: ['35%', '48%', '60%', '74%', '88%'],
+    tableHead: ['Month', 'Projected', 'Growth'],
+    tableRows: [
+      ['Oct', '$58.2k', '+8%'],
+      ['Nov', '$61.4k', '+11%'],
+      ['Dec', '$66.0k', '+14%'],
+    ],
+    trust: 'Show the query · Confidence 62% · Flag this answer',
+  },
+];
+
 export function LandingPage() {
   const navigate = useNavigate();
   const askId = useId();
   const [question, setQuestion] = useState('');
+  const [demoTab, setDemoTab] = useState(0);
+  const demo = DEMO_EXAMPLES[demoTab];
   const revealRef = useRevealRoot<HTMLElement>();
 
   const submitAsk = (event: FormEvent) => {
@@ -170,54 +245,71 @@ export function LandingPage() {
               <li>Your data stays yours</li>
             </ul>
 
-            {/* Product mock — maritime dashboard-poster slot */}
-            <div className="bl-mock bl-reveal" role="img" aria-label="Preview of a BuildifyLabs answer: a revenue question with a chart, a table, and a trust footer.">
+            {/* Product mock — maritime dashboard-poster slot, three
+                tabbed example answers sharing one anatomy */}
+            <div className="bl-mock bl-reveal">
               <div className="bl-mock__bar" aria-hidden="true">
                 <span />
                 <span />
                 <span />
-                <em>buildifylabs / app — revenue question</em>
+                <em>buildifylabs / app — {demo.title}</em>
               </div>
-              <div className="bl-mock__body" aria-hidden="true">
-                <p className="bl-mock__user">Why did revenue drop last week?</p>
+              <div className="bl-mock__tabs" role="tablist" aria-label="Example answers">
+                {DEMO_EXAMPLES.map((example, index) => (
+                  <button
+                    key={example.id}
+                    type="button"
+                    role="tab"
+                    id={`bl-demo-tab-${example.id}`}
+                    aria-selected={index === demoTab}
+                    aria-controls="bl-demo-panel"
+                    className="bl-mock__tab"
+                    onClick={() => setDemoTab(index)}
+                  >
+                    {example.tab}
+                  </button>
+                ))}
+              </div>
+              <div
+                className="bl-mock__body"
+                role="tabpanel"
+                id="bl-demo-panel"
+                aria-labelledby={`bl-demo-tab-${demo.id}`}
+              >
+                <p className="bl-mock__user">{demo.question}</p>
                 <div className="bl-mock__answer">
-                  <p>Revenue fell 7.4% week over week, driven by the West region and two paused wholesale accounts.</p>
+                  <p>{demo.answer}</p>
                   <div className="bl-mock__row">
                     <div className="bl-mock__metric">
-                      <span className="bl-mock__metric-value">−7.4%</span>
-                      <span className="bl-mock__metric-label">WoW revenue</span>
+                      <span className="bl-mock__metric-value">{demo.metricValue}</span>
+                      <span className="bl-mock__metric-label">{demo.metricLabel}</span>
                     </div>
-                    <div className="bl-mock__bars">
-                      <i style={{ height: '70%' }} />
-                      <i style={{ height: '62%' }} />
-                      <i style={{ height: '78%' }} />
-                      <i style={{ height: '44%' }} />
-                      <i style={{ height: '56%' }} />
+                    <div className="bl-mock__bars" aria-hidden="true">
+                      {demo.bars.map((height) => (
+                        <i key={height} style={{ height }} />
+                      ))}
                     </div>
                   </div>
                   <table className="bl-mock__table">
                     <thead>
                       <tr>
-                        <th>Region</th>
-                        <th>Revenue</th>
-                        <th>WoW</th>
+                        {demo.tableHead.map((head) => (
+                          <th key={head}>{head}</th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
-                      <tr>
-                        <td>West</td>
-                        <td>$44.7k</td>
-                        <td>−12.1%</td>
-                      </tr>
-                      <tr>
-                        <td>East</td>
-                        <td>$51.3k</td>
-                        <td>−2.8%</td>
-                      </tr>
+                      {demo.tableRows.map(([first, second, third]) => (
+                        <tr key={first}>
+                          <td>{first}</td>
+                          <td>{second}</td>
+                          <td>{third}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                   <p className="bl-mock__trust">
-                    Show the query · Confidence 70% · Flag this answer
+                    {demo.trust}
                   </p>
                 </div>
               </div>

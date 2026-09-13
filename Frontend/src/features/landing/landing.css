@@ -586,19 +586,19 @@
   transition: all 2s;
 }
 
-.bl-ask:hover > .bl-ask__dark::before {
+.bl-ask:hover .bl-ask__dark::before {
   transform: translate(-50%, -50%) rotate(-98deg);
 }
 
-.bl-ask:hover > .bl-ask__glow::before {
+.bl-ask:hover .bl-ask__glow::before {
   transform: translate(-50%, -50%) rotate(-120deg);
 }
 
-.bl-ask:hover > .bl-ask__white::before {
+.bl-ask:hover .bl-ask__white::before {
   transform: translate(-50%, -50%) rotate(-97deg);
 }
 
-.bl-ask:hover > .bl-ask__border::before {
+.bl-ask:hover .bl-ask__border::before {
   transform: translate(-50%, -50%) rotate(-110deg);
 }
 
@@ -658,6 +658,8 @@
 }
 
 .bl-ask__input {
+  position: relative;
+  z-index: 1;
   background-color: var(--bl-input-bg);
   border: 1px solid var(--bl-border);
   width: 100%;
@@ -722,7 +724,8 @@
 }
 
 /* Ask halo in light — swap the near-black conic bases for warm paper
- * tones so the glow reads as amber light, not dark smudges. */
+ * tones, and hide the large ambient glow entirely: on white it spills past
+ * the input over the CTAs and hint text instead of reading as atmosphere. */
 :root[data-theme='light'] .bl-landing .bl-ask__border::before {
   background-image: conic-gradient(
     #f5f4f0,
@@ -747,18 +750,7 @@
 }
 
 :root[data-theme='light'] .bl-landing .bl-ask__glow {
-  opacity: 0.35;
-}
-
-:root[data-theme='light'] .bl-landing .bl-ask__glow::before {
-  background-image: conic-gradient(
-    rgba(0, 0, 0, 0),
-    #b45309 5%,
-    rgba(0, 0, 0, 0) 38%,
-    rgba(0, 0, 0, 0) 50%,
-    #f59e0b 60%,
-    rgba(0, 0, 0, 0) 87%
-  );
+  display: none;
 }
 
 @media (prefers-color-scheme: light) {
@@ -786,18 +778,7 @@
   }
 
   :root:not([data-theme]) .bl-landing .bl-ask__glow {
-    opacity: 0.35;
-  }
-
-  :root:not([data-theme]) .bl-landing .bl-ask__glow::before {
-    background-image: conic-gradient(
-      rgba(0, 0, 0, 0),
-      #b45309 5%,
-      rgba(0, 0, 0, 0) 38%,
-      rgba(0, 0, 0, 0) 50%,
-      #f59e0b 60%,
-      rgba(0, 0, 0, 0) 87%
-    );
+    display: none;
   }
 }
 
@@ -839,6 +820,44 @@
   font-family: var(--bl-mono);
   font-size: 12px;
   color: var(--bl-muted);
+}
+
+/* Demo tabs — switch the mock between the three example answers. */
+.bl-mock__tabs {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--bl-border);
+  overflow-x: auto;
+}
+
+.bl-mock__tab {
+  flex: none;
+  font: inherit;
+  font-family: var(--bl-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--bl-muted);
+  background: transparent;
+  border: 1px solid var(--bl-border);
+  border-radius: 999px;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.bl-mock__tab:hover {
+  color: var(--bl-text);
+  border-color: var(--bl-muted);
+}
+
+.bl-mock__tab[aria-selected='true'] {
+  color: var(--bl-amber);
+  border-color: var(--bl-amber);
+  background: var(--bl-amber-soft);
 }
 
 .bl-mock__body {
