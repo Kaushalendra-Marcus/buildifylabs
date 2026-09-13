@@ -15,5 +15,6 @@ from app.db.models.user import User
 from app.db.models.file_upload import FileUpload
 from app.db.models.payment import Payment
 from app.db.models.query_logs import QueryLogs
+from app.db.models.document_chunk import DocumentChunk
 
-__all__ = ["User", "FileUpload", "Payment", "QueryLogs"]
+__all__ = ["User", "FileUpload", "Payment", "QueryLogs", "DocumentChunk"]

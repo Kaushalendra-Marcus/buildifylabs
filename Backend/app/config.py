@@ -104,6 +104,24 @@ class Settings(BaseSettings):
     # a silent full failure) — see Phase 6.
     ENABLE_LIVE_WEB_SCOPE: bool = Field(True, env="ENABLE_LIVE_WEB_SCOPE")
 
+    # --- Document QA (Part C): PDF text → chunks → pgvector evidence ---
+
+    # Kill switch, same shape as ENABLE_LIVE_WEB_SCOPE above: when false,
+    # PDF uploads still succeed (parsed and chunked) but retrieval at query
+    # time is skipped.
+    ENABLE_DOCUMENT_QA: bool = Field(True, env="ENABLE_DOCUMENT_QA")
+
+    DOCUMENT_CHUNK_CHARS: int = 1000
+    DOCUMENT_CHUNK_OVERLAP_CHARS: int = 150
+    MAX_DOCUMENT_CHARS: int = 200_000  # safety cap on extracted PDF text before chunking
+    MAX_CHUNKS_PER_FILE: int = 400  # independent backstop
+
+    DOCUMENT_EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
+    DOCUMENT_EMBEDDING_DIM: int = 384
+
+    MAX_DOCUMENT_CHUNKS_PER_QUERY: int = 6  # top-K retrieval
+    MAX_DOCUMENT_CONTEXT_CHARS: int = 4000  # reserved sub-budget for documents
+
     HF_API_KEY: Optional[str] = Field(None, env="HF_API_KEY")
     HF_MODEL: str = "mistralai/Mixtral-8x7B-Instruct-v0.1"
 

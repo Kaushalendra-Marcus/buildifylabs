@@ -294,7 +294,7 @@ class TestToolRouting:
         multi-year adapters for a 3-year ask, never the 1-month series."""
         calls: list = []
 
-        async def fake_rewrite(query, prior_clarification=None, company_name=None):
+        async def fake_rewrite(query, prior_clarification=None, company_name=None, prior_query=None):
             return {
                 "queries": ["NVIDIA vs AMD 3 year stock revenue profit"],
                 "entities": ["NVIDIA", "AMD"],

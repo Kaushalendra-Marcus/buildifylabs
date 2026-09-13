@@ -46,7 +46,10 @@ from app.services.data.executor import (
 )
 from app.services.data.stats import (
     apply_what_if,
+    compute_forecast,
     compute_statistics,
+    infer_forecast_columns,
+    is_forecast_query,
     parse_what_if,
 )
 from app.services.llm.groq_service import generate_response
@@ -327,6 +330,12 @@ async def _answer_request(
             logger.warning(f"Clarification merge failed: {exc}")
             plan_query = request.query
 
+    # Part A: prior-turn context for follow-ups. Guard against
+    # double-injection: when the clarification merge already fired
+    # (plan_query != request.query), plan_query already contains the prior
+    # question's text, so don't also pass raw prior_query.
+    sql_prior_context = prior_query if plan_query == request.query else None
+
     # specs/07 FR4: a "Yes, check live sources too" quick-pick answer arrives
     # as a plain user message with scope still "own_data" (frontend doesn't
     # flip the selector) -- treat this turn as "both" for evidence gathering
@@ -404,6 +413,7 @@ async def _answer_request(
                 source_scope=effective_scope,
                 company_name=request.company_name,
                 prior_clarification=prior_clarification,
+                prior_query=sql_prior_context,
                 has_tavily_key=bool(live_settings.WEB_SEARCH_API_KEY),
                 has_fred_key=bool(live_settings.FRED_API_KEY),
             )
@@ -411,20 +421,29 @@ async def _answer_request(
 
     if effective_scope in ("own_data", "both"):
         table_name = user_data_table_name(user_id)
-        columns = await get_table_columns(db, table_name)
-        schema = build_data_schema(table_name, columns)
-        # Canonical query (P0#1): SQL uses plan_query (clarification-merged
-        # research intent), never the fragmentary request.query, so SQL and
-        # research/visual timeframes cannot diverge.
-        sql_prompt = build_sql_prompt(plan_query, schema)
+        try:
+            columns = await get_table_columns(db, table_name)
+        except Exception as exc:
+            # No structured table for this user (e.g. PDF-only uploads never
+            # create one): skip SQL, keep documents/web. Fail soft, never loud.
+            logger.warning(f"Column introspection skipped, SQL branch off: {exc}")
+            columns = []
+        if not columns:
+            table_name = None  # no structured data for this user; skip SQL, keep documents/web
+        else:
+            schema = build_data_schema(table_name, columns)
+            # Canonical query (P0#1): SQL uses plan_query (clarification-merged
+            # research intent), never the fragmentary request.query, so SQL and
+            # research/visual timeframes cannot diverge.
+            sql_prompt = build_sql_prompt(plan_query, schema, prior_query=sql_prior_context)
 
-        sql_result = await generate_response(
-            prompt=sql_prompt,
-            system_prompt=SQL_SYSTEM_PROMPT,
-            temperature=0.2,
-            max_tokens=512,
-        )
-        cleaned_sql = clean_sql_response(sql_result.get("content") or "")
+            sql_result = await generate_response(
+                prompt=sql_prompt,
+                system_prompt=SQL_SYSTEM_PROMPT,
+                temperature=0.2,
+                max_tokens=512,
+            )
+            cleaned_sql = clean_sql_response(sql_result.get("content") or "")
 
     sql_error: Optional[str] = None
 
@@ -510,18 +529,27 @@ async def _answer_request(
             plan_query,
             request.company_name,
             prior_clarification=prior_clarification,
+            prior_query=sql_prior_context,
             planned_tools=planned,
             user_id=str(user_id),
             thread_id=thread_id,
             timeframe_label=_tf,
         )
 
+    async def _document_branch():
+        if effective_scope not in ("own_data", "both"):
+            return [], []
+        from app.services.data.vector_store import retrieve_document_evidence
+        return await retrieve_document_evidence(db, user_id, plan_query)
+
     await emit("evidence")
     try:
-        exec_result, search_result = await asyncio.gather(
+        exec_result, search_result, doc_result = await asyncio.gather(
             _execute_branch() if table_name is not None else asyncio.sleep(0, result=[]),
             _search_branch(),
+            _document_branch(),
         )
+        document_context, document_sources = doc_result
     except Exception as branch_exc:
         # Consistent failure contract (P1#27): branch failures outside the
         # sentinel contract are logged to QueryLogs as fallbacks, never
@@ -581,6 +609,19 @@ async def _answer_request(
                         computed = {**computed, "what_if": what_if}
             except Exception as exc:
                 logger.warning(f"What-if scenario skipped: {exc}")
+            # specs/11 §3.2 v1: a forecast-phrased question ("forecast next
+            # month's revenue") extrapolates deterministically from the
+            # executed rows; the LLM narrates the precomputed numbers, never
+            # its own trend math (same pattern as what-if above).
+            try:
+                if is_forecast_query(plan_query):
+                    date_col, value_col = infer_forecast_columns(rows)
+                    if date_col and value_col:
+                        forecast = compute_forecast(rows, date_col, value_col)
+                        if forecast is not None:
+                            computed = {**computed, "forecast": forecast}
+            except Exception as exc:
+                logger.warning(f"Forecast computation skipped: {exc}")
         news_context = None
         web_sources = []
         market_data = []
@@ -635,6 +676,25 @@ async def _answer_request(
                 }
                 for source in web_sources
             ]
+        # Reserved sub-budget for documents, then remaining budget for web:
+        # your own uploaded document is inherently more trustworthy than a
+        # generic web result and must never be crowded out by a
+        # coincidentally-well-scored web snippet.
+        from app.services.llm.context_budget import fit_pairs_to_budget
+
+        _settings = get_settings()
+        _doc_budget = min(_settings.MAX_DOCUMENT_CONTEXT_CHARS, _settings.MAX_EVIDENCE_CONTEXT_CHARS)
+        document_context, document_sources, _ = fit_pairs_to_budget(
+            document_context, document_sources, _doc_budget
+        )
+        _remaining_budget = max(
+            0, _settings.MAX_EVIDENCE_CONTEXT_CHARS - sum(len(t) for t in document_context)
+        )
+        news_context, web_sources, _ = fit_pairs_to_budget(
+            news_context or [], web_sources or [], _remaining_budget
+        )
+        news_context = document_context + news_context
+        web_sources = document_sources + web_sources
         output = await run_pipeline(
             user_query=request.query,
             db_data=rows,

@@ -1856,6 +1856,7 @@ async def search_web(
     company_name: Optional[str] = None,
     prior_clarification: Optional[str] = None,
     planned_tools: Optional[list[str]] = None,
+    prior_query: Optional[str] = None,
     *,
     user_id: Optional[str] = None,
     thread_id: Optional[str] = None,
@@ -1878,6 +1879,7 @@ async def search_web(
         framed = await rewrite_search_queries(
             query,
             prior_clarification=prior_clarification,
+            prior_query=prior_query,
             company_name=company_name,
         )
         search_queries = framed["queries"][:MAX_SEARCH_QUERIES]

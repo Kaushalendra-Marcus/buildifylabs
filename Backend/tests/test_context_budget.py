@@ -102,7 +102,7 @@ class TestSearchWebBudgetIntegration:
     def test_over_budget_pool_is_trimmed_and_disclosed(self, monkeypatch):
         import app.services.llm.query_rewriter as rewriter_mod
 
-        async def fake_rewrite(user_query, prior_clarification=None, company_name=None):
+        async def fake_rewrite(user_query, prior_clarification=None, company_name=None, prior_query=None):
             return {
                 "queries": ["fuel prices market"],
                 "entities": [],
@@ -145,7 +145,7 @@ class TestSearchWebBudgetIntegration:
         assert len(result.context) == len(result.sources)
 
     def test_structured_evidence_survives_whole_pool_budget(self, monkeypatch):
-        async def fake_rewrite(user_query, prior_clarification=None, company_name=None):
+        async def fake_rewrite(user_query, prior_clarification=None, company_name=None, prior_query=None):
             return {
                 "queries": ["Acme stock price"],
                 "entities": ["Acme"],
@@ -211,7 +211,7 @@ class TestSearchWebBudgetIntegration:
         assert len(result.context) == len(result.sources)
 
     def test_recommendation_deep_read_respects_config_cap(self, monkeypatch):
-        async def fake_rewrite(user_query, prior_clarification=None, company_name=None):
+        async def fake_rewrite(user_query, prior_clarification=None, company_name=None, prior_query=None):
             return {
                 "queries": ["best books about startups"],
                 "entities": [],

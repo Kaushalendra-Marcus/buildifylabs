@@ -744,7 +744,7 @@ class TestAdversarial:
         )
 
     def test_all_providers_failing_never_raises(self, monkeypatch):
-        async def fake_rewrite(query, prior_clarification=None, company_name=None):
+        async def fake_rewrite(query, prior_clarification=None, company_name=None, prior_query=None):
             return {"queries": ["q1"], "entities": ["Tesla"],
                     "time_sensitive": False}
 
@@ -765,7 +765,7 @@ class TestAdversarial:
     def test_yahoo_partial_never_drops_third_entity(self, monkeypatch):
         seen = []
 
-        async def fake_rewrite(query, prior_clarification=None, company_name=None):
+        async def fake_rewrite(query, prior_clarification=None, company_name=None, prior_query=None):
             return {"queries": ["Tesla BYD Toyota comparison"],
                     "entities": ["Tesla", "BYD"], "time_sensitive": False}
 

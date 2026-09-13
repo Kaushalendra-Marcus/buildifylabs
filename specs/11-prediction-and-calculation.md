@@ -1,6 +1,6 @@
 # 11 — Prediction, Calculation & Benchmarking
 
-**Status:** ⚠️ §3.1 done (B4), §3.3 v1 + §3.4 partial done (evidence tools), §3.2 not started. §3.1's deterministic statistical calculations
+**Status:** ⚠️ §3.1 done (B4), §3.2 v1 done (Part C/D), §3.3 v1 + §3.4 partial done (evidence tools). §3.1's deterministic statistical calculations
 (§3.1 + §5's no-new-infrastructure constraint) are implemented in `app/services/data/stats.py` and
 consumed by B4's `POST /chat` — the LLM narrates precomputed numbers, never computes them. §3.4's
 "ask, don't guess" interaction pattern (§4) is implemented in the pipeline's SYSTEM_PROMPT; its
@@ -101,8 +101,12 @@ chat answer, closing the loop back into the same request once answered.
       not a special case bolted onto benchmarking alone. *(`clarification: ClarificationRequest | None`
       is a real pipeline output mode driven by the ask-don't-guess prompt, B4; benchmarking's first
       concrete use lands with B6.)*
-- [ ] A forecast always states its method and a confidence range, never a bare number.
-      *(§3.2, pending.)*
+- [x] A forecast always states its method and a confidence range, never a bare number.
+      *(`stats.py::compute_forecast` v1: linear-regression extrapolation over the executed rows —
+      `is_forecast_query` detector + `infer_forecast_columns` (single-numeric-column only, else
+      skip); `computed_numbers["forecast"]` narrated under the SYSTEM_PROMPT's FORECAST RULE
+      (method + assumption quoted verbatim, framed as a projection) with an Actual/Projected
+      `graph` visual; <4 points returns None — no forecast, not a guess.)*
 - [x] A what-if scenario always states its assumptions (e.g. "assumes quantity is unaffected")
       alongside the result. *(`stats.py::apply_what_if` v1: price-scenario recompute from the
       executed rows — price×quantity when both columns exist, revenue-column scaling otherwise;

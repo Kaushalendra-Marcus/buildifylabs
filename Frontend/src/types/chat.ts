@@ -54,6 +54,8 @@ export interface ChatRequest {
   query: string;
   source_scope?: SourceScope; // only "own_data" fully supported today (B7 gated)
   company_name?: string | null; // reserved for benchmarking (specs/11)
+  /** Per-conversation thread id — the active chat-store conversation id. */
+  thread_id?: string;
 }
 
 export interface FlagRequest {

@@ -77,6 +77,7 @@ export function ClarificationMessage({ output }: { output: PipelineOutput }) {
       const response = await sendQuery({
         query: followUp,
         source_scope: scope,
+        thread_id: useChatStore.getState().activeConversationId ?? undefined,
       });
       useQuotaStore.getState().recordQuestion();
       addAssistantMessage(response);

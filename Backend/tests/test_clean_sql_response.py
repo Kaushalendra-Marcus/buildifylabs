@@ -141,3 +141,36 @@ class TestDynamicSchema:
     def test_build_sql_prompt_defaults_to_placeholder(self):
         prompt = build_sql_prompt("Total revenue?")
         assert "sales" in prompt
+
+
+class TestBuildSqlPromptPriorQuery:
+    def test_without_prior_is_byte_identical_to_today(self):
+        schema = build_data_schema("user_abc_data", ["date"])
+        prompt = build_sql_prompt("Total revenue?", schema=schema)
+        expected = (
+            "\n"
+            "    Database Schema:\n"
+            f"    {schema}\n"
+            "    User Query:\n"
+            "    Total revenue?\n"
+            "    Generate a safe PostgreSQL query.\n"
+        )
+        assert prompt == expected
+
+    def test_with_prior_contains_schema_and_labeled_section(self):
+        schema = build_data_schema("user_abc_data", ["date", "revenue"])
+        prompt = build_sql_prompt(
+            "what about last month?",
+            schema,
+            prior_query="What was revenue by region?",
+        )
+        assert schema in prompt
+        assert "Previous question in this conversation (context only)" in prompt
+        assert "What was revenue by region?" in prompt
+        assert "what about last month?" in prompt
+
+    def test_blank_prior_behaves_like_no_prior(self):
+        schema = build_data_schema("user_abc_data", ["date"])
+        assert build_sql_prompt("q?", schema, prior_query="   ") == build_sql_prompt(
+            "q?", schema
+        )

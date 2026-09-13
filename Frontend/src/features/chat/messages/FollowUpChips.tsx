@@ -30,6 +30,7 @@ export function FollowUpChips({ followups }: { followups: string[] }) {
       const response = await sendQuery({
         query: question,
         source_scope: scope,
+        thread_id: useChatStore.getState().activeConversationId ?? undefined,
       });
       useQuotaStore.getState().recordQuestion();
       addAssistantMessage(response);

@@ -128,25 +128,60 @@ def _is_text_dtype(series: pd.Series) -> bool:
 
 # --- landing into the per-user table ----------------------------------------
 
-async def ingest_file(db: AsyncSession, user_id, filename: str, content: bytes) -> str:
-    """Parse + clean `content` and (re)create the user's data table.
+async def ingest_file(db: AsyncSession, user_id, upload_id, filename: str, content: bytes) -> str:
+    """Parse + clean `content` and land it for querying.
 
-    Returns the per-user table name (the reference stored on the FileUpload).
-    Raises ValueError for anything that makes the file un-ingestable so the
-    route can record status="failed" with a stored reason.
+    CSV/XLSX are tabular: cleaned and (re)created as the user's data table
+    (returns the per-user table name). PDF is text: extracted, chunked,
+    embedded and stored in `document_chunks` (returns f"vector:{upload_id}").
+    Raises ValueError for anything un-ingestable so the route can record
+    status="failed" with a stored reason.
     """
     ext = os.path.splitext(filename)[1].lower()
-    if ext != ".csv":
-        raise ValueError(
-            f"{ext.upper() or 'unsupported'} parsing is not supported yet - "
-            "CSV is the minimum for this phase."
-        )
+    if ext == ".csv":
+        df = clean_dataframe(parse_csv_bytes(content))
+        if df.empty:
+            raise ValueError("CSV contains no data rows to ingest.")
+        return await upsert_user_table(db, user_id, df)
 
-    df = clean_dataframe(parse_csv_bytes(content))
+    if ext == ".xlsx":
+        df = clean_dataframe(parse_xlsx_bytes(content))
+        if df.empty:
+            raise ValueError("XLSX contains no data rows to ingest.")
+        return await upsert_user_table(db, user_id, df)
+
+    if ext == ".pdf":
+        from app.services.data.pdf_parser import chunk_text, extract_pdf_text
+        from app.services.data.vector_store import store_chunks
+
+        text = extract_pdf_text(content)
+        if not text.strip():
+            raise ValueError(
+                "No readable text found in this PDF. Scanned/image-only PDFs "
+                "aren't supported yet — try a text-based PDF."
+            )
+        chunks = chunk_text(text)
+        stored = await store_chunks(db, user_id, upload_id, filename, chunks)
+        if stored == 0:
+            raise ValueError("Couldn't process this PDF's content — please try again.")
+        return f"vector:{upload_id}"
+
+    raise ValueError(
+        f"{ext.upper() or 'unsupported'} parsing is not supported yet - "
+        "CSV is the minimum for this phase."
+    )
+
+
+def parse_xlsx_bytes(content: bytes) -> "pd.DataFrame":
+    """Read the first sheet of an XLSX workbook into a DataFrame.
+
+    Same contract as parse_csv_bytes (a DataFrame for clean_dataframe);
+    an empty workbook raises so we never ingest an empty dataset.
+    """
+    df = pd.read_excel(io.BytesIO(content), engine="openpyxl")
     if df.empty:
-        raise ValueError("CSV contains no data rows to ingest.")
-
-    return await upsert_user_table(db, user_id, df)
+        raise ValueError("XLSX file is empty.")
+    return df
 
 
 async def upsert_user_table(db: AsyncSession, user_id, df: pd.DataFrame) -> str:

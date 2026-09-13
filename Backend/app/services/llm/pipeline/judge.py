@@ -149,6 +149,7 @@ async def plan_tools(
     source_scope: str = "live_web",
     company_name: Optional[str] = None,
     prior_clarification: Optional[str] = None,
+    prior_query: Optional[str] = None,
     has_tavily_key: bool = False,
     has_fred_key: bool = False,
 ) -> List[str]:
@@ -166,6 +167,12 @@ async def plan_tools(
         context_lines.append(f"Company context: {company_name}")
     if prior_clarification:
         context_lines.append(f"Previously asked: {prior_clarification}")
+    if prior_query:
+        context_lines.append(
+            f"Previous question in this conversation (context only, resolve "
+            f"follow-up references like 'that'/'it'/'last one' against it — "
+            f"ignore it completely if this question is self-contained): {prior_query}"
+        )
     capabilities = (
         f"Capabilities: Tavily search/extract "
         f"{'available' if has_tavily_key else 'unavailable'}, "

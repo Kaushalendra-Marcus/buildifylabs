@@ -8,7 +8,6 @@ safely serializable (no NaN/None leaks that would show up in the prompt as
 
 from app.services.data.stats import compute_statistics
 
-
 def test_empty_rows_yield_only_row_count():
     assert compute_statistics([]) == {"row_count": 0}
 
@@ -100,3 +99,72 @@ def test_nan_values_do_not_leak_into_numbers():
     assert stats["averages"]["revenue"] == 200.0
     for value in stats["averages"].values():
         assert value is not None
+
+
+class TestComputeForecast:
+    """specs/11 §3.2 v1: deterministic linear-regression extrapolation."""
+
+    ROWS = [
+        {"month": "2024-01-01", "revenue": 100},
+        {"month": "2024-02-01", "revenue": 120},
+        {"month": "2024-03-01", "revenue": 140},
+        {"month": "2024-04-01", "revenue": 160},
+        {"month": "2024-05-01", "revenue": 180},
+    ]
+
+    def test_upward_trend_projects_upward(self):
+        from app.services.data.stats import compute_forecast, infer_forecast_columns
+
+        date_col, value_col = infer_forecast_columns(self.ROWS)
+        assert (date_col, value_col) == ("month", "revenue")
+        forecast = compute_forecast(self.ROWS, date_col, value_col)
+        assert forecast is not None
+        assert forecast["historical_periods"] == 5
+        assert forecast["projected_value"] > 180
+        assert forecast["last_actual_value"] == 180.0
+        assert "linear regression" in forecast["method"]
+        assert "trend continues" in forecast["assumption"]
+
+    def test_fewer_than_four_points_returns_none(self):
+        from app.services.data.stats import compute_forecast
+
+        rows = [
+            {"month": "2024-01-01", "revenue": 100},
+            {"month": "2024-02-01", "revenue": 120},
+            {"month": "2024-03-01", "revenue": 140},
+        ]
+        assert compute_forecast(rows, "month", "revenue") is None
+
+    def test_missing_and_non_numeric_values_filtered_not_crashed(self):
+        from app.services.data.stats import compute_forecast
+
+        rows = [
+            {"month": "2024-01-01", "revenue": 100},
+            {"month": "2024-02-01", "revenue": None},
+            {"month": "2024-03-01", "revenue": "n/a"},
+            {"month": "2024-04-01", "revenue": 160},
+            {"month": "2024-05-01", "revenue": 180},
+            {"month": "2024-06-01", "revenue": 200},
+        ]
+        forecast = compute_forecast(rows, "month", "revenue")
+        assert forecast is not None
+        assert forecast["historical_periods"] == 4
+
+    def test_ambiguous_columns_skip_rather_than_guess(self):
+        from app.services.data.stats import infer_forecast_columns
+
+        rows = [
+            {"month": "2024-01-01", "revenue": 100, "cost": 50},
+            {"month": "2024-02-01", "revenue": 120, "cost": 60},
+            {"month": "2024-03-01", "revenue": 140, "cost": 70},
+            {"month": "2024-04-01", "revenue": 160, "cost": 80},
+        ]
+        assert infer_forecast_columns(rows) == (None, None)
+
+    def test_is_forecast_query_detector(self):
+        from app.services.data.stats import is_forecast_query
+
+        assert is_forecast_query("forecast next month's revenue")
+        assert is_forecast_query("predict sales going forward")
+        assert is_forecast_query("project revenue for next quarter")
+        assert not is_forecast_query("what was revenue last month")

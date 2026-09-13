@@ -43,6 +43,8 @@ export interface UserChatMessage {
    *  "12:28 AM" timestamp under the bubble. Optional so older/tests state
    *  without it still renders (no timestamp). */
   createdAt?: number;
+  /** Owning conversation — the history rail filters the stream by this. */
+  conversationId: string;
 }
 
 export interface AssistantChatMessage {
@@ -52,6 +54,8 @@ export interface AssistantChatMessage {
   /** Epoch ms when the answer arrived — the trust footer renders it at the
    *  end of its row. Optional, same as the user timestamp. */
   createdAt?: number;
+  /** Owning conversation — the history rail filters the stream by this. */
+  conversationId: string;
 }
 
 export type SystemNoticeKind = 'window-exhausted' | 'lifetime-cap' | 'error';
@@ -60,6 +64,8 @@ export interface SystemChatMessage {
   id: string;
   role: 'system';
   kind: SystemNoticeKind;
+  /** Owning conversation — the history rail filters the stream by this. */
+  conversationId: string;
   /** Epoch ms when the window rolls over (window-exhausted) — the notice
    *  renders a live countdown from this. Null ⇒ unknown (fall back to
    *  "shortly"). */
@@ -90,11 +96,24 @@ export function classifyAssistantOutput(
   return 'answer';
 }
 
+/** Visible stream for one conversation — derived at read time, never stored. */
+export function messagesForConversation(
+  messages: ChatMessage[],
+  conversationId: string | null,
+): ChatMessage[] {
+  if (conversationId === null) return messages;
+  return messages.filter(
+    (m) => (m as { conversationId?: string }).conversationId === conversationId,
+  );
+}
+
 interface ChatState {
   messages: ChatMessage[];
   conversations: ChatConversation[];
-  /** Currently selected thread in the history rail. Visual selection only
-   *  until per-thread transcripts land — selecting never wipes the stream. */
+  /** Currently selected thread in the history rail. The message stream
+   *  renders only this conversation's messages (see
+   *  `messagesForConversation`) — selecting a past conversation restores
+   *  its transcript. Null only on a store with no conversation yet. */
   activeConversationId: string | null;
   /** In-flight send indicator (F5/F6): `cold-start` on a session's first
    *  request (§5.7), `thinking` otherwise (F6 renders it). */
@@ -150,38 +169,43 @@ export const useChatStore = create<ChatState>()(
 addUserMessage: (content, fileName = null) =>
     set((state) => {
       const now = Date.now();
-      // One conversation per thread: a fresh thread (empty stream, or after
-      // New chat cleared the active id) opens a conversation; follow-up turns
-      // in the same thread only bump its recency — never one row per message.
+      // One conversation per thread: the active conversation (created here
+      // on the first message, or pre-created by newChat) owns every
+      // follow-up turn; only its recency is bumped — never one row per
+      // message. Selecting a past conversation re-activates it, so new
+      // messages there continue that thread.
       const active =
         state.activeConversationId === null
           ? null
           : state.conversations.find((c) => c.id === state.activeConversationId) ?? null;
-      if (state.messages.length === 0 || active === null) {
-        const id = makeId();
+      if (active !== null) {
         return {
-          conversations: [
-            {
-              id,
-              title: content.trim().slice(0, 48) || 'New conversation',
-              updatedAt: now,
-            },
-            ...state.conversations,
-          ],
-          activeConversationId: id,
+          conversations: state.conversations.map((c) =>
+            c.id === active.id ? { ...c, updatedAt: now } : c,
+          ),
           messages: [
             ...state.messages,
-            { id: makeId(), role: 'user', content, fileName, createdAt: now },
+            { id: makeId(), role: 'user', content, fileName, createdAt: now, conversationId: active.id },
           ],
         };
       }
+      // No active conversation row yet: mint one, reusing the id newChat
+      // pre-created when present so the thread id stays stable from the
+      // "New chat" click through the first request.
+      const id = state.activeConversationId ?? makeId();
       return {
-        conversations: state.conversations.map((c) =>
-          c.id === active.id ? { ...c, updatedAt: now } : c,
-        ),
+        conversations: [
+          {
+            id,
+            title: content.trim().slice(0, 48) || 'New conversation',
+            updatedAt: now,
+          },
+          ...state.conversations,
+        ],
+        activeConversationId: id,
         messages: [
           ...state.messages,
-          { id: makeId(), role: 'user', content, fileName, createdAt: now },
+          { id: makeId(), role: 'user', content, fileName, createdAt: now, conversationId: id },
         ],
       };
     }),
@@ -190,7 +214,13 @@ addUserMessage: (content, fileName = null) =>
     set((state) => ({
       messages: [
         ...state.messages,
-        { id: makeId(), role: 'assistant', output, createdAt: Date.now() },
+        {
+          id: makeId(),
+          role: 'assistant',
+          output,
+          createdAt: Date.now(),
+          conversationId: state.activeConversationId ?? 'default',
+        },
       ],
     })),
 
@@ -198,7 +228,14 @@ addUserMessage: (content, fileName = null) =>
     set((state) => ({
       messages: [
         ...state.messages,
-        { id: makeId(), role: 'system', kind, resetAt, text },
+        {
+          id: makeId(),
+          role: 'system',
+          kind,
+          resetAt,
+          text,
+          conversationId: state.activeConversationId ?? 'default',
+        },
       ],
     })),
 
@@ -216,9 +253,12 @@ addUserMessage: (content, fileName = null) =>
 
   setHasData: (hasData) => set({ hasData }),
 
-  clearChat: () => set({ messages: [], pending: null, pendingStage: null, streamingText: null, activeConversationId: null }),
+  clearChat: () => set({ messages: [], conversations: [], pending: null, pendingStage: null, streamingText: null, activeConversationId: null }),
 
-  newChat: () => set({ messages: [], pending: null, pendingStage: null, streamingText: null, activeConversationId: null }),
+  // New chat keeps every past transcript (the rail restores them by id)
+  // and opens a fresh thread id up front, so the stream is empty until
+  // the first message and the first request already has a thread_id.
+  newChat: () => set({ pending: null, pendingStage: null, streamingText: null, activeConversationId: makeId() }),
 
   selectConversation: (id) => set({ activeConversationId: id }),
     }),
@@ -228,8 +268,27 @@ addUserMessage: (content, fileName = null) =>
       // Transient send/upload state never persists; the tail is capped so a
       // long thread with 50-row previews cannot blow the 5MB quota.
       name: 'buildifylabs-chat',
-      version: 1,
+      version: 2,
       storage: createJSONStorage(() => localStorage),
+      // v1 → v2: messages gain `conversationId`. Pre-upgrade persisted
+      // messages without it are stamped with the first conversation's id
+      // (best-effort, avoids losing history on upgrade).
+      migrate: (persistedState, version) => {
+        const state = (persistedState ?? {}) as Record<string, unknown>;
+        if (version < 2) {
+          const conversations = (state.conversations ?? []) as ChatConversation[];
+          const fallbackId =
+            conversations.length > 0 ? conversations[0].id : 'default';
+          const messages = ((state.messages ?? []) as Array<Record<string, unknown>>).map(
+            (m) =>
+              'conversationId' in m && typeof m.conversationId === 'string'
+                ? m
+                : { ...m, conversationId: fallbackId },
+          );
+          return { ...state, messages } as unknown as ChatState;
+        }
+        return persistedState as ChatState;
+      },
       partialize: (state) => ({
         messages: state.messages.slice(-50),
         conversations: state.conversations.slice(-20),

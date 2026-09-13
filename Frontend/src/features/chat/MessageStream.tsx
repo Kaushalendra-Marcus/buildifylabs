@@ -8,7 +8,7 @@
  * files), the no-data question messaging, and the small inline thinking
  * indicator.
  */
-import { useChatStore } from './chat-store';
+import { messagesForConversation, useChatStore } from './chat-store';
 import { UserMessage } from './messages/UserMessage';
 import { AssistantMessage } from './messages/AssistantMessage';
 import { AssistantIdentity } from './messages/AssistantIdentity';
@@ -21,7 +21,9 @@ import { EmptyThread } from './messages/EmptyThread';
 import './message-stream.css';
 
 export function MessageStream() {
-  const messages = useChatStore((state) => state.messages);
+  const allMessages = useChatStore((state) => state.messages);
+  const activeConversationId = useChatStore((state) => state.activeConversationId);
+  const messages = messagesForConversation(allMessages, activeConversationId);
   const pending = useChatStore((state) => state.pending);
   const pendingStage = useChatStore((state) => state.pendingStage);
   const streamingText = useChatStore((state) => state.streamingText);

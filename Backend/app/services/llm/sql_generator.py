@@ -81,11 +81,35 @@ def build_data_schema(table_name: str, columns: List[str]) -> str:
 
 # Build Prompt
 
-def build_sql_prompt(user_query: str, schema: Optional[str] = None) -> str:
+def build_sql_prompt(
+    user_query: str,
+    schema: Optional[str] = None,
+    prior_query: Optional[str] = None,
+) -> str:
     schema = schema or DEFAULT_DATABASE_SCHEMA
+    if not prior_query or not prior_query.strip():
+        return f"""
+    Database Schema:
+    {schema}
+    User Query:
+    {user_query}
+    Generate a safe PostgreSQL query.
+"""
+    prior_section = f"""
+    Previous question in this conversation (context only):
+    {prior_query.strip()}
+
+    If the question below is a follow-up that refers back to the previous one
+    (pronouns like "that"/"it", or an incomplete phrase like "what about next
+    month" or "break that down by region"), resolve it using the previous
+    question's subject, metric, and time period. If the question below is a
+    complete, self-contained question on its own topic, ignore the previous
+    question entirely.
+"""
     return f"""
     Database Schema:
     {schema}
+    {prior_section}
     User Query:
     {user_query}
     Generate a safe PostgreSQL query.

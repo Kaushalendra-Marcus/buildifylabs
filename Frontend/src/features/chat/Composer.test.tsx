@@ -116,6 +116,7 @@ describe('Composer (F5, specs/14 §5)', () => {
       {
         query: 'Why did revenue drop last week?',
         source_scope: 'own_data',
+        thread_id: useChatStore.getState().activeConversationId ?? undefined,
       },
       expect.any(Function),
       expect.any(Function),
@@ -168,7 +169,11 @@ describe('Composer (F5, specs/14 §5)', () => {
       'Hello{Enter}',
     )
     expect(sendQuery).toHaveBeenCalledWith(
-      { query: 'Hello', source_scope: 'own_data' },
+      {
+        query: 'Hello',
+        source_scope: 'own_data',
+        thread_id: useChatStore.getState().activeConversationId ?? undefined,
+      },
       expect.any(Function),
       expect.any(Function),
     )
@@ -252,8 +257,7 @@ describe('Composer (F5, specs/14 §5)', () => {
     ).toBeEnabled()
   })
 
-  it('a lifetime-cap 429 drives the permanent lifetime card with the contact form', async () => {
-    signedInAs('free')
+  it('a lifetime-cap 429 drives the permanent lifetime card with the contact form', async () => {    signedInAs('free')
     vi.mocked(sendQuery).mockRejectedValue(
       new ApiError(429, {
         detail: "You've reached the 100-question limit for now.",
@@ -279,5 +283,25 @@ describe('Composer (F5, specs/14 §5)', () => {
     expect(
       screen.getByPlaceholderText('Why did revenue drop last week?'),
     ).toBeEnabled()
+  })
+
+  it('sends thread_id matching the current activeConversationId', async () => {
+    signedInAs('free')
+    vi.mocked(sendQuery).mockResolvedValue(makeOutput())
+    const user = userEvent.setup()
+    render(<Composer />)
+
+    await user.type(
+      screen.getByPlaceholderText('Why did revenue drop last week?'),
+      'threaded question',
+    )
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+
+    const activeId = useChatStore.getState().activeConversationId
+    expect(activeId).toBeTruthy()
+    expect(vi.mocked(sendQuery).mock.calls[0][0]).toMatchObject({
+      query: 'threaded question',
+      thread_id: activeId,
+    })
   })
 })

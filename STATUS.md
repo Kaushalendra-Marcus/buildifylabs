@@ -19,6 +19,13 @@ question in-session) and the core loop has real-user evidence.
 
 ## Completed tasks
 
+- **Conversation continuity + document QA + forecasting (`implementation-plan-continuity-and-completeness.md`, Parts A–D)** — done, test-verified (backend **694 tests**, all green, up from 658, +1 gated pgvector integration skipped without `TEST_POSTGRES_URL`; frontend **149 tests**, all green, up from 142; `npm run build` + `npm run lint` clean):
+  - **Part A — follow-ups keep context**: `build_sql_prompt`, `rewrite_search_queries`, `search_web`, `plan_tools` accept optional `prior_query` (all default `None`, backward compatible); `chat.py` passes the previous turn's question (never double-injected alongside a clarification merge). Tests: byte-identical no-prior regression guard, prompt-threading unit tests, same-`thread_id` follow-up e2e.
+  - **Part B — history rail restores transcripts, `thread_id` ships**: messages carry `conversationId`; `MessageStream` filters by `messagesForConversation`; Composer (+ follow-up/chip paths) sends `thread_id`; persist `version: 2` migrates v1 messages. `newChat` keeps past transcripts and opens a fresh thread id up front (required by the rail-restore test + DoD). Tests: per-conversation store tests, rail-restore render, `thread_id` assertion, persist stamp.
+  - **Part D — forecasting v1 (`specs/11` §3.2)**: `stats.py::is_forecast_query`/`infer_forecast_columns`/`compute_forecast` (linear regression, ≥4 points else `None`); `chat.py` merges `computed["forecast"]`; SYSTEM_PROMPT FORECAST RULE; Actual/Projected `graph` visual (zero `GraphCard` changes). `specs/11` §3.2 checkbox checked.
+  - **Part C — PDF/XLSX document QA**: XLSX parses like CSV; PDFs extract (`pypdf`) → chunk → embed (HF Inference API) → `document_chunks` (pgvector, migration `c1code0000`, `CREATE EXTENSION vector`); per-query cosine retrieval scoped to `user_id` merges inside a reserved sub-budget ahead of web evidence, tagged `your_documents` (prompt tag + frontend badge); `ENABLE_DOCUMENT_QA=false` degrades cleanly; PDF-only users skip SQL instead of 422ing. Vector-store SQL covered by a `TEST_POSTGRES_URL`-gated integration test; everything else mocked. Pre-existing `rewrite_search_queries` test doubles updated for the new optional kwarg. `specs/04` status/FR4/acceptance, `Backend/docs/known-gaps.md`, `Backend/CLAUDE.md` updated in the same change.
+  - Files: backend `config.py`, `requirements.txt` (+`openpyxl`/`pypdf`/`pgvector`), `sql_generator.py`, `query_rewriter.py`, `web_search.py`, `routes/chat.py`, `routes/files.py`, `services/data/parser.py`, `services/data/pdf_parser.py` + `embeddings.py` + `vector_store.py` (new), `services/data/stats.py`, `pipeline/prompting.py` + `prompts.py` + `visuals.py`, `pipeline/judge.py`, `db/models/document_chunk.py` + `__init__.py`, `alembic/.../c1code0000_document_chunks.py`, 7 test files touched/added; frontend `chat-store.ts`, `MessageStream.tsx`, `Composer.tsx`, `ClarificationMessage.tsx`, `FollowUpChips.tsx`, `types/chat.ts`, `messages/evidence.ts`, `messages/DataSources.tsx`, 4 test files touched/added.
+
 - **Whole-app light/dark mode with user toggle** — done, test-verified (frontend **139 tests**, all green, up from 130; `npm run build` + `npm run lint` clean; backend untouched — **658 tests**):
   - Mechanism: `<html data-theme>` (`light`/`dark` explicit, absent = follow OS) driven by a persisted `theme-store` (`system` default) + `index.html` pre-paint guard; root tokens carry both themes (`color-scheme` included); new interaction tokens (`--border-*`, `--fill-*`, `--overlay-backdrop`, `--on-accent`, `--chart-pie-1..6`).
   - Workspace + auth surfaces: forced-dark intelligence blocks now apply dark-only (light inherits root light tokens, blue accent); ~35 white-alpha literals → theme tokens; on-accent text, BoxLoader masks, route-guards loading screen, and the pie ramp (token-read with fallback) all follow the theme; charts re-render on switch.
@@ -455,19 +462,20 @@ first-time users asking a 2nd question in-session, and put the core loop in fron
 before any POST-CHECKPOINT phase). Note: that bar was never formally defined, and
 POST-CHECKPOINT-adjacent work has shipped anyway (B7 evidence hardening Phases 0–6, 4-query
 framing + whole-pool budgeting + 5-URL deep reads + 7-visual ceiling, visual-empty production
-fix, pipeline package split, and this reliability-hardening pass) — proceeding on the explicit
-decision that hardening the core loop does not wait on the real-user gate; the gate still applies
-to net-new product scope (payments, document-QA retrieval, multi-LLM cascade). Next: define the
-"worth continuing" bar and put the core loop in front of real users.
+fix, pipeline package split, reliability hardening, and now conversation continuity + document
+QA + forecasting v1) — proceeding on the explicit decision that hardening the core loop does
+not wait on the real-user gate; the gate still applies to net-new product scope (payments,
+multi-LLM cascade). Next: define the "worth continuing" bar and put the core loop in front of
+real users.
 
 ## Blocked / deferred
 
 - **Spec-01 completeness (single-use reset tokens; resend-verification endpoint)** — ⏸ decided OUT
   of B0 at execution (plan: "decide in/out at execution"; known-gaps, not on critical path).
 - **Phase B9 payments / F7 upgrade UI** — ⏸ paused (`specs/03`).
-- **PDF/XLSX unstructured document QA** (parse → chunk → embed → Pinecone → retrieve → synthesize;
-  `specs/04`/`specs/08`) — ⏸ deferred, separate multi-week architecture initiative, not bundled
-  with retrieval hardening. CSV upload → per-user table → NL→SQL path is the working scope.
+- **Document-QA follow-ups** (OCR for scanned PDFs, structured table extraction via `pdfplumber`,
+  single-PDF delete/replace, cross-document re-ranking; `specs/04`) — ⏸ deferred, separate
+  initiatives; v1 retrieval (top-K cosine) is live.
 - **Multi-LLM provider cascade** (`specs/12`) — ⏸ deferred, separate architecture decision.
 
 ## Important decisions
@@ -496,19 +504,22 @@ to net-new product scope (payments, document-QA retrieval, multi-LLM cascade). N
 - **Per-type EXT↔MIME validation (B3):** the "double-check" is enforced per file type (`.csv` →
   `text/csv`, etc.), so a mismatched pair like `.csv`+`application/pdf` is a deliberate `415`
   (`specs/04` §4).
-- **One active data file per user (B3):** a fresh upload **replaces** the user's per-user data
-  table; `pinecone_namespace` temporarily holds the per-user table name as the storage ref until
-  the real Pinecone namespace is wired.
-- `.xlsx`/`.pdf` uploads pass validation but land `status="failed"` with a stored reason (parsing
-  beyond CSV deferred); raw file is still persisted.
+- **One active data file per user (B3; PDFs accumulate since Part C):** a fresh CSV/XLSX upload
+  **replaces** the user's per-user data table; PDFs append to `document_chunks` instead.
+  `pinecone_namespace` holds the per-user table name (CSV/XLSX) or a `vector:<upload_id>` ref (PDF).
+- **XLSX parses like CSV; PDFs retrieve via pgvector (Part C):** `openpyxl` read support reuses the
+  CSV clean + table path; PDF text (`pypdf`) → chunks → HF embeddings → `document_chunks`
+  (migration `c1code0000`), retrieved per query scoped to `user_id`, reserved sub-budget ahead of
+  web evidence, `your_documents` tag end-to-end. Scanned/image-only PDFs fail honestly (no OCR).
 - **7-type visual contract (B4, frozen; visuals.ts landed in F0):** `visual_type` is
   `Literal["metric","graph","table","comparison","insight","alert","status"]` with `props: Dict`;
   `src/lib/schemas/visuals.ts` (frontend) is now the landed authoritative per-type props source of
   truth (discriminated union + runtime guard) — backend only constrains the type values.
   `confidence` is `Field(ge=0.0, le=1.0)`.
-- **LLM never does arithmetic (B4, `specs/11` §2):** `stats.py` computes averages/totals/growth/ratios
-  deterministically in pandas; `run_pipeline` receives them as `computed_numbers` to **narrate**, never
-  calculate. `GROQ_MODEL` interim = `llama-3.3-70b-versatile`; retires **2026-08-16** → pick a durable model in B5.
+- **LLM never does arithmetic (B4, `specs/11` §2; forecasting v1 in Part D):** `stats.py` computes averages/totals/growth/ratios
+  deterministically in pandas, plus `compute_forecast` (linear regression, ≥4 points else `None`)
+  and the what-if recomputes; `run_pipeline` receives them as `computed_numbers` to **narrate**, never
+  calculate (WHAT-IF RULE + FORECAST RULE quote method/assumption verbatim). `GROQ_MODEL` interim = `llama-3.3-70b-versatile`; retires **2026-08-16** → pick a durable model in B5.
 - **Trust traceability (B4, `specs/10` §2):** `PipelineOutput.sql_query` + `data_preview` carry the exact SQL
   and raw row slice end-to-end (filled by the route, never the LLM); `QueryLogs` written on every `/chat`;
   `POST /chat/flag` sets `QueryLogs.flagged` (own-only).
@@ -522,16 +533,20 @@ to net-new product scope (payments, document-QA retrieval, multi-LLM cascade). N
 
 ## Tests / verification (this run)
 
-**Backend** — `python3 -m pytest` run from `Backend/` on 2026-09-11 — **658 passed**
-(Python 3.12; `conftest.py` supplies dummy env vars so no `.env` is needed; async scenarios run
-via `asyncio.run`). Includes reliability hardening Phases 1–3 plus answer token streaming (+9
-streaming tests) on top of the 638 baseline (which itself needed one
-`_DuckDuckGoParser._pending` → `_pending_pair` green-fix for a `HTMLParser` internal collision
-on Python 3.12).
+**Backend** — `python3 -m pytest` run from `Backend/` on 2026-09-13 — **694 passed, 1 skipped**
+(`.venv/bin/python`; `conftest.py` supplies dummy env vars so no `.env` is needed; async scenarios
+run via `asyncio.run`). +36 new since the 658 baseline (Part A continuity 5, Part D forecasting 7,
+Part C document QA 17 incl. parser/embeddings/vector-store/pdf, chat/files e2e 4, plan_tools
+compat untouched); 7 pre-existing `rewrite_search_queries` test doubles widened for the new
+optional `prior_query` kwarg (no production change); the 1 skip is the `TEST_POSTGRES_URL`-gated
+pgvector integration test (needs a real Postgres with `CREATE EXTENSION vector`).
 
-**Frontend** — `npm test -- --run` run from `Frontend/` on 2026-09-12 — **21 test files,
-139 tests, all passed** (Vitest + RTL, jsdom); `npm run build` ✅, `npm run lint` ✅.
+**Frontend** — `npm test -- --run` run from `Frontend/` on 2026-09-13 — **24 test files,
+149 tests, all passed** (Vitest + RTL, jsdom); `npm run build` ✅, `npm run lint` ✅.
++7 new since the 142 baseline (chat-store per-conversation 3, Composer `thread_id` 1,
+persist stamp 1, rail-restore + your-documents badge 2); 2 Composer call-shape assertions
+extended for `thread_id`.
 
 ## Last updated
 
-2026-09-12 (Whole-app light/dark mode with persisted toggle complete; live counts backend 658 / frontend 139).
+2026-09-13 (Continuity + document QA + forecasting Parts A–D complete; live counts backend 694+1 skipped / frontend 149).

@@ -552,3 +552,92 @@ def compute_freeform_scenario(query: str) -> Optional[dict]:
         )
     return result
 
+
+# ---------------------------------------------------------------------------
+# specs/11 §3.2 v1 - forecasting. Same discipline as the what-if scenarios
+# above: deterministic computation in code (linear-regression extrapolation
+# over the user's own already-fetched time-series rows); the LLM only
+# narrates the precomputed result and must quote its stated assumptions
+# verbatim (see the SYSTEM_PROMPT's FORECAST RULE). A simple method that's
+# honestly labeled as simple (specs/11 §3.2).
+# ---------------------------------------------------------------------------
+
+def is_forecast_query(text: str) -> bool:
+    """Deterministic detector, same style as is_what_if_query — a regex over
+    forward-looking phrasing ('forecast', 'project', 'predict', 'next
+    month/quarter/year', 'going forward')."""
+    import re
+    return bool(re.search(
+        r"\b(forecast|project(?:ion|ed)?|predict\w*|next (week|month|quarter|year)|going forward)\b",
+        text or "", re.IGNORECASE,
+    ))
+
+
+def infer_forecast_columns(rows: list[dict]) -> tuple:
+    """Pick the (date_col, value_col) pair a forecast can run over.
+
+    Reuses the same date detection the stats frame already uses
+    (`_to_frame` coerces date-like columns to datetime64): the first
+    datetime column is the date axis. The value axis is the first numeric
+    column — but when several numeric columns exist the intent is ambiguous,
+    so skip forecasting rather than guess (ask, don't guess).
+    Returns (None, None) whenever no unambiguous pair exists.
+    """
+    if not rows:
+        return None, None
+    try:
+        df = _to_frame(rows)
+    except Exception:
+        return None, None
+    date_cols = [
+        c for c in df.columns if pd.api.types.is_datetime64_any_dtype(df[c])
+    ]
+    numeric = [c for c in df.columns if _is_numeric(df[c]) and c.lower() != "id"]
+    if not date_cols or len(numeric) != 1:
+        return None, None
+    return date_cols[0], numeric[0]
+
+
+def compute_forecast(rows: list[dict], date_col: str, value_col: str, periods_ahead: int = 1) -> Optional[dict]:
+    """Linear-regression extrapolation over (date_col, value_col) pairs from
+    already-fetched rows. Returns None (not a guess) when there isn't enough
+    history to be meaningful (specs/11 §5: 'the pipeline should recognize
+    insufficient data and say so, not force an answer') — the caller treats
+    None exactly like apply_what_if's None: no forecast visual, no forecast
+    claim in the narration.
+
+    Method is linear regression on the numeric row index (not a real
+    time-aware model) — honestly labeled as such in the returned dict, which
+    the SYSTEM_PROMPT's FORECAST RULE requires the model to state verbatim.
+    """
+    import numpy as np
+
+    series = [
+        (row.get(date_col), row.get(value_col))
+        for row in rows
+        if row.get(date_col) is not None and row.get(value_col) is not None
+    ]
+    series = [(d, v) for d, v in series if isinstance(v, (int, float))]
+    if len(series) < 4:
+        return None
+    series.sort(key=lambda pair: str(pair[0]))
+    values = np.array([float(v) for _, v in series])
+    x = np.arange(len(values))
+    slope, intercept = np.polyfit(x, values, 1)
+    next_x = len(values) + periods_ahead - 1
+    projected = float(slope * next_x + intercept)
+    residuals = values - (slope * x + intercept)
+    std_err = float(np.std(residuals)) if len(residuals) > 1 else 0.0
+    return {
+        "method": "linear regression over the available history (not a seasonal model)",
+        "historical_periods": len(values),
+        "projected_value": round(projected, 2),
+        "confidence_range": [round(projected - std_err, 2), round(projected + std_err, 2)],
+        "last_actual_value": round(float(values[-1]), 2),
+        "last_actual_label": str(series[-1][0]),
+        "assumption": (
+            "Assumes the recent trend continues unchanged — does not account for "
+            "seasonality, one-off events, or external factors."
+        ),
+    }
+

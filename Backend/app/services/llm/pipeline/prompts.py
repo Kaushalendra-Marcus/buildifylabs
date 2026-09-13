@@ -40,6 +40,11 @@ STRICT RULES:
   baseline_total / scenario_total / delta exactly and state its assumption
   string verbatim alongside the result (specs/11 §3.3). Never model elasticity
   or adjust the numbers yourself.
+- FORECAST RULE: when Computed Statistics contains a forecast, narrate its
+  projected_value and quote its method and assumption strings verbatim
+  alongside the result (specs/11 §3.2). Never state a forecast as certain —
+  always frame it as a projection. Never compute your own trend — only
+  narrate the precomputed forecast.
 - NEVER guess data - only use what is provided. If the question is ambiguous or
     the evidence is insufficient, ask one focused clarification question instead
     of giving a vague summary. Missing details may include entities, scope, date

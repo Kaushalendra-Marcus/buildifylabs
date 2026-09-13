@@ -7,7 +7,7 @@
 import type { PipelineOutput } from '../../../types/chat';
 
 export interface DerivedSource {
-  kind: 'your-data' | 'live-web';
+  kind: 'your-data' | 'your-documents' | 'live-web';
   title: string;
   subtitle: string;
   detail: string | null;
@@ -56,12 +56,13 @@ export function deriveSources(output: PipelineOutput): DerivedSource[] {
     if (!Number.isNaN(parsed.getTime())) {
       subtitle = `Retrieved ${parsed.toLocaleString()}`;
     }
+    const isDocument = web.provider === 'your_documents';
     sources.push({
-      kind: 'live-web',
+      kind: isDocument ? 'your-documents' : 'live-web',
       title: web.title,
       subtitle,
       detail: null,
-      url: web.url,
+      url: web.url || null,
     });
   }
 

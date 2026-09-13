@@ -162,6 +162,7 @@ async def rewrite_search_queries(
     user_query: str,
     prior_clarification: Optional[str] = None,
     company_name: Optional[str] = None,
+    prior_query: Optional[str] = None,
 ) -> dict:
     """Frame 1-3 search queries from a chat message. Never raises."""
     context_lines = []
@@ -169,6 +170,12 @@ async def rewrite_search_queries(
         context_lines.append(f"Company context: {company_name}")
     if prior_clarification:
         context_lines.append(f"Previously asked: {prior_clarification}")
+    if prior_query:
+        context_lines.append(
+            f"Previous question in this conversation (context only, resolve "
+            f"follow-up references like 'that'/'it'/'last one' against it — "
+            f"ignore it completely if this question is self-contained): {prior_query}"
+        )
     context = "\n".join(context_lines) or "none"
     prompt = (
         f"Chat message:\n{user_query}\n\nContext:\n{context}\n\n"

@@ -199,7 +199,25 @@ class TestHappyPath:
             set_active(_FREE_USER)
         assert other.status_code == 404
 
-    def test_uploaded_xlsx_fails_with_stored_reason(self, client):
+    def test_uploaded_xlsx_parses_like_csv(self, client):
+        pytest.importorskip("openpyxl")
+        import io as _io
+
+        import pandas as pd
+
+        buf = _io.BytesIO()
+        pd.DataFrame({"a": [1, 2], "b": [3, 4]}).to_excel(buf, index=False)
+        resp = do_upload(
+            client,
+            "data.xlsx",
+            buf.getvalue(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["status"] == "completed"
+
+    def test_uploaded_garbage_xlsx_fails_with_stored_reason(self, client):
         resp = do_upload(
             client,
             "data.xlsx",
@@ -209,7 +227,7 @@ class TestHappyPath:
         assert resp.status_code == 202
         body = resp.json()
         assert body["status"] == "failed"
-        assert "not supported yet" in body["error"]
+        assert body["error"]
 
     def test_uploaded_pdf_fails_with_stored_reason(self, client):
         resp = do_upload(client, "report.pdf", b"%PDF-1.4fake", "application/pdf")

@@ -38,14 +38,23 @@ starting; don't fix from this summary alone.
 - **[Closed, B3] Storage backend decided** — local disk for dev (`app/services/data/storage.py`,
   `UPLOAD_DIR`), object store (S3) for prod; the module is the swap seam.
 - **[Closed, B3]** Empty (0-byte) uploads are rejected explicitly with a `400` in the validator.
-- **[Graceful, B3]** `.xlsx` / `.pdf` uploads pass validation (per FR3) but fail ingestion with a
-  stored reason (`status="failed"`, `error` set) — parsing beyond CSV is deferred. The raw file is
-  still persisted.
+- **[Closed, Part C]** `.xlsx` uploads parse into the per-user SQL table exactly like CSV
+  (`parser.parse_xlsx_bytes` → same `clean_dataframe` + `upsert_user_table`; `openpyxl`).
+- **[Closed, Part C]** `.pdf` uploads extract text (`pdf_parser.extract_pdf_text`/`chunk_text`),
+  embed (HF Inference API, `embeddings.py`) and store in `document_chunks` (pgvector on the
+  existing Neon Postgres — Pinecone superseded, no second vendor/key). Retrieved per query by
+  cosine similarity scoped to `user_id`, merged into the answer inside a reserved sub-budget
+  (`MAX_DOCUMENT_CONTEXT_CHARS`) ranked ahead of web evidence, tagged `your_documents`
+  end-to-end (prompt tag + frontend "your documents" badge). `ENABLE_DOCUMENT_QA=false`
+  degrades cleanly (ingest still succeeds; retrieval skipped). Scanned/image-only PDFs fail
+  honestly (OCR out of scope); single-PDF delete/replace and cross-document re-ranking are
+  still open (no `DELETE /files/{id}` for any type — pre-existing gap).
 - **[Accepted]** Size check loads the whole file into memory before checking size — fine at today's
   ≤10MB cap, won't scale if caps are raised without moving to streaming checks.
-- **[B3 contract note]** A fresh upload **replaces** the user's per-user data table (one active data
-  file per user, per `specs/04` §4). `FileUpload.pinecone_namespace` temporarily holds the per-user
-  table name as the storage ref until Pinecone ships.
+- **[B3 contract note]** A fresh CSV/XLSX upload **replaces** the user's per-user data table (one active data
+  file per user, per `specs/04` §4). PDFs accumulate in `document_chunks` instead (append, don't
+  replace). `FileUpload.pinecone_namespace` holds the per-user table name (CSV/XLSX) or a
+  `vector:<upload_id>` ref (PDF).
 
 ## NL→SQL (`specs/05-query-sql-safety.md`)
 
@@ -85,6 +94,10 @@ starting; don't fix from this summary alone.
   key) — follow-ups about a cited article without a pasted URL still use snippets.
 - What-if v1 (`stats.py::apply_what_if`) is price-scenarios only with the quantity-unaffected
   assumption; no elasticity, no cost/discount-column modeling beyond effective-price inversion.
+- Forecasting v1 (`stats.py::compute_forecast`, specs/11 §3.2) is linear-regression extrapolation
+  over the executed rows (single numeric column only, ≥4 points, else None — no forecast, not a
+  guess), narrated under the FORECAST RULE with an Actual/Projected graph visual. No
+  seasonal/ARIMA modeling; web/market-history series are out of scope (own uploaded data only).
 - Judge-directed routing (`plan_tools` → `tools_needed`) is advisory: one extra fast-model call
   per live-web request (overlapped with SQL generation, not serial), and any planner failure or
   empty/unknown plan degrades to the deterministic intent predicates. The regex predicates are

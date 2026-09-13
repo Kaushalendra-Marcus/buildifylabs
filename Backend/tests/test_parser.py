@@ -10,6 +10,8 @@ matching the existing suite's pattern.
 """
 
 import asyncio
+import io
+import uuid
 
 import pytest
 from pandas.api.types import is_datetime64_any_dtype
@@ -98,7 +100,9 @@ class TestIngest:
             try:
                 maker = async_sessionmaker(engine, expire_on_commit=False)
                 async with maker() as session:
-                    return await ingest_file(session, USER_ID, filename, content)
+                    return await ingest_file(
+                        session, USER_ID, uuid.uuid4(), filename, content
+                    )
             finally:
                 await engine.dispose()
 
@@ -115,7 +119,37 @@ class TestIngest:
             try:
                 maker = async_sessionmaker(engine, expire_on_commit=False)
                 async with maker() as session:
-                    table = await ingest_file(session, USER_ID, "sales.csv", csv)
+                    table = await ingest_file(
+                        session, USER_ID, uuid.uuid4(), "sales.csv", csv
+                    )
+                    assert table == USER_TABLE
+                    result = await session.execute(
+                        text(f'SELECT revenue FROM "{table}" ORDER BY revenue')
+                    )
+                    assert [r["revenue"] for r in result.mappings()] == [800, 1200]
+            finally:
+                await engine.dispose()
+
+        run(verify())
+
+    def test_xlsx_lands_like_csv(self):
+        pytest.importorskip("openpyxl")
+        import pandas as pd
+
+        buf = io.BytesIO()
+        pd.DataFrame(
+            {"date": ["2024-01-01", "2024-01-02"], "revenue": [1200, 800]}
+        ).to_excel(buf, index=False)
+        content = buf.getvalue()
+
+        async def verify():
+            engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+            try:
+                maker = async_sessionmaker(engine, expire_on_commit=False)
+                async with maker() as session:
+                    table = await ingest_file(
+                        session, USER_ID, uuid.uuid4(), "sales.xlsx", content
+                    )
                     assert table == USER_TABLE
                     result = await session.execute(
                         text(f'SELECT revenue FROM "{table}" ORDER BY revenue')
@@ -133,10 +167,10 @@ class TestIngest:
                 maker = async_sessionmaker(engine, expire_on_commit=False)
                 async with maker() as session:
                     await ingest_file(
-                        session, USER_ID, "first.csv", b"a,b\n1,2\n3,4\n"
+                        session, USER_ID, uuid.uuid4(), "first.csv", b"a,b\n1,2\n3,4\n"
                     )
                     await ingest_file(
-                        session, USER_ID, "second.csv", b"a,b\n9,9\n"
+                        session, USER_ID, uuid.uuid4(), "second.csv", b"a,b\n9,9\n"
                     )
                     result = await session.execute(
                         text(f"SELECT COUNT(*) AS n FROM {USER_TABLE}")
@@ -150,7 +184,3 @@ class TestIngest:
     def test_header_only_csv_raises_no_data_rows(self):
         with pytest.raises(ValueError, match="no data rows"):
             self._ingest(b"a,b\n")
-
-    def test_xlsx_upload_raises_unsupported_reason(self):
-        with pytest.raises(ValueError, match="not supported yet"):
-            self._ingest(b"PK\x03\x04\x00", filename="data.xlsx")

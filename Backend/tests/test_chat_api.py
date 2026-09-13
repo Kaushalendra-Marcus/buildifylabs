@@ -695,3 +695,195 @@ class TestSqlSelfCorrection:
         assert resp.status_code == 200
         assert resp.json()["answer"]
         assert sql_calls["n"] == 1
+
+
+class TestConversationContinuity:
+    """Part A: a bare follow-up in the same thread_id reaches SQL
+    generation with the previous question as labeled context."""
+    def test_followup_sql_prompt_contains_prior_question(
+        self, client, seed, monkeypatch
+    ):
+        sql_prompts = []
+
+        async def sql_fake(prompt, system_prompt, temperature=0.3, max_tokens=512, **kwargs):
+            sql_prompts.append(prompt)
+            return {"content": HAPPY_SQL, "source": "groq", "usage": None}
+
+        monkeypatch.setattr("app.routes.chat.generate_response", sql_fake)
+        monkeypatch.setattr(
+            "app.services.llm.langchain_pipeline.generate_response",
+            _pipeline_fake(PIPELINE_JSON),
+        )
+        first = client.post(
+            "/chat",
+            json={
+                "query": "What was revenue by region?",
+                "source_scope": "own_data",
+                "thread_id": "thread-a",
+            },
+        )
+        assert first.status_code == 200
+        second = client.post(
+            "/chat",
+            json={
+                "query": "what about last month",
+                "source_scope": "own_data",
+                "thread_id": "thread-a",
+            },
+        )
+        assert second.status_code == 200
+        assert len(sql_prompts) == 2
+        assert "Previous question in this conversation" not in sql_prompts[0]
+        assert "Previous question in this conversation" in sql_prompts[1]
+        assert "What was revenue by region?" in sql_prompts[1]
+
+
+class TestForecasting:
+    """Part D (specs/11 §3.2): a forecast-phrased question over the user's
+    own time-series data yields an Actual/Projected graph visual plus a
+    narration framed as a projection (method + confidence range)."""
+
+    def test_forecast_question_produces_actual_projected_graph(
+        self, client, seed, monkeypatch
+    ):
+        async def add_rows():
+            async with seed() as s:
+                await s.execute(
+                    text(
+                        f'INSERT INTO "{USER_TABLE}" (id, created_at, revenue, region) VALUES '
+                        '(10, "2024-02-01", 300, "east"), '
+                        '(11, "2024-03-01", 350, "west"), '
+                        '(12, "2024-04-01", 400, "east"), '
+                        '(13, "2024-05-01", 450, "west")'
+                    )
+                )
+                await s.commit()
+
+        asyncio.run(add_rows())
+
+        monkeypatch.setattr(
+            "app.routes.chat.generate_response", _sql_fake(HAPPY_SQL)
+        )
+        monkeypatch.setattr(
+            "app.services.llm.langchain_pipeline.generate_response",
+            _pipeline_fake(
+                {
+                    **PIPELINE_JSON,
+                    "answer": (
+                        "A projection (not a fact): next month's revenue is "
+                        "projected at 500.0 (linear regression over the "
+                        "available history, confidence range 490.0-510.0). "
+                        "Assumes the recent trend continues unchanged."
+                    ),
+                    "visuals": [],
+                }
+            ),
+        )
+        resp = client.post(
+            "/chat",
+            json={
+                "query": "forecast next month's revenue",
+                "source_scope": "own_data",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "projection" in body["answer"].lower()
+        graphs = [v for v in body["visuals"] if v["visual_type"] == "graph"]
+        assert graphs, "expected an Actual/Projected forecast graph"
+        names = [d["name"] for d in graphs[0]["props"]["datasets"]]
+        assert "Actual" in names and "Projected" in names
+
+
+class TestDocumentEvidence:
+    """Part C: uploaded-PDF evidence merges into the answer with a reserved
+    sub-budget, tagged as your_documents (never crowded out by web)."""
+
+    TEST_ID_DOCS = uuid.UUID("eeeeeeee-0000-1111-2222-333344445555")
+
+    def _mock_docs(self, monkeypatch):
+        async def fake_docs(db, user_id, query_text):
+            return (
+                ["Annual revenue was five million, per the report."],
+                [
+                    {
+                        "title": "report.pdf",
+                        "url": "",
+                        "provider": "your_documents",
+                        "retrieved_at": "2026-09-13T00:00:00+00:00",
+                    }
+                ],
+            )
+
+        monkeypatch.setattr(
+            "app.services.data.vector_store.retrieve_document_evidence", fake_docs
+        )
+
+    def test_document_sources_merge_ahead_of_web(self, client, seed, monkeypatch):
+        mock_llms(monkeypatch)
+        self._mock_docs(monkeypatch)
+        resp = client.post(
+            "/chat",
+            json={"query": "what was annual revenue?", "source_scope": "own_data"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["web_sources"], "expected merged document sources"
+        assert body["web_sources"][0]["provider"] == "your_documents"
+        assert body["web_sources"][0]["title"] == "report.pdf"
+
+    def test_pdf_only_user_skips_sql_and_answers_from_documents(
+        self, client, seed, monkeypatch
+    ):
+        async def add_docs_user():
+            async with seed() as s:
+                s.add(
+                    User(
+                        id=self.TEST_ID_DOCS,
+                        email="docs@example.com",
+                        auth_provider="email",
+                        plan="free",
+                        is_active=True,
+                        is_verified=True,
+                    )
+                )
+                s.add(
+                    FileUpload(
+                        id=uuid.uuid4(),
+                        user_id=self.TEST_ID_DOCS,
+                        file_name="report.pdf",
+                        file_type="application/pdf",
+                        file_size=10,
+                        status="completed",
+                        pinecone_namespace="vector:fake",
+                    )
+                )
+                await s.commit()
+
+        asyncio.run(add_docs_user())
+
+        sql_calls = {"n": 0}
+
+        async def sql_fake(prompt, system_prompt, temperature=0.3, max_tokens=512, **kwargs):
+            sql_calls["n"] += 1
+            return {"content": HAPPY_SQL, "source": "groq", "usage": None}
+
+        monkeypatch.setattr("app.routes.chat.generate_response", sql_fake)
+        monkeypatch.setattr(
+            "app.services.llm.langchain_pipeline.generate_response",
+            _pipeline_fake(PIPELINE_JSON),
+        )
+        self._mock_docs(monkeypatch)
+        set_active(self.TEST_ID_DOCS)
+        try:
+            resp = client.post(
+                "/chat",
+                json={"query": "summarize my report", "source_scope": "own_data"},
+            )
+        finally:
+            set_active(TEST_ID)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["answer"]
+        assert body["sql_query"] is None
+        assert sql_calls["n"] == 0

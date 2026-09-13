@@ -1,13 +1,16 @@
 # Spec 04 — File Upload Validation & Ingestion Pipeline
 
-**Status:** ⚠️ Partially implemented — validation, the `POST /files/upload` route, local-disk
-storage (gap #4), and defensive **CSV** parsing → per-user data table are complete. Still missing:
-PDF/XLSX parsing (deferred), chunking, and Pinecone embedding (deferred — the parsed per-user table
-is queried directly).
+**Status:** ✅ Implemented — validation, the `POST /files/upload` route, local-disk
+storage (gap #4), defensive **CSV/XLSX** parsing → per-user data table, and **PDF** text
+extraction → chunking → HF embeddings → **pgvector** retrieval (decision: pgvector on the
+existing Neon Postgres, not Pinecone) are complete.
 **Source files (existing):** `app/middlewares/file_validator.py`, `app/db/models/file_upload.py`,
 `app/schemas/file_upload.py`, `app/routes/files.py` (new, B3),
-`app/services/data/storage.py` (new, B3), `app/services/data/parser.py` (new, B3)
-**Source files (missing):** Pinecone integration (chunking + embeddings)
+`app/services/data/storage.py` (new, B3), `app/services/data/parser.py` (new, B3;
+XLSX + PDF branches, Part C), `app/services/data/pdf_parser.py`,
+`app/services/data/embeddings.py`, `app/services/data/vector_store.py`,
+`app/db/models/document_chunk.py` (new, Part C; migration `c1code0000_document_chunks.py`)
+**Source files (missing):** none — Pinecone is superseded by pgvector (see §4).
 
 ---
 
@@ -26,9 +29,10 @@ cleaned, and made queryable — none of the post-validation steps exist yet.
   `content_type` (the extension's expected MIME must match; a mismatched pair is `415`).
 - **FR4:** On an accepted upload: create a `FileUpload` row (`status = "processing"`), persist the
   raw file, parse + clean it, then set `status = "completed"` (or `"failed"` with a stored reason).
-  *Implemented subset (B3):* CSV parses into a **per-user data table** the SQL layer queries
-  directly. Chunking + embedding + Pinecone upsert are **deferred** (the per-user table is the
-  queryable storage ref for now).
+  *Implemented (B3 + Part C):* CSV/XLSX parse into a **per-user data table** the SQL layer queries
+  directly. PDFs extract text (`pdf_parser`) → chunk → embed (HF Inference API) → upsert into
+  `document_chunks` (pgvector), retrieved per query by cosine similarity scoped to `user_id`.
+  Multiple PDFs accumulate per user (append); CSV/XLSX keep one-active-file replace semantics.
 - **FR5:** List a user's uploaded files with their current status.
 
 ## 3. API Contracts (proposed)
@@ -62,15 +66,17 @@ cleaned, and made queryable — none of the post-validation steps exist yet.
 - **Storage backend (gap #4, resolved in B3):** **local disk** for dev (`UPLOAD_DIR` config,
   `app/services/data/storage.py`), object store (S3) for prod — storage.py is the swap seam.
 - Parsed data lands in a **per-user data table** (`user_data_table_name`) in the same DB; a new
-  upload **replaces** the user's data table (one user, one active data file — no multi-file
-  merge/join across uploads yet). `FileUpload.pinecone_namespace` temporarily holds the per-user
-  table name as the "storage ref" until Pinecone ships.
+  CSV/XLSX upload **replaces** the user's data table (one user, one active data file — no multi-file
+  merge/join across uploads yet). PDFs accumulate in `document_chunks` instead (append, don't
+  replace). `FileUpload.pinecone_namespace` holds the per-user table name for CSV/XLSX, or a
+  `vector:<upload_id>` ref for PDFs.
 
 ## 5. Edge Cases & Error Handling
 
 1. **Upload passes validation but downstream processing fails** (bad parse, embedding API error):
    `status` transitions to `"failed"` with a stored reason (`FileUpload.error`), never stuck on
-   `"processing"`. **Implemented** — CSV parse/ingest errors set `failed` + trimmed reason.
+   `"processing"`. **Implemented** — CSV/XLSX parse/ingest errors and PDF extraction/embedding
+   errors set `failed` + trimmed reason.
 2. **Malformed/corrupt CSV** (wrong encoding, ragged rows, mixed date formats): a defensive
    `pandas`-based cleaning pass (encoding fallback, column normalization, nulls, type/date/currency
    coercion, row dedupe, ragged-row tolerance) runs before the table insert. **Implemented**.
@@ -90,4 +96,9 @@ cleaned, and made queryable — none of the post-validation steps exist yet.
       check catches it).
 - [x] A successfully processed CSV is queryable by the AI pipeline via its **per-user data table**
       (Pinecone namespace deferred — target: TBD once the pipeline is built).
+- [x] A successfully processed XLSX is queryable exactly like a CSV (same clean + per-user table
+      path; `openpyxl` read support).
+- [x] A successfully processed PDF is answerable via pgvector chunk retrieval (reserved
+      sub-budget, `your_documents` citation tag; scanned/image-only PDFs fail honestly with a
+      clear reason — OCR out of scope).
 - [x] An empty (0-byte) file is explicitly rejected, not silently accepted.

@@ -301,7 +301,7 @@ class TestExtract:
 
 class TestSearchWebMerge:
     def _rewrite_fake(self, queries, entities):
-        async def fake(query, prior_clarification=None, company_name=None):
+        async def fake(query, prior_clarification=None, company_name=None, prior_query=None):
             return {
                 "queries": queries,
                 "entities": entities,

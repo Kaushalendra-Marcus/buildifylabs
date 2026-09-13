@@ -20,6 +20,12 @@ python-multipart
 sqlglot
 # B3: defensive CSV cleaning + parsing before landing data in a per-user table (specs/04)
 pandas
+# Part C: XLSX read support for pandas (tabular ingestion, same path as CSV)
+openpyxl
+# Part C: PDF text extraction (lightweight, no native deps)
+pypdf
+# Part C: pgvector Python/SQLAlchemy integration
+pgvector
 # Live-web evidence cache (specs/07 FR5): Redis when REDIS_URL is set,
 # transparent in-memory fallback otherwise. Optional at runtime (lazy import).
 redis

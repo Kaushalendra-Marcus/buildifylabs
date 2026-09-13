@@ -731,8 +731,15 @@ def _visuals_from_rows(
     else:
         order = ["graph", "table", "metric"]
     ordered = [parts[kind] for kind in order if parts[kind] is not None]
+    # Forecast-aware branch (specs/11 §3.2): only fires when
+    # computed_numbers carries a precomputed forecast — the Actual/Projected
+    # graph leads, still capped like every other synthesis here.
+    forecast_visual = _forecast_graph_visual(rows, computed_numbers.get("forecast"))
+    visuals = [VisualOutput(**visual) for visual in ordered[:3]]
+    if forecast_visual is not None:
+        visuals = [forecast_visual, *[v for v in visuals if v.title != forecast_visual.title]][:3]
     # Validated VisualOutput objects (the field holds models, not dicts).
-    return [VisualOutput(**visual) for visual in ordered[:3]]
+    return visuals
 
 
 def _align_series(
@@ -1163,6 +1170,67 @@ def _margin_table_visual(financial_history: list, query: Optional[str] = None) -
     )
 
 
+def _forecast_graph_visual(
+    rows: Sequence[dict], forecast: Optional[dict]
+) -> Optional[VisualOutput]:
+    """Actual-vs-Projected line chart for a precomputed forecast (specs/11 §3.2).
+
+    Pure data-shaping over already-fetched rows + the deterministic
+    compute_forecast() result (never LLM arithmetic): "Actual" carries the
+    historical value-column values (absent for the future period) and
+    "Projected" carries absent values for every historical period except
+    the last real one — duplicated as the bridge point so the two lines
+    visually connect — followed by the projected value. Two separate named
+    datasets in the same line chart, so no GraphCard change is needed.
+    None (not a guess) whenever the forecast dict or the column inference
+    cannot support it.
+    """
+    if not isinstance(forecast, dict) or not forecast:
+        return None
+    try:
+        from app.services.data.stats import infer_forecast_columns
+    except Exception:
+        return None
+    try:
+        date_col, value_col = infer_forecast_columns(list(rows or []))
+    except Exception:
+        return None
+    if not date_col or not value_col:
+        return None
+    try:
+        projected = float(forecast.get("projected_value"))
+    except (TypeError, ValueError):
+        return None
+    pairs = [
+        (row.get(date_col), row.get(value_col))
+        for row in (rows or [])
+        if isinstance(row, dict)
+    ]
+    pairs = [
+        (d, v) for d, v in pairs
+        if d is not None and isinstance(v, (int, float))
+    ]
+    if len(pairs) < 4:
+        return None
+    pairs.sort(key=lambda pair: str(pair[0]))
+    labels = [str(d) for d, _ in pairs] + ["Projected"]
+    actual = [float(v) for _, v in pairs] + [None]
+    last_actual = float(pairs[-1][1])
+    projected_series = [None] * (len(pairs) - 1) + [last_actual, projected]
+    return VisualOutput(
+        visual_type="graph",
+        title=f"{value_col} forecast",
+        props={
+            "chart_type": "line",
+            "labels": labels,
+            "datasets": [
+                {"name": "Actual", "values": actual},
+                {"name": "Projected", "values": projected_series},
+            ],
+        },
+    )
+
+
 def _visual_intent(query: str) -> str:
     """Requested semantic intent: what_if | historical_comparison | comparison | rows | qualitative."""
     q = query or ""
@@ -1192,6 +1260,7 @@ __all__ = [
     "_figures_bar_visual",
     "_figures_table_visual",
     "_financial_history_table_visual",
+    "_forecast_graph_visual",
     "_fundamentals_comparison_visual",
     "_is_number",
     "_looks_like_date",

@@ -198,7 +198,7 @@ class TestConcurrentProvidersAndCache:
         async def fake_ddg(client, query_item, settings):
             return [("ddg result", "https://d.example", "DuckDuckGo", None, None)]
 
-        async def fake_rewrite(query, prior_clarification=None, company_name=None):
+        async def fake_rewrite(query, prior_clarification=None, company_name=None, prior_query=None):
             return {
                 "queries": ["latest tesla news"],
                 "entities": [],
@@ -234,7 +234,7 @@ class TestConcurrentProvidersAndCache:
             calls["n"] += 1
             return [("ddg result", "https://d.example", "DuckDuckGo", None, None)]
 
-        async def fake_rewrite(query, prior_clarification=None, company_name=None):
+        async def fake_rewrite(query, prior_clarification=None, company_name=None, prior_query=None):
             return {"queries": ["same question"], "entities": [], "time_sensitive": False}
 
         monkeypatch.setattr(web_search_mod, "_tavily_search", fake_tavily)
@@ -442,7 +442,7 @@ class TestEntityFallback:
     def test_market_data_survives_rewrite_outage(self, monkeypatch):
         cache_mod._reset_cache_state()
 
-        async def fake_rewrite(query, prior_clarification=None, company_name=None):
+        async def fake_rewrite(query, prior_clarification=None, company_name=None, prior_query=None):
             return {"queries": [query], "entities": [], "time_sensitive": False}
 
         async def fake_resolve(client, entity):
@@ -792,7 +792,7 @@ class TestRecommendationEvidence:
         async def fake_ddg(client, query_item, settings):
             return []
 
-        async def fake_rewrite(query, prior_clarification=None, company_name=None):
+        async def fake_rewrite(query, prior_clarification=None, company_name=None, prior_query=None):
             return {"queries": ["best books query"], "entities": [], "time_sensitive": False}
 
         extract_calls = []
@@ -829,7 +829,7 @@ class TestRecommendationEvidence:
         async def fake_ddg(client, query_item, settings):
             return []
 
-        async def fake_rewrite(query, prior_clarification=None, company_name=None):
+        async def fake_rewrite(query, prior_clarification=None, company_name=None, prior_query=None):
             return {"queries": ["revenue question"], "entities": [], "time_sensitive": False}
 
         async def fake_extract(client, url, query, settings):  # pragma: no cover

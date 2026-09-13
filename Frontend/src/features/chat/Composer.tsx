@@ -87,7 +87,11 @@ export function Composer() {
         }, 1400);
       }
       const output = await sendQuery(
-        { query: text, source_scope: scope },
+        {
+          query: text,
+          source_scope: scope,
+          thread_id: useChatStore.getState().activeConversationId ?? undefined,
+        },
         (stage) => useChatStore.getState().setPendingStage(stage),
         (delta) => useChatStore.getState().appendStreamingText(delta),
       );

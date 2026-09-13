@@ -117,11 +117,15 @@ def build_prompt(
         dated_lines = []
         for index, snippet in enumerate(news_context, start=1):
             date = ""
+            tag = ""
             if index - 1 < len(web_sources):
-                raw_date = (web_sources[index - 1] or {}).get("published_date")
+                source = web_sources[index - 1] or {}
+                raw_date = source.get("published_date")
                 if raw_date:
                     date = f", {str(raw_date)[:10]}"
-            dated_lines.append(f"[{index}{date}] {snippet}")
+                if source.get("provider") == "your_documents":
+                    tag = ", from your uploaded document"
+            dated_lines.append(f"[{index}{date}{tag}] {snippet}")
         news_section = "\n".join(dated_lines)
     elif source_scope == "own_data":
         news_section = "User asked for their own data only - no live web context."
@@ -337,7 +341,7 @@ Price/Financial History (multi-year validated evidence - use for historical asks
 Fundamentals (CURRENT snapshot values - quote these, never re-derive, never use for historical growth):
 {fundamentals_section}
 
-Web Search Results:
+Retrieved Evidence (web search and/or your uploaded documents — each item's source is tagged inline):
 {news_section}
 
 {forbid_section}

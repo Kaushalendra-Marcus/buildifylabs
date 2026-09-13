@@ -104,6 +104,32 @@ describe('Evidence stack — sources, citations, process', () => {
     expect(screen.getByText('Processing')).toBeInTheDocument()
     expect(screen.getByText('running..')).toBeInTheDocument()
   })
+
+  it("labels your_documents sources as your documents, not live web", async () => {
+    const user = userEvent.setup()
+    useChatStore.getState().addAssistantMessage(
+      makeOutput({
+        sql_query: null,
+        data_preview: null,
+        web_sources: [
+          {
+            title: 'Q3 report.pdf',
+            url: '',
+            provider: 'your_documents',
+            retrieved_at: new Date('2026-09-01T10:00:00Z').toISOString(),
+          },
+        ],
+      }),
+    )
+    render(<MessageStream />)
+
+    const toggle = screen.getByRole('button', { name: /1 source/ })
+    expect(toggle).toHaveTextContent('1 your documents')
+    expect(toggle).not.toHaveTextContent('live web')
+
+    await user.click(toggle)
+    expect(screen.getByText('Q3 report.pdf')).toBeInTheDocument()
+  })
 })
 
 describe('HistoryRail — grouped threads', () => {
@@ -132,5 +158,22 @@ describe('HistoryRail — grouped threads', () => {
 
     await user.click(screen.getByRole('button', { name: 'Gross margin breakdown' }))
     expect(useChatStore.getState().activeConversationId).toBe('c-yesterday')
+  })
+
+  it('clicking a past conversation shows that conversation’s messages', async () => {
+    const user = userEvent.setup()
+    useChatStore.getState().addUserMessage('question in A')
+    const conversationA = useChatStore.getState().activeConversationId as string
+    useChatStore.getState().newChat()
+    useChatStore.getState().addUserMessage('question in B')
+
+    useChatStore.getState().selectConversation(conversationA)
+    render(<MessageStream />)
+
+    expect(screen.getByText('question in A')).toBeInTheDocument()
+    expect(screen.queryByText('question in B')).not.toBeInTheDocument()
+
+    await user.click(screen.getByText('question in A'))
+    expect(useChatStore.getState().activeConversationId).toBe(conversationA)
   })
 })

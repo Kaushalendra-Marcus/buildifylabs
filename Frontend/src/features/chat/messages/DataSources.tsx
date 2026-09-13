@@ -6,7 +6,7 @@
  * citations have a landing target (`#source-n`). Amber accent only.
  */
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Database, Globe } from 'lucide-react';
+import { ChevronDown, ChevronRight, Database, FileText, Globe } from 'lucide-react';
 import type { PipelineOutput } from '../../../types/chat';
 import { deriveSources } from './evidence';
 
@@ -16,7 +16,8 @@ export function DataSources({ output }: { output: PipelineOutput }) {
   if (sources.length === 0) return null;
 
   const yourDataCount = sources.filter((s) => s.kind === 'your-data').length;
-  const liveWebCount = sources.length - yourDataCount;
+  const yourDocumentsCount = sources.filter((s) => s.kind === 'your-documents').length;
+  const liveWebCount = sources.length - yourDataCount - yourDocumentsCount;
 
   return (
     <div className="evidence-block">
@@ -38,6 +39,11 @@ export function DataSources({ output }: { output: PipelineOutput }) {
         {yourDataCount > 0 && (
           <span className="evidence-badge evidence-badge--own">
             {yourDataCount} your data
+          </span>
+        )}
+        {yourDocumentsCount > 0 && (
+          <span className="evidence-badge evidence-badge--documents">
+            {yourDocumentsCount} your documents
           </span>
         )}
         {liveWebCount > 0 && (
@@ -62,6 +68,8 @@ export function DataSources({ output }: { output: PipelineOutput }) {
                 <p className="source-card__title">
                   {source.kind === 'your-data' ? (
                     <Database size={13} aria-hidden="true" />
+                  ) : source.kind === 'your-documents' ? (
+                    <FileText size={13} aria-hidden="true" />
                   ) : (
                     <Globe size={13} aria-hidden="true" />
                   )}

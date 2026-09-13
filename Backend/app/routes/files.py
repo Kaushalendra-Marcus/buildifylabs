@@ -46,7 +46,7 @@ async def upload_file(
     table_name = None
     try:
         storage.save_raw_file(user.id, upload_id, file.filename or "", contents)
-        table_name = await parser.ingest_file(db, user.id, file.filename, contents)
+        table_name = await parser.ingest_file(db, user.id, upload_id, file.filename, contents)
     except Exception as exc:
         # specs/04 edge case 1: never leave the row stuck on "processing".
         # Roll back whatever ingest did and record the failed status + reason.

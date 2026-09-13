@@ -165,6 +165,35 @@ class TestFanOutMerge:
         }
 
 
+class TestRewriteSearchQueriesPriorQuery:
+    def test_prior_query_reaches_the_prompt_only_when_passed(self, monkeypatch):
+        import json
+
+        seen = {}
+
+        async def fake(prompt, system_prompt, temperature=0.0, max_tokens=300, **kwargs):
+            seen["prompt"] = prompt
+            return {
+                "content": json.dumps({"queries": ["q1"]}),
+                "source": "groq",
+                "usage": None,
+            }
+
+        monkeypatch.setattr(rewriter_mod, "generate_response", fake)
+
+        framed = asyncio.run(
+            rewrite_search_queries("what about last month", prior_query="revenue by region?")
+        )
+        assert framed["queries"] == ["q1"]
+        assert "revenue by region?" in seen["prompt"]
+        assert "Previous question in this conversation" in seen["prompt"]
+
+        seen.clear()
+        framed = asyncio.run(rewrite_search_queries("what about last month"))
+        assert framed["queries"] == ["q1"]
+        assert "Previous question in this conversation" not in seen["prompt"]
+
+
 class TestWantsExternalContext:
     def test_positive_cases(self):
         assert wants_external_context("check the news on X") is True

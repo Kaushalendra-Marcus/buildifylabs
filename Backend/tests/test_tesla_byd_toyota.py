@@ -243,7 +243,7 @@ class TestToolRouting:
     def _install(self, monkeypatch, *, financial=None, snippets=None):
         calls: list = []
 
-        async def fake_rewrite(query, prior_clarification=None, company_name=None):
+        async def fake_rewrite(query, prior_clarification=None, company_name=None, prior_query=None):
             # Simulate the live LLM drop: only 2 of 3 entities framed.
             return {
                 "queries": ["Tesla BYD Toyota 3 year comparison"],

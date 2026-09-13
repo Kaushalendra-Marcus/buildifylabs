@@ -62,4 +62,12 @@ describe('chat thread persistence', () => {
     const raw = localStorage.getItem(STORAGE_KEY) as string
     expect(raw).not.toContain('partial prose')
   })
+
+  it('stamps messages with their conversation id', () => {
+    useChatStore.getState().addUserMessage('q?')
+    const activeId = useChatStore.getState().activeConversationId
+    expect(activeId).toBeTruthy()
+
+    expect(storedMessages().at(-1)).toMatchObject({ conversationId: activeId })
+  })
 })
