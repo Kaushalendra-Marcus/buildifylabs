@@ -89,11 +89,11 @@ describe('LandingPage', () => {
     expect(['light', 'dark']).toContain(useThemeStore.getState().theme)
   })
 
-  it('tabs the hero demo between three different example layouts', async () => {
+  it('tabs the hero demo between four different example layouts', async () => {
     const user = userEvent.setup()
     renderLanding()
     const tabs = screen.getAllByRole('tab')
-    expect(tabs).toHaveLength(3)
+    expect(tabs).toHaveLength(4)
     const panel = screen.getByRole('tabpanel')
 
     // Diagnose-a-drop: metric + bars + data table.
@@ -119,7 +119,45 @@ describe('LandingPage', () => {
     for (const label of ['$51.3k', '$58.2k', '$66.0k', 'Aug', 'Dec']) {
       expect(svgText).toContain(label)
     }
-    expect(svg?.querySelectorAll('circle').length).toBe(5)
+    expect(svg?.querySelectorAll('.bl-mock__spark-dot').length).toBe(5)
     expect(panel.querySelector('.bl-mock__table')).toBeNull()
+
+    // Channel mix: donut + bars + legend, no table.
+    await user.click(screen.getByRole('tab', { name: 'Channel mix' }))
+    expect(within(panel).getByText('Where do sales come from?')).toBeInTheDocument()
+    expect(within(panel).getByLabelText('Sales by channel')).toBeInTheDocument()
+    expect(panel.querySelector('.bl-mock__donut')).not.toBeNull()
+    expect(panel.querySelector('.bl-mock__table')).toBeNull()
+  })
+
+  it('shows numbers on hover across every demo visual', async () => {
+    const user = userEvent.setup()
+    renderLanding()
+    const panel = screen.getByRole('tabpanel')
+
+    // Bars carry week + revenue tips.
+    const barTips = [...panel.querySelectorAll('.bl-mock__bar-col[data-tip]')].map((el) =>
+      el.getAttribute('data-tip'),
+    )
+    expect(barTips).toContain('W3 · $59.1k')
+
+    // Share rows carry region + revenue + share tips.
+    await user.click(screen.getByRole('tab', { name: 'Region compare' }))
+    const shareTip = panel.querySelector('.bl-mock__share-row[data-tip]')
+    expect(shareTip?.getAttribute('data-tip')).toMatch(/East · \$51\.3k · 34%/)
+
+    // Forecast points carry month + value + regime titles.
+    await user.click(screen.getByRole('tab', { name: 'Forecast' }))
+    const pointTitles = [
+      ...panel.querySelectorAll('.bl-mock__point title'),
+    ].map((el) => el.textContent)
+    expect(pointTitles).toContain('Oct · $58.2k · projected')
+
+    // Donut segments carry channel + share + revenue titles.
+    await user.click(screen.getByRole('tab', { name: 'Channel mix' }))
+    const segTitles = [
+      ...panel.querySelectorAll('.bl-mock__donut-seg title'),
+    ].map((el) => el.textContent)
+    expect(segTitles).toContain('Online · 46% · $69.0k')
   })
 })

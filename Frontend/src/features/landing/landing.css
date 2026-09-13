@@ -400,6 +400,45 @@
   align-items: center;
 }
 
+/* Pinned scroll slides — the stage sticks for one viewport while the
+ * runway scrolls past (~40vh per slide, last slide landing just before
+ * release). Safe with `position: sticky`: `.bl-hero` above uses
+ * `overflow: clip`, which creates no scroll container. */
+.bl-demo-pin {
+  position: relative;
+  width: 100%;
+  height: 170vh;
+}
+
+.bl-demo-pin__stage {
+  position: sticky;
+  top: 0;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 84px 20px 32px;
+}
+
+.bl-demo-pin__stage > .bl-mock {
+  width: min(880px, 100%);
+  margin-top: 0;
+}
+
+/* No pinning on small screens (the stacked mock can outgrow the
+ * viewport) or for reduced motion: plain static block instead. */
+@media (max-width: 700px), (prefers-reduced-motion: reduce) {
+  .bl-demo-pin {
+    height: auto;
+  }
+  .bl-demo-pin__stage {
+    position: static;
+    min-height: 0;
+    padding: 48px 20px;
+  }
+}
+
 .bl-hero__title {
   margin: 0;
   max-width: 20ch;
@@ -943,6 +982,57 @@
   opacity: 0.9;
 }
 
+/* Hoverable bar columns — the number rides in a CSS tooltip. */
+.bl-mock__bar-col {
+  flex: 1;
+  align-self: stretch;
+  display: flex;
+  align-items: flex-end;
+}
+
+.bl-mock__bar-col > i {
+  width: 100%;
+}
+
+.bl-mock__bar-col:hover > i {
+  opacity: 1;
+  filter: brightness(1.12);
+}
+
+/* Number tooltips — one pattern for bars and share rows. */
+.bl-mock__bar-col[data-tip],
+.bl-mock__share-row[data-tip] {
+  position: relative;
+}
+
+.bl-mock__bar-col[data-tip]:hover::after,
+.bl-mock__share-row[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  white-space: nowrap;
+  pointer-events: none;
+  font-family: var(--bl-mono);
+  font-size: 12px;
+  color: var(--bl-bg);
+  background: var(--bl-text);
+  border-radius: 999px;
+  padding: 5px 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.bl-mock__share-row[data-tip]:hover::after {
+  bottom: auto;
+  top: calc(100% + 6px);
+}
+
+.bl-mock__share-row[data-tip]:hover .bl-mock__share-name {
+  color: var(--bl-amber);
+}
+
 .bl-mock__table {
   width: 100%;
   margin-top: 14px;
@@ -1070,7 +1160,7 @@
 .bl-mock__chart-card--top {
   width: 100%;
   max-width: 560px;
-  margin: 14px auto 0;
+  margin: 14px 0 0;
 }
 
 .bl-mock__insights--fill {
@@ -1130,6 +1220,22 @@
   fill: var(--bl-amber);
 }
 
+/* Forecast points — fat transparent hit area, native tooltip via
+ * `<title>`, dot grows on hover. */
+.bl-mock__point {
+  cursor: pointer;
+}
+
+.bl-mock__point .bl-mock__spark-dot {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.15s ease;
+}
+
+.bl-mock__point:hover .bl-mock__spark-dot {
+  transform: scale(1.5);
+}
+
 .bl-mock__spark-legend {
   display: flex;
   gap: 16px;
@@ -1153,6 +1259,116 @@
 .bl-mock__spark-legend--projected::before {
   border-top-color: var(--bl-muted);
   border-top-style: dashed;
+}
+
+/* Channel-mix demo — donut + bars + legend. */
+.bl-mock__donut-card {
+  flex: none;
+  width: 168px;
+  align-self: center;
+  background: var(--bl-panel-2);
+  border: 1px solid var(--bl-border);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.bl-mock__donut {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.bl-mock__donut text {
+  font-family: var(--bl-mono);
+}
+
+.bl-mock__donut-track {
+  stroke: var(--bl-track);
+  stroke-width: 18;
+}
+
+.bl-mock__donut-seg {
+  cursor: pointer;
+}
+
+.bl-mock__donut-seg circle {
+  stroke-width: 18;
+  transition:
+    stroke-width 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.bl-mock__donut-seg:hover circle {
+  stroke-width: 21;
+}
+
+.bl-mock__donut-seg--online circle {
+  stroke: var(--bl-amber);
+}
+
+.bl-mock__donut-seg--retail circle {
+  stroke: var(--bl-ember);
+}
+
+.bl-mock__donut-seg--wholesale circle {
+  stroke: var(--bl-muted);
+}
+
+.bl-mock__donut-total {
+  font-size: 10px;
+  font-weight: 700;
+  fill: var(--bl-text);
+}
+
+.bl-mock__donut-sub {
+  font-size: 7px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  fill: var(--bl-muted);
+}
+
+.bl-mock__legend {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.bl-mock__legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.bl-mock__legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.bl-mock__legend-swatch--online {
+  background: var(--bl-amber);
+}
+
+.bl-mock__legend-swatch--retail {
+  background: var(--bl-ember);
+}
+
+.bl-mock__legend-swatch--wholesale {
+  background: var(--bl-muted);
+}
+
+.bl-mock__legend-name {
+  font-weight: 600;
+  color: var(--bl-text);
+}
+
+.bl-mock__legend-detail {
+  color: var(--bl-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .bl-mock__insights {

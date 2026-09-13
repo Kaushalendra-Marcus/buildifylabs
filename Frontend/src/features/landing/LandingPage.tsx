@@ -18,7 +18,7 @@
  *  - `.bl-ask` — the glowing conic-border input, hero ask box
  *  - `.bl-wave` — the loading bars, demo strip (amber, not blue)
  */
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -57,7 +57,7 @@ const SAMPLE_QUESTIONS = [
 ];
 
 interface DemoExample {
-  id: 'revenue' | 'compare' | 'forecast';
+  id: 'revenue' | 'compare' | 'forecast' | 'channels';
   tab: string;
   title: string;
   question: string;
@@ -65,11 +65,12 @@ interface DemoExample {
   trust: string;
 }
 
-/* Hero demo — three different example answer types behind tabs: a drop
- * diagnosis (metric + bars + table), a head-to-head comparison (versus
- * cards + share bars, no table), and a forecast (sparkline + hedged
- * "possible factors", no table). Static mock data, clearly a preview —
- * every answer still carries the trust footer. */
+/* Hero demo — four different example answer types behind tabs: a drop
+ * diagnosis (metric + hoverable bars + table), a head-to-head comparison
+ * (versus cards + share bars, no table), a forecast (trend chart + hedged
+ * "possible factors", no table), and a channel mix (donut + bars +
+ * legend). Static mock data, clearly a preview — hover any chart mark for
+ * its number, and every answer still carries the trust footer. */
 const DEMO_EXAMPLES: DemoExample[] = [
   {
     id: 'revenue',
@@ -98,6 +99,15 @@ const DEMO_EXAMPLES: DemoExample[] = [
       'Pace suggests +12% quarter over quarter if West recovers to its 4-week average. A projection, not a fact.',
     trust: 'Show the query · Confidence 62% · Flag this answer',
   },
+  {
+    id: 'channels',
+    tab: 'Channel mix',
+    title: 'channel mix',
+    question: 'Where do sales come from?',
+    answer:
+      'Online drives 46% of revenue at $69.0k, ahead of retail at $48.0k. Wholesale trails while two accounts stay paused.',
+    trust: 'Show the query · Confidence 71% · Flag this answer',
+  },
 ];
 
 export function LandingPage() {
@@ -107,6 +117,46 @@ export function LandingPage() {
   const [demoTab, setDemoTab] = useState(0);
   const demo = DEMO_EXAMPLES[demoTab];
   const revealRef = useRevealRoot<HTMLElement>();
+  const pinRef = useRef<HTMLDivElement>(null);
+
+  /* Scroll-driven demo slides: the stage pins while its runway (see
+   * `landing.css`) scrolls past — one slide per stretch, the fourth
+   * landing just before release into the rest of the page. Works in both
+   * directions: scrolling back up steps slides back. Off while
+   * `prefers-reduced-motion` is set (the runway collapses via CSS too). */
+  useEffect(() => {
+    if (
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      return;
+    }
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const node = pinRef.current;
+      if (!node) return;
+      const rect = node.getBoundingClientRect();
+      const total = rect.height - window.innerHeight;
+      if (total <= 0) return;
+      const progress = Math.min(1, Math.max(0, -rect.top / total));
+      const index =
+        progress < 0.3 ? 0 : progress < 0.6 ? 1 : progress < 0.85 ? 2 : 3;
+      setDemoTab(index);
+    };
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, []);
 
   const submitAsk = (event: FormEvent) => {
     event.preventDefault();
@@ -216,9 +266,11 @@ export function LandingPage() {
               <li>Your data stays yours</li>
             </ul>
 
-            {/* Product mock — maritime dashboard-poster slot, three
-                tabbed example answers sharing one anatomy */}
-            <div className="bl-mock bl-reveal">
+            {/* Product demo — pinned scroll slides: the stage sticks while
+                the runway scrolls past, one slide per stretch. */}
+            <div className="bl-demo-pin" ref={pinRef}>
+              <div className="bl-demo-pin__stage">
+                <div className="bl-mock bl-reveal">
               <div className="bl-mock__bar" aria-hidden="true">
                 <span />
                 <span />
@@ -258,11 +310,17 @@ export function LandingPage() {
                           <span className="bl-mock__metric-label">WoW revenue</span>
                         </div>
                         <div className="bl-mock__bars" aria-hidden="true">
-                          <i style={{ height: '70%' }} />
-                          <i style={{ height: '62%' }} />
-                          <i style={{ height: '78%' }} />
-                          <i style={{ height: '44%' }} />
-                          <i style={{ height: '56%' }} />
+                          {[
+                            { height: '70%', tip: 'W1 · $55.8k' },
+                            { height: '62%', tip: 'W2 · $52.4k' },
+                            { height: '78%', tip: 'W3 · $59.1k' },
+                            { height: '44%', tip: 'W4 · $44.7k' },
+                            { height: '56%', tip: 'W5 · $48.9k' },
+                          ].map(({ height, tip }) => (
+                            <span key={tip} className="bl-mock__bar-col" data-tip={tip}>
+                              <i style={{ height }} />
+                            </span>
+                          ))}
                         </div>
                       </div>
                       <table className="bl-mock__table">
@@ -304,12 +362,16 @@ export function LandingPage() {
                       </div>
                       <ul className="bl-mock__share" aria-label="Revenue share by region">
                         {[
-                          { region: 'East', share: '34%' },
-                          { region: 'West', share: '30%' },
-                          { region: 'North', share: '19%' },
-                          { region: 'South', share: '17%' },
-                        ].map(({ region, share }) => (
-                          <li key={region} className="bl-mock__share-row">
+                          { region: 'East', share: '34%', revenue: '$51.3k' },
+                          { region: 'West', share: '30%', revenue: '$44.7k' },
+                          { region: 'North', share: '19%', revenue: '$28.9k' },
+                          { region: 'South', share: '17%', revenue: '$25.1k' },
+                        ].map(({ region, share, revenue }) => (
+                          <li
+                            key={region}
+                            className="bl-mock__share-row"
+                            data-tip={`${region} · ${revenue} · ${share} of total`}
+                          >
                             <span className="bl-mock__share-name">{region}</span>
                             <span className="bl-mock__share-track" aria-hidden="true">
                               <i className="bl-mock__share-fill" style={{ width: share }} />
@@ -332,12 +394,19 @@ export function LandingPage() {
                               className="bl-mock__spark-projected"
                               points="184,60 264,48 344,30"
                             />
-                            <circle className="bl-mock__spark-dot" cx="24" cy="86" r="4" />
-                            <circle className="bl-mock__spark-dot" cx="104" cy="76" r="4" />
-                            <circle className="bl-mock__spark-dot" cx="184" cy="60" r="4" />
-                            <circle className="bl-mock__spark-dot" cx="264" cy="48" r="4" />
-                            <circle className="bl-mock__spark-dot" cx="344" cy="30" r="4" />
-                            <text className="bl-mock__chart-value-label" x="24" y="75" textAnchor="middle">$51.3k</text>
+                            {[
+                              { cx: 24, cy: 86, tip: 'Aug · $51.3k · actual' },
+                              { cx: 104, cy: 76, tip: 'Sep · $54.0k · actual' },
+                              { cx: 184, cy: 60, tip: 'Oct · $58.2k · projected' },
+                              { cx: 264, cy: 48, tip: 'Nov · $61.4k · projected' },
+                              { cx: 344, cy: 30, tip: 'Dec · $66.0k · projected' },
+                            ].map(({ cx, cy, tip }) => (
+                              <g key={tip} className="bl-mock__point">
+                                <title>{tip}</title>
+                                <circle cx={cx} cy={cy} r="11" fill="transparent" />
+                                <circle className="bl-mock__spark-dot" cx={cx} cy={cy} r="4" />
+                              </g>
+                            ))}                            <text className="bl-mock__chart-value-label" x="24" y="75" textAnchor="middle">$51.3k</text>
                             <text className="bl-mock__chart-value-label" x="104" y="65" textAnchor="middle">$54.0k</text>
                             <text className="bl-mock__chart-value-label" x="184" y="49" textAnchor="middle">$58.2k</text>
                             <text className="bl-mock__chart-value-label" x="264" y="37" textAnchor="middle">$61.4k</text>
@@ -368,9 +437,62 @@ export function LandingPage() {
                       </div>
                     </>
                   )}
+                  {demo.id === 'channels' && (
+                    <>
+                      <div className="bl-mock__row">
+                        <div className="bl-mock__donut-card">
+                          <svg className="bl-mock__donut" viewBox="0 0 96 96" role="img" aria-label="Donut chart: Online 46%, Retail 32%, Wholesale 22%">
+                            <circle cx="48" cy="48" r="34" fill="none" className="bl-mock__donut-track" />
+                            <g transform="rotate(-90 48 48)">
+                              <g className="bl-mock__donut-seg bl-mock__donut-seg--online">
+                                <title>Online · 46% · $69.0k</title>
+                                <circle cx="48" cy="48" r="34" fill="none" strokeDasharray="98.3 213.6" strokeDashoffset="0" />
+                              </g>
+                              <g className="bl-mock__donut-seg bl-mock__donut-seg--retail">
+                                <title>Retail · 32% · $48.0k</title>
+                                <circle cx="48" cy="48" r="34" fill="none" strokeDasharray="68.4 213.6" strokeDashoffset="-98.3" />
+                              </g>
+                              <g className="bl-mock__donut-seg bl-mock__donut-seg--wholesale">
+                                <title>Wholesale · 22% · $33.0k</title>
+                                <circle cx="48" cy="48" r="34" fill="none" strokeDasharray="47 213.6" strokeDashoffset="-166.7" />
+                              </g>
+                            </g>
+                            <text className="bl-mock__donut-total" x="48" y="44" textAnchor="middle">$150k</text>
+                            <text className="bl-mock__donut-sub" x="48" y="58" textAnchor="middle">Q3 sales</text>
+                          </svg>
+                        </div>
+                        <div className="bl-mock__bars" aria-hidden="true">
+                          {[
+                            { height: '88%', tip: 'Online · $69.0k' },
+                            { height: '62%', tip: 'Retail · $48.0k' },
+                            { height: '42%', tip: 'Wholesale · $33.0k' },
+                          ].map(({ height, tip }) => (
+                            <span key={tip} className="bl-mock__bar-col" data-tip={tip}>
+                              <i style={{ height }} />
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <ul className="bl-mock__legend" aria-label="Sales by channel">
+                        {[
+                          { channel: 'Online', detail: '46% · $69.0k', modifier: 'online' },
+                          { channel: 'Retail', detail: '32% · $48.0k', modifier: 'retail' },
+                          { channel: 'Wholesale', detail: '22% · $33.0k', modifier: 'wholesale' },
+                        ].map(({ channel, detail, modifier }) => (
+                          <li key={channel}>
+                            <i className={`bl-mock__legend-swatch bl-mock__legend-swatch--${modifier}`} aria-hidden="true" />
+                            <span className="bl-mock__legend-name">{channel}</span>
+                            <span className="bl-mock__legend-detail">{detail}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
                   <p className="bl-mock__trust">
                     {demo.trust}
                   </p>
+                </div>
+              </div>
                 </div>
               </div>
             </div>
