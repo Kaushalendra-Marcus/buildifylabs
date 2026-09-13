@@ -8,9 +8,11 @@
  * graphify-style X-vs-check + report table, a live-answer demo strip, a
  * closing CTA, and a lantern-style mono footer.
  *
- * Theme: always dark (like the references). Accent is the loader's
- * amber/ember pair (#ffbf48 / #be4a1d) — never purple. The four supplied
- * Uiverse elements are all used, re-skinned to that pair:
+ * Theme: follows the whole-app theme (`theme-store` + `<html data-theme>`,
+ * same as auth/chat). Dark is the art-directed default; light is a warm
+ * paper variant of the same amber/ember system (see `landing.css`). Accent
+ * is the loader's amber/ember pair (#ffbf48 / #be4a1d) — never purple. The
+ * four supplied Uiverse elements are all used, re-skinned to that pair:
  *  - `GooLoader` — the gooey loader (andrew-manzyk), report + CTA decoration
  *  - `.bl-grid-bg` — the faint grid, hero backdrop
  *  - `.bl-ask` — the glowing conic-border input, hero ask box
@@ -44,6 +46,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { GooLoader } from '../../components/GooLoader';
+import { ThemeToggle } from '../../components/ThemeToggle';
 import { useRevealRoot } from './useRevealRoot';
 import './landing.css';
 
@@ -96,6 +99,7 @@ export function LandingPage() {
             <Link to="/signup" className="bl-nav__signup">
               Sign up <ArrowRight size={14} aria-hidden="true" />
             </Link>
+            <ThemeToggle className="bl-nav__theme" />
           </div>
         </nav>
       </header>
