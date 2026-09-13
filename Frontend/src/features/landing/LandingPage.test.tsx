@@ -1,8 +1,15 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { useThemeStore } from '../../lib/theme-store'
 import { LandingPage } from './LandingPage'
+
+beforeEach(() => {
+  localStorage.clear()
+  useThemeStore.setState({ theme: 'system' })
+  document.documentElement.removeAttribute('data-theme')
+})
 
 function renderLanding() {
   return render(
@@ -70,5 +77,15 @@ describe('LandingPage', () => {
     }
     const art = container.querySelector<HTMLImageElement>('.bl-cta__art img')
     expect(art?.getAttribute('src')).toBe('/login.png')
+  })
+
+  it('offers a dark/light switch in the nav that flips the stored theme', async () => {
+    const user = userEvent.setup()
+    const { container } = renderLanding()
+    const toggle = screen.getByRole('button', { name: /switch to (dark|light) mode/i })
+    expect(container.querySelector('.bl-nav__actions')).toContainElement(toggle)
+
+    await user.click(toggle)
+    expect(['light', 'dark']).toContain(useThemeStore.getState().theme)
   })
 })
