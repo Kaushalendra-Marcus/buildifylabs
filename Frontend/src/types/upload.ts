@@ -14,3 +14,12 @@ export interface FileResponse {
   error: string | null;
   created_at: string; // ISO 8601
 }
+
+/** GET /files/{id}/preview — first rows of a dataset for the Data page. */
+export interface FilePreview {
+  file_id: string;
+  file_name: string;
+  kind: 'table' | 'documents';
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+}

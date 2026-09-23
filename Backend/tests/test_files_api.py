@@ -233,3 +233,232 @@ class TestHappyPath:
         resp = do_upload(client, "report.pdf", b"%PDF-1.4fake", "application/pdf")
         assert resp.status_code == 202
         assert resp.json()["status"] == "failed"
+
+
+class TestDeleteFile:
+    def test_delete_csv_removes_row_table_and_raw_file(
+        self, client, uploads_dir, db_engine
+    ):
+        # Backdate every earlier row: the "drop the table" rule keys off
+        # recency, and runner DBs store created_at at second precision, so a
+        # same-second tie with an earlier upload would make "latest"
+        # ambiguous (and this test flaky). Pin the fixture upload as latest.
+        async def backdate_all():
+            maker = async_sessionmaker(db_engine, expire_on_commit=False)
+            async with maker() as session:
+                await session.execute(
+                    text("UPDATE file_uploads SET created_at = '2000-01-01 00:00:00'")
+                )
+                await session.commit()
+
+        asyncio.run(backdate_all())
+        file_id = do_upload(
+            client, "todelete.csv", TestHappyPath.CSV, "text/csv"
+        ).json()["id"]
+        assert len(list((uploads_dir / str(TEST_ID_A)).glob("*.csv"))) == 1
+
+        resp = client.delete(f"/files/{file_id}")
+        assert resp.status_code == 204
+        assert client.get(f"/files/{file_id}").status_code == 404
+        assert list((uploads_dir / str(TEST_ID_A)).glob("*")) == []
+
+        async def check():
+            maker = async_sessionmaker(db_engine, expire_on_commit=False)
+            async with maker() as session:
+                await session.execute(
+                    text(f'SELECT * FROM "{user_data_table_name(TEST_ID_A)}"')
+                )
+
+        with pytest.raises(Exception):
+            asyncio.run(check())
+
+    def test_delete_twice_is_404(self, client):
+        file_id = do_upload(
+            client, "twice.csv", b"a,b\n1,2\n", "text/csv"
+        ).json()["id"]
+        assert client.delete(f"/files/{file_id}").status_code == 204
+        assert client.delete(f"/files/{file_id}").status_code == 404
+
+    def test_delete_missing_id_is_404(self, client):
+        resp = client.delete(f"/files/{uuid.uuid4()}")
+        assert resp.status_code == 404
+
+    def test_delete_other_users_file_is_404_and_kept(self, client):
+        file_id = do_upload(
+            client, "mine.csv", b"a,b\n1,2\n", "text/csv"
+        ).json()["id"]
+        set_active(_OTHER_USER)
+        try:
+            assert client.delete(f"/files/{file_id}").status_code == 404
+        finally:
+            set_active(_FREE_USER)
+        assert client.get(f"/files/{file_id}").status_code == 200
+        assert client.delete(f"/files/{file_id}").status_code == 204
+
+    def test_guest_delete_is_403(self, client):
+        file_id = do_upload(
+            client, "guest.csv", b"a,b\n1,2\n", "text/csv"
+        ).json()["id"]
+        set_active(_GUEST_USER)
+        try:
+            assert client.delete(f"/files/{file_id}").status_code == 403
+        finally:
+            set_active(_FREE_USER)
+        assert client.delete(f"/files/{file_id}").status_code == 204
+
+    def test_delete_failed_upload_succeeds(self, client):
+        file_id = do_upload(
+            client,
+            "bad.xlsx",
+            b"PK\x03\x04somebinary",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ).json()["id"]
+        assert client.delete(f"/files/{file_id}").status_code == 204
+
+    def test_delete_old_file_keeps_current_table(self, client, db_engine):
+        do_upload(client, "old.csv", b"a,b\n1,2\n", "text/csv")
+        # Backdate the older row: runner DBs store created_at at second
+        # precision, so two rapid uploads could tie and make "latest"
+        # ambiguous. The product rule keys off recency — pin it down.
+        old_id = next(
+            f["id"] for f in client.get("/files").json() if f["file_name"] == "old.csv"
+        )
+
+        async def backdate():
+            maker = async_sessionmaker(db_engine, expire_on_commit=False)
+            async with maker() as session:
+                # UUIDs land in sqlite as 32-char hyphenless hex.
+                await session.execute(
+                    text(
+                        "UPDATE file_uploads SET created_at = '2000-01-01 00:00:00' "
+                        "WHERE id = :i"
+                    ),
+                    {"i": old_id.replace("-", "")},
+                )
+                await session.commit()
+
+        asyncio.run(backdate())
+        do_upload(client, "new.csv", b"a,b\n3,4\n", "text/csv")
+
+        listing = client.get("/files").json()
+        stale = next(f for f in listing if f["file_name"] == "old.csv")
+        assert client.delete(f"/files/{stale['id']}").status_code == 204
+
+        async def check():
+            maker = async_sessionmaker(db_engine, expire_on_commit=False)
+            async with maker() as session:
+                result = await session.execute(
+                    text(
+                        "SELECT b FROM "
+                        f'"{user_data_table_name(TEST_ID_A)}" ORDER BY b'
+                    )
+                )
+                return [r["b"] for r in result.mappings()]
+
+        # The current table still holds the NEW upload's rows, not the deleted one's.
+        assert asyncio.run(check()) == [4]
+
+        for f in client.get("/files").json():
+            if f["file_name"] == "new.csv":
+                assert client.delete(f"/files/{f['id']}").status_code == 204
+
+
+class TestPreviewFile:
+    def test_csv_preview_columns_and_rows(self, client):
+        file_id = do_upload(
+            client, "prev.csv", TestHappyPath.CSV, "text/csv"
+        ).json()["id"]
+        try:
+            resp = client.get(f"/files/{file_id}/preview")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["file_id"] == file_id
+            assert body["kind"] == "table"
+            assert body["columns"] == ["date", "revenue", "region"]
+            assert len(body["rows"]) == 2
+            assert sorted(r["revenue"] for r in body["rows"]) == [100, 250]
+        finally:
+            client.delete(f"/files/{file_id}")
+
+    def test_preview_other_users_file_is_404(self, client):
+        file_id = do_upload(
+            client, "priv.csv", b"a,b\n1,2\n", "text/csv"
+        ).json()["id"]
+        try:
+            set_active(_OTHER_USER)
+            try:
+                assert client.get(f"/files/{file_id}/preview").status_code == 404
+            finally:
+                set_active(_FREE_USER)
+        finally:
+            client.delete(f"/files/{file_id}")
+
+    def test_preview_missing_is_404(self, client):
+        assert client.get(f"/files/{uuid.uuid4()}/preview").status_code == 404
+
+    def test_preview_failed_upload_is_404(self, client):
+        file_id = do_upload(
+            client, "report.pdf", b"%PDF-1.4fake", "application/pdf"
+        ).json()["id"]
+        try:
+            assert client.get(f"/files/{file_id}/preview").status_code == 404
+        finally:
+            client.delete(f"/files/{file_id}")
+
+    def test_pdf_chunks_preview(self, client, db_engine):
+        """A landed PDF (vector: namespace + stored chunks) previews as
+        chunk rows without any embedding call."""
+        from app.db.models.document_chunk import DocumentChunk
+        from app.db.models.file_upload import FileUpload
+
+        pdf_id = uuid.uuid4()
+
+        async def seed():
+            maker = async_sessionmaker(db_engine, expire_on_commit=False)
+            async with maker() as session:
+                session.add(
+                    FileUpload(
+                        id=pdf_id,
+                        user_id=TEST_ID_A,
+                        file_name="doc.pdf",
+                        file_type="application/pdf",
+                        file_size=9,
+                        status="completed",
+                        pinecone_namespace=f"vector:{pdf_id}",
+                    )
+                )
+                session.add(
+                    DocumentChunk(
+                        user_id=TEST_ID_A,
+                        file_id=pdf_id,
+                        file_name="doc.pdf",
+                        chunk_index=0,
+                        content="first chunk",
+                        embedding=[0.0] * 384,
+                    )
+                )
+                await session.commit()
+
+        asyncio.run(seed())
+        try:
+            resp = client.get(f"/files/{pdf_id}/preview")
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["kind"] == "documents"
+            assert body["columns"] == ["chunk_index", "content"]
+            assert body["rows"] == [{"chunk_index": 0, "content": "first chunk"}]
+
+            # Deleting the PDF removes its chunks too.
+            assert client.delete(f"/files/{pdf_id}").status_code == 204
+
+            async def chunks_left():
+                maker = async_sessionmaker(db_engine, expire_on_commit=False)
+                async with maker() as session:
+                    result = await session.execute(
+                        text("SELECT COUNT(*) AS n FROM document_chunks")
+                    )
+                    return result.mappings().all()[0]["n"]
+
+            assert asyncio.run(chunks_left()) == 0
+        finally:
+            client.delete(f"/files/{pdf_id}")

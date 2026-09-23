@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OverviewPage } from './OverviewPage';
@@ -50,5 +51,14 @@ describe('OverviewPage', () => {
   it('shows an empty recent-insights state before the first answer', async () => {
     renderOverview();
     expect(await screen.findByText(/no answers yet/i)).toBeInTheDocument();
+  });
+
+  it('shows a dismissible first-run welcome banner', async () => {
+    const user = userEvent.setup();
+    renderOverview();
+    expect(await screen.findByText(/welcome to buildifylabs/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Got it' }));
+    expect(screen.queryByText(/welcome to buildifylabs/i)).toBeNull();
+    expect(localStorage.getItem('bl-onboarded-v1')).toBe('1');
   });
 });

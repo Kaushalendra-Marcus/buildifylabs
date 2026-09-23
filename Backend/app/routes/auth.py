@@ -13,8 +13,9 @@ from app.services.auth.email_verification import (
     verify_email_token,
     create_password_reset_token,
     verify_password_reset_token,
+    create_verification_token,
 )
-from app.services.auth.email_sender import send_password_reset_email
+from app.services.auth.email_sender import send_password_reset_email, send_verification_email
 from app.services.auth.token_service import (
     create_access_token,
     create_refresh_token,
@@ -110,6 +111,22 @@ async def verify_email(token: str, db: AsyncSession = Depends(get_db)):
     await db.refresh(user)
 
     return {"message": "Email verified successfully"}
+
+
+@router.post("/resend-verification", dependencies=[Depends(verify_email_rate_limit)])
+async def resend_verification(data: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
+    """Re-send the signup verification email (a lost/expired link left users
+    with no self-serve way back in). Same generic response either way as
+    /forgot-password, so this can't probe which emails are registered; only
+    unverified email/password accounts actually get a new link."""
+    result = await db.execute(select(User).where(User.email == data.email))
+    user = result.scalar_one_or_none()
+
+    if user and user.auth_provider == "email" and not user.is_verified:
+        token = create_verification_token(user.id)
+        await send_verification_email(user.email, token)
+
+    return {"message": "If that email is registered and unverified, a new verification link has been sent."}
 
 
 @router.post("/forgot-password")

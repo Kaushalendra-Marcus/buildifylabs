@@ -26,3 +26,27 @@ def save_raw_file(user_id, file_id, original_filename: str, content: bytes) -> s
     path = directory / f"{file_id}{ext}"
     path.write_bytes(content)
     return str(path)
+
+
+def delete_raw_file(user_id, file_id) -> bool:
+    """Remove one upload's raw bytes (best-effort, for DELETE /files/{id}).
+
+    Matches `<file_id>.*` inside the user's directory (the on-disk name is
+    the upload UUID plus its original extension). Missing files and unlink
+    errors are swallowed — the DB row is the source of truth, never the disk.
+    Returns True if at least one file was removed.
+    """
+    settings = get_settings()
+    directory = Path(settings.UPLOAD_DIR) / str(user_id)
+    removed = False
+    try:
+        candidates = list(directory.glob(f"{file_id}.*"))
+    except OSError:
+        return False
+    for path in candidates:
+        try:
+            path.unlink()
+            removed = True
+        except OSError:
+            continue
+    return removed

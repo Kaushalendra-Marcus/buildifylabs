@@ -17,7 +17,9 @@ starting; don't fix from this summary alone.
   `LOGIN_RATE_LIMIT`/`VERIFY_EMAIL_RATE_LIMIT` already existing in config.
 - Password reset tokens are time-limited (20 min) but not single-use — a leaked link stays valid
   for the rest of its window even after a successful reset.
-- No resend-verification-email endpoint — a user with a lost/expired link has no self-serve way back in.
+- **[Closed]** Resend-verification endpoint shipped: `POST /auth/resend-verification`
+  (same generic response as forgot-password, IP rate-limited via
+  `verify_email_rate_limit`, only unverified email/password accounts get a link).
 
 ## Plan/quota (`specs/02-plan-quota-enforcement.md`)
 
@@ -46,9 +48,14 @@ starting; don't fix from this summary alone.
   cosine similarity scoped to `user_id`, merged into the answer inside a reserved sub-budget
   (`MAX_DOCUMENT_CONTEXT_CHARS`) ranked ahead of web evidence, tagged `your_documents`
   end-to-end (prompt tag + frontend "your documents" badge). `ENABLE_DOCUMENT_QA=false`
-  degrades cleanly (ingest still succeeds; retrieval skipped). Scanned/image-only PDFs fail
-  honestly (OCR out of scope); single-PDF delete/replace and cross-document re-ranking are
-  still open (no `DELETE /files/{id}` for any type — pre-existing gap).
+   degrades cleanly (ingest still succeeds; retrieval skipped). Scanned/image-only PDFs fail
+   honestly (OCR out of scope).
+- **[Closed]** File management round-trip exists: `DELETE /files/{id}` (own-only,
+  guest 403; drops the per-user data table only when the deleted file is the
+  latest completed tabular upload, deletes PDF `document_chunks`, removes raw
+  bytes best-effort) and `GET /files/{id}/preview` (first 10 table rows without
+  the synthetic `id`, or first 10 PDF chunks — no embedding call). Single-PDF
+  replace stays append-by-design; cross-document re-ranking is still open.
 - **[Accepted]** Size check loads the whole file into memory before checking size — fine at today's
   ≤10MB cap, won't scale if caps are raised without moving to streaming checks.
 - **[B3 contract note]** A fresh CSV/XLSX upload **replaces** the user's per-user data table (one active data
@@ -105,12 +112,14 @@ starting; don't fix from this summary alone.
 
 ## LLM config (`specs/12-llm-orchestration.md`)
 
-- `config.py`'s `GROQ_MODEL` default (`llama-3.1-70b-versatile`) is a Groq model ID decommissioned
-  since ~Jan 2025. Without an env override, every `generate_response()` call fails 3x (with
-  backoff) before silently falling to the HuggingFace fallback — meaning today's interim pipeline
-  is quietly running on HF, not Groq, on every request. Needs a live model id from
-  `console.groq.com/docs/models` — that lineup moves fast (e.g. the interim replacement
-  `llama-3.3-70b-versatile` is itself being retired Aug 16, 2026).
+- `GROQ_MODEL` is a required env var (no code default — tests use `test-model`
+  mocks). Groq shut down `llama-3.3-70b-versatile` / `llama-3.1-8b-instant` for
+  free/dev tiers on Aug 16, 2026; their recommended replacements are
+  `openai/gpt-oss-120b` (strong) and `openai/gpt-oss-20b` (fast). The local
+  `Backend/.env` already runs `GROQ_MODEL=openai/gpt-oss-120b` — if chat answers
+  degrade to fallbacks, check that var first (a dead id fails 3x with backoff
+  before the HuggingFace fallback). Do NOT use `openai/gpt-oss-safeguard-20b`
+  here (a safety classifier, not a chat model — it breaks narration).
 
 ## Cross-cutting
 

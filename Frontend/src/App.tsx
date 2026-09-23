@@ -11,6 +11,7 @@
  * - `/app/chat` — the Chat Workspace shell (F2, history rail + stream)
  * - `/app/data` — Datasets page (upload + file list)
  * - `/app/reports` — Pinned reports (pin from any chat answer)
+ * - `/app/activity` — Usage quotas + conversation history
  *
  * `useTokenRefresh` re-establishes a session from the stored 7-day refresh
  * token on app load (in-memory access token, F0 decision).
@@ -24,6 +25,7 @@ import { RequireAuth, RequireGuest } from './features/auth/route-guards';
 import { SigninScreen } from './features/auth/SigninScreen';
 import { SignupScreen } from './features/auth/SignupScreen';
 import { VerifyEmailScreen } from './features/auth/VerifyEmailScreen';
+import { ActivityPage } from './features/activity/ActivityPage';
 import { ChatWorkspace } from './features/chat/ChatWorkspace';
 import { DataPage } from './features/data/DataPage';
 import { LandingPage } from './features/landing/LandingPage';
@@ -52,6 +54,7 @@ function AppRoutes() {
         <Route path="chat" element={<ChatWorkspace />} />
         <Route path="data" element={<DataPage />} />
         <Route path="reports" element={<ReportsPage />} />
+        <Route path="activity" element={<ActivityPage />} />
       </Route>
       <Route element={<RequireGuest><AuthLayout /></RequireGuest>}>
         <Route path="/signin" element={<SigninScreen />} />

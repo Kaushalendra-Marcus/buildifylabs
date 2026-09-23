@@ -98,4 +98,5 @@ export const http = {
   get: <T>(path: string): Promise<T> => request<T>(path, 'GET'),
   post: <T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> =>
     request<T>(path, 'POST', { ...options, body }),
+  del: <T>(path: string): Promise<T> => request<T>(path, 'DELETE'),
 };

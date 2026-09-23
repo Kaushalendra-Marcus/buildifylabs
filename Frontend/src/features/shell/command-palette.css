@@ -1,0 +1,105 @@
+/* Command palette — centered filter modal. Tokens only. */
+
+.palette-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12vh 16px 16px;
+}
+
+.palette-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--overlay-backdrop);
+  border: none;
+  padding: 0;
+  cursor: default;
+}
+
+.palette {
+  position: relative;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(480px, calc(100dvh - 128px));
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: 14px;
+  box-shadow: var(--elevation-raised);
+  overflow: hidden;
+}
+
+.palette__input {
+  font: inherit;
+  font-size: var(--font-size-body);
+  color: var(--text-primary);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 14px 16px;
+}
+
+.palette__input:focus {
+  outline: none;
+}
+
+.palette__list {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.palette__empty {
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: var(--font-size-body);
+}
+
+.palette__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  font: inherit;
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 10px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.palette__item:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.palette__item-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette__item-group {
+  flex: none;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.palette__hint {
+  margin: 0;
+  padding: 8px 16px 12px;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}

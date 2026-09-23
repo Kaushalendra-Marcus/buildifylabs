@@ -3,7 +3,7 @@
  * returns 202 with a `FileResponse`; listing is own-only server-side.
  */
 import { http } from '../lib/http';
-import type { FileResponse } from '../types';
+import type { FilePreview, FileResponse } from '../types';
 
 export function uploadFile(file: File): Promise<FileResponse> {
   const form = new FormData();
@@ -17,4 +17,12 @@ export function listFiles(): Promise<FileResponse[]> {
 
 export function getFile(id: string): Promise<FileResponse> {
   return http.get<FileResponse>(`/files/${id}`);
+}
+
+export function previewFile(id: string): Promise<FilePreview> {
+  return http.get<FilePreview>(`/files/${id}/preview`);
+}
+
+export function deleteFile(id: string): Promise<void> {
+  return http.del<void>(`/files/${id}`);
 }

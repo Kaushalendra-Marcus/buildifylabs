@@ -84,4 +84,18 @@ describe('App routing (F1 auth screens + landing)', () => {
     expect(screen.getAllByText('Ada').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('free').length).toBeGreaterThanOrEqual(1)
   })
+
+  it('renders the Activity page at /app/activity', async () => {
+    window.history.pushState({}, '', '/app/activity')
+    useAuthStore.getState().setSession({
+      user: { id: 'user-1', email: 'ada@example.com', name: 'Ada', plan: 'free' },
+      access_token: 'access-1',
+      refresh_token: 'refresh-1',
+      token_type: 'bearer',
+    })
+
+    render(<App />)
+    expect(await screen.findByText('Usage & history')).toBeInTheDocument()
+    expect(screen.getByText('Window quota')).toBeInTheDocument()
+  })
 })

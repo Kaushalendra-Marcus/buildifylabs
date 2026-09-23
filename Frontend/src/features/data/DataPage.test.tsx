@@ -1,8 +1,10 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DataPage } from './DataPage';
 import { useAuthStore } from '../auth/auth-store';
+import { deleteFile, listFiles, previewFile } from '../../api/files';
 
 vi.mock('../../api/files', () => ({
   listFiles: vi.fn().mockResolvedValue([
@@ -18,6 +20,14 @@ vi.mock('../../api/files', () => ({
     },
   ]),
   uploadFile: vi.fn(),
+  previewFile: vi.fn().mockResolvedValue({
+    file_id: 'file-1',
+    file_name: 'sales.csv',
+    kind: 'table',
+    columns: ['revenue', 'region'],
+    rows: [{ revenue: 100, region: 'east' }],
+  }),
+  deleteFile: vi.fn().mockResolvedValue(undefined),
 }));
 
 function renderData() {
@@ -50,5 +60,25 @@ describe('DataPage', () => {
     renderData();
     await screen.findByText('sales.csv');
     expect(screen.getByLabelText('Upload a data file')).toBeInTheDocument();
+  });
+
+  it('opens a preview dialog for a file', async () => {
+    const user = userEvent.setup();
+    renderData();
+    await user.click(await screen.findByRole('button', { name: 'Preview' }));
+    expect(await screen.findByRole('dialog', { name: 'Preview of sales.csv' })).toBeInTheDocument();
+    expect(previewFile).toHaveBeenCalledWith('file-1');
+    expect(screen.getByText('revenue')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Close preview' }));
+    expect(screen.queryByRole('dialog', { name: 'Preview of sales.csv' })).toBeNull();
+  });
+
+  it('deletes a file after a two-step confirm', async () => {
+    const user = userEvent.setup();
+    renderData();
+    await user.click(await screen.findByRole('button', { name: 'Delete' }));
+    await user.click(await screen.findByRole('button', { name: 'Confirm delete' }));
+    expect(deleteFile).toHaveBeenCalledWith('file-1');
+    expect(listFiles).toHaveBeenCalled();
   });
 });

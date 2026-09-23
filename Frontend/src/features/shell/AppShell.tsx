@@ -5,12 +5,14 @@
  * every other page renders inside this frame: left sidebar on desktop
  * (>=768px), bottom tab bar on narrow viewports. Amber accent only.
  */
-import { Database, LayoutDashboard, MessageSquare, Pin } from 'lucide-react';
+import { Activity, Database, LayoutDashboard, MessageSquare, Pin, Search } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 import { PlanBadge } from '../../components/PlanBadge';
 import { ThemeToggle } from '../../components/ThemeToggle';
 import { useAuth } from '../../hooks/useAuth';
 import { AccountMenu } from '../chat/AccountMenu';
+import { CommandPalette } from './CommandPalette';
 import './app-shell.css';
 
 const NAV = [
@@ -18,10 +20,24 @@ const NAV = [
   { to: '/app/chat', end: false, label: 'Chat', icon: MessageSquare },
   { to: '/app/data', end: true, label: 'Data', icon: Database },
   { to: '/app/reports', end: true, label: 'Reports', icon: Pin },
+  { to: '/app/activity', end: true, label: 'Activity', icon: Activity },
 ] as const;
 
 export function AppShell() {
   const { user } = useAuth();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Global quick switcher: Ctrl/⌘+K toggles from anywhere in the app.
+  useEffect(() => {
+    function handleKey(event: KeyboardEvent) {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        setPaletteOpen((value) => !value);
+      }
+    }
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, []);
 
   return (
     <div className="app-shell">
@@ -52,6 +68,18 @@ export function AppShell() {
           ))}
         </nav>
 
+        <button
+          type="button"
+          className="app-shell__palette-trigger"
+          onClick={() => setPaletteOpen(true)}
+          aria-label="Open quick switcher"
+          title="Quick switcher (Ctrl+K)"
+        >
+          <Search size={15} aria-hidden="true" />
+          <span>Quick switch…</span>
+          <kbd>⌘K</kbd>
+        </button>
+
         <div className="app-shell__sidebar-footer">
           {user && <PlanBadge plan={user.plan} />}
           <AccountMenu align="up" />
@@ -68,6 +96,14 @@ export function AppShell() {
           </NavLink>
           <span className="app-shell__spacer" />
           {user && <PlanBadge plan={user.plan} />}
+          <button
+            type="button"
+            className="app-shell__palette-trigger app-shell__palette-trigger--top"
+            onClick={() => setPaletteOpen(true)}
+            aria-label="Open quick switcher"
+          >
+            <Search size={16} aria-hidden="true" />
+          </button>
           <ThemeToggle />
         </header>
         <div className="app-shell__content">
@@ -89,6 +125,7 @@ export function AppShell() {
           ))}
         </nav>
       </div>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );
 }

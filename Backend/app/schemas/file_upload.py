@@ -16,3 +16,17 @@ class FileResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class FilePreview(BaseModel):
+    """First rows of a dataset for the Data page preview drawer.
+
+    `kind` is "table" (CSV/XLSX — columns/rows from the per-user data table)
+    or "documents" (PDF — the first stored chunks, no embedding needed).
+    """
+
+    file_id: UUID
+    file_name: str
+    kind: str
+    columns: list[str]
+    rows: list[dict]

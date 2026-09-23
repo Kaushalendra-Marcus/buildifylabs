@@ -5,13 +5,13 @@
  * No delete affordance yet (no backend route) — replace works by uploading
  * a new CSV/XLSX, which the backend lands in the per-user table.
  */
-import { FileText, RefreshCw, UploadCloud } from 'lucide-react';
+import { FileText, RefreshCw, UploadCloud, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, DragEvent } from 'react';
-import { listFiles, uploadFile } from '../../api/files';
+import { deleteFile, listFiles, previewFile, uploadFile } from '../../api/files';
 import { useAuth } from '../../hooks/useAuth';
 import { getErrorMessage } from '../../lib/errors';
-import type { FileResponse, FileStatus } from '../../types';
+import type { FilePreview, FileResponse, FileStatus } from '../../types';
 import { useChatStore } from '../chat/chat-store';
 import './data.css';
 
@@ -44,6 +44,10 @@ export function DataPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [preview, setPreview] = useState<FilePreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [acting, setActing] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const loadFiles = useCallback(async () => {
@@ -91,6 +95,38 @@ export function DataPage() {
     const file = event.target.files?.[0];
     if (file) void upload(file);
     event.target.value = '';
+  }
+
+  async function openPreview(file: FileResponse) {
+    setPreviewLoading(true);
+    setError(null);
+    try {
+      setPreview(await previewFile(file.id));
+    } catch (caught) {
+      setError(getErrorMessage(caught));
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  async function removeFile(id: string) {
+    setActing(true);
+    setError(null);
+    try {
+      await deleteFile(id);
+      const remaining = await listFiles();
+      setFiles(remaining);
+      if (remaining.length === 0) {
+        useChatStore.getState().setHasData(false);
+        useChatStore.getState().setActiveFileName(null);
+      }
+      if (preview && preview.file_id === id) setPreview(null);
+    } catch (caught) {
+      setError(getErrorMessage(caught));
+    } finally {
+      setActing(false);
+      setConfirmDeleteId(null);
+    }
   }
 
   return (
@@ -180,6 +216,7 @@ export function DataPage() {
                 <th scope="col">Size</th>
                 <th scope="col">Status</th>
                 <th scope="col">Uploaded</th>
+                {!isGuest && <th scope="col">Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -202,12 +239,110 @@ export function DataPage() {
                     </span>
                   </td>
                   <td>{formatDate(file.created_at)}</td>
+                  {!isGuest && (
+                    <td>
+                      <span className="data-page__actions">
+                        <button
+                          type="button"
+                          className="data-page__action"
+                          disabled={acting || previewLoading}
+                          onClick={() => void openPreview(file)}
+                        >
+                          Preview
+                        </button>
+                        {confirmDeleteId === file.id ? (
+                          <button
+                            type="button"
+                            className="data-page__action data-page__action--danger"
+                            disabled={acting}
+                            onClick={() => void removeFile(file.id)}
+                          >
+                            {acting ? 'Deleting…' : 'Confirm delete'}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="data-page__action data-page__action--danger"
+                            disabled={acting}
+                            onClick={() => setConfirmDeleteId(file.id)}
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </span>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </section>
+
+      {previewLoading && (
+        <p className="data-page__status" role="status">
+          Loading preview…
+        </p>
+      )}
+
+      {preview && (
+        <div className="data-page__preview-layer">
+          <button
+            type="button"
+            className="data-page__preview-backdrop"
+            aria-label="Dismiss preview"
+            onClick={() => setPreview(null)}
+          />
+          <div
+            className="data-page__preview"
+            role="dialog"
+            aria-label={`Preview of ${preview.file_name}`}
+          >
+            <div className="data-page__preview-head">
+              <div>
+                <p className="data-page__preview-title">{preview.file_name}</p>
+                <p className="data-page__preview-sub">
+                  {preview.kind === 'table'
+                    ? `First ${preview.rows.length} rows`
+                    : `First ${preview.rows.length} document chunks`}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="data-page__preview-close"
+                aria-label="Close preview"
+                onClick={() => setPreview(null)}
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+            </div>
+            <div className="data-page__preview-table-wrap">
+              <table className="data-page__preview-table">
+                <thead>
+                  <tr>
+                    {preview.columns.map((column) => (
+                      <th key={column} scope="col">
+                        {column}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {preview.rows.map((row, index) => (
+                    <tr key={index}>
+                      {preview.columns.map((column) => (
+                        <td key={column}>
+                          {String(row[column] ?? '—').slice(0, 280)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

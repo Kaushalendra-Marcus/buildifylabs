@@ -31,6 +31,7 @@ const QUICK_ASKS = [
 ];
 
 const PENDING_KEY = 'bl-pending-question';
+const ONBOARDED_KEY = 'bl-onboarded-v1';
 
 export function OverviewPage() {
   const { user } = useAuth();
@@ -46,6 +47,23 @@ export function OverviewPage() {
   const [files, setFiles] = useState<FileResponse[]>([]);
   const [filesError, setFilesError] = useState<string | null>(null);
   const [filesLoading, setFilesLoading] = useState(true);
+  const [onboarded, setOnboarded] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem(ONBOARDED_KEY) !== null ||
+        localStorage.getItem(ONBOARDED_KEY) !== null;
+    } catch {
+      return true; // storage unavailable — never nag
+    }
+  });
+
+  function dismissOnboarding() {
+    try {
+      localStorage.setItem(ONBOARDED_KEY, '1');
+    } catch {
+      /* storage unavailable — banner just hides for this render */
+    }
+    setOnboarded(true);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -116,6 +134,24 @@ export function OverviewPage() {
 
   return (
     <div className="overview" role="main" aria-label="Overview dashboard">
+      {!onboarded && (
+        <section className="overview__welcome" aria-label="Welcome">
+          <div>
+            <p className="overview__welcome-title">Welcome to BuildifyLabs 👋</p>
+            <p className="overview__welcome-sub">
+              Three steps and you are answering questions from your own data.
+              Press <kbd>Ctrl+K</kbd> anywhere to jump around.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="overview__welcome-dismiss"
+            onClick={dismissOnboarding}
+          >
+            Got it
+          </button>
+        </section>
+      )}
       <section className="overview__hero">
         <div>
           <p className="overview__eyebrow">Overview</p>

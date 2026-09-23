@@ -22,6 +22,50 @@
   padding: 22px;
 }
 
+.overview__welcome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 14px;
+  padding: 14px 18px;
+}
+
+.overview__welcome-title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.overview__welcome-sub {
+  margin: 4px 0 0;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+}
+
+.overview__welcome-sub kbd {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  border: 1px solid color-mix(in srgb, var(--text-muted) 45%, transparent);
+  border-radius: 5px;
+  padding: 0 5px;
+}
+
+.overview__welcome-dismiss {
+  flex: none;
+  font: inherit;
+  font-size: var(--font-size-caption);
+  font-weight: 700;
+  color: var(--surface-card);
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
 .overview__eyebrow {
   margin: 0 0 4px;
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
