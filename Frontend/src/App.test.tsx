@@ -48,8 +48,23 @@ describe('App routing (F1 auth screens + landing)', () => {
     ).toBeInTheDocument()
   })
 
-  it('guards the workspace: authenticated users land on the /app Chat Workspace shell', async () => {
+  it('guards the app shell: authenticated users land on the /app Overview dashboard', async () => {
     window.history.pushState({}, '', '/app')
+    useAuthStore.getState().setSession({
+      user: { id: 'user-1', email: 'ada@example.com', name: 'Ada', plan: 'free' },
+      access_token: 'access-1',
+      refresh_token: 'refresh-1',
+      token_type: 'bearer',
+    })
+
+    render(<App />)
+    // AppShell index route is the Overview dashboard (KPI cards + checklist).
+    expect(await screen.findByText(/namaste, ada/i)).toBeInTheDocument()
+    expect(screen.getAllByRole('navigation', { name: 'Primary' }).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('renders the Chat Workspace shell at /app/chat', async () => {
+    window.history.pushState({}, '', '/app/chat')
     useAuthStore.getState().setSession({
       user: { id: 'user-1', email: 'ada@example.com', name: 'Ada', plan: 'free' },
       access_token: 'access-1',
@@ -64,7 +79,9 @@ describe('App routing (F1 auth screens + landing)', () => {
     expect(newChatButtons.length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('complementary', { name: 'Chat history' })).toBeInTheDocument()
     expect(screen.getByRole('region', { name: 'Message stream' })).toBeInTheDocument()
-    expect(screen.getByText('Ada')).toBeInTheDocument()
-    expect(screen.getByText('free')).toBeInTheDocument()
+    // Account identity renders in both the AppShell sidebar and the chat
+    // rail footer — assert presence, not uniqueness.
+    expect(screen.getAllByText('Ada').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('free').length).toBeGreaterThanOrEqual(1)
   })
 })

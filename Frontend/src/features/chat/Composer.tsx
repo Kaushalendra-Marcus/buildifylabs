@@ -50,6 +50,21 @@ export function Composer() {
   const [popoverOpen, setPopoverOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
+  // Overview quick-ask handoff: a template stored as `bl-pending-question`
+  // pre-fills the draft once on mount (user still presses Send).
+  useEffect(() => {
+    try {
+      const pending = sessionStorage.getItem('bl-pending-question');
+      if (pending && pending.trim()) {
+        setDraft(pending.trim());
+        sessionStorage.removeItem('bl-pending-question');
+        inputRef.current?.focus();
+      }
+    } catch {
+      /* storage unavailable — composer stays empty */
+    }
+  }, []);
+
   const canSend = draft.trim().length > 0; // §5.4: quota NEVER disables send.
 
   // 5.1 auto-grow: shrink-free sizing from content (capped, scrolls past max).

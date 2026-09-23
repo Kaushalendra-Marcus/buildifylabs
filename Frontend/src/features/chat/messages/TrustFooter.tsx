@@ -8,7 +8,7 @@
  *     with a tooltip (never hidden) when there is no query-log to flag.
  */
 import { useState } from 'react';
-import { Check, Code2, Flag } from 'lucide-react';
+import { Check, Code2, Flag, Pin } from 'lucide-react';
 import { flagAnswer } from '../../../api/chat';
 import { formatTime } from '../../../lib/format';
 
@@ -18,6 +18,9 @@ interface TrustFooterProps {
   dataPreview: Array<Record<string, unknown>> | null;
   confidence: number;
   answeredAt?: number;
+  /** Pin-to-reports affordance (ReportsPage). Absent = chat outside pin scope. */
+  pinned?: boolean;
+  onPin?: () => void;
 }
 
 function isBoundedConfidence(value: number): boolean {
@@ -68,6 +71,8 @@ export function TrustFooter({
   dataPreview,
   confidence,
   answeredAt,
+  pinned = false,
+  onPin,
 }: TrustFooterProps) {
   const [queryOpen, setQueryOpen] = useState(false);
   const [flagState, setFlagState] = useState<'idle' | 'flagging' | 'flagged' | 'error'>(
@@ -155,6 +160,28 @@ export function TrustFooter({
         )}
         {flagState === 'flagged' ? 'Flagged' : 'Flag this answer'}
       </button>
+
+      {onPin && (
+        <>
+          <span className="trust-footer__sep" aria-hidden="true">
+            ·
+          </span>
+          <button
+            type="button"
+            className="trust-footer__action"
+            disabled={pinned}
+            title={pinned ? 'Already pinned to Reports' : 'Pin this answer to Reports'}
+            onClick={onPin}
+          >
+            {pinned ? (
+              <Check size={14} aria-hidden="true" />
+            ) : (
+              <Pin size={14} aria-hidden="true" />
+            )}
+            {pinned ? 'Pinned' : 'Pin to reports'}
+          </button>
+        </>
+      )}
 
       {flagState === 'error' && (
         <span className="trust-footer__error" role="alert">

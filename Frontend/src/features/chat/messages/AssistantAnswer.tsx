@@ -11,6 +11,7 @@
  *   7. News-context row — only when `news_context` is non-empty
  */
 import { Newspaper } from 'lucide-react';
+import { useState } from 'react';
 import type { PipelineOutput } from '../../../types/chat';
 import { AssistantIdentity } from './AssistantIdentity';
 import { AnswerProse } from './AnswerProse';
@@ -21,15 +22,25 @@ import { ProcessTrace } from './ProcessTrace';
 import { InsightsStrip } from './InsightsStrip';
 import { TrustFooter } from './TrustFooter';
 import { deriveSources } from './evidence';
+import { useReportsStore } from '../../reports/reports-store';
 
 export function AssistantAnswer({
   output,
   answeredAt,
+  conversationId = 'default',
 }: {
   output: PipelineOutput;
   answeredAt?: number;
+  conversationId?: string;
 }) {
   const sourceCount = deriveSources(output).length;
+  const pinReport = useReportsStore((s) => s.pinReport);
+  const reports = useReportsStore((s) => s.reports);
+  const [justPinned, setJustPinned] = useState(false);
+  const alreadyPinned =
+    output.query_log_id !== null &&
+    reports.some((r) => r.output.query_log_id === output.query_log_id);
+  const pinned = justPinned || alreadyPinned;
 
   return (
     <div className="message message--assistant-answer">
@@ -53,6 +64,11 @@ export function AssistantAnswer({
         dataPreview={output.data_preview}
         confidence={output.confidence}
         answeredAt={answeredAt}
+        pinned={pinned}
+        onPin={() => {
+          pinReport(output, conversationId);
+          setJustPinned(true);
+        }}
       />
 
       <FollowUpChips followups={output.followups ?? []} />
