@@ -433,7 +433,6 @@ def _clean_chart_phrase(words: list, full_text: str = "") -> Optional[str]:
 
 def _nearest_product_phrase(window: str, pos: int, full_text: str = "") -> Optional[str]:
     """Closest capitalized product-like phrase to a figure position.
-
     Searches BACKWARD first: listicles name the product before its price
     ("... Ant Esports H707 ... Price: ₹1,499"). Forward only as fallback.
     Returns a brand-led phrase of at most 4 words, stopword-cleaned, or
@@ -481,6 +480,42 @@ def _nearest_product_phrase(window: str, pos: int, full_text: str = "") -> Optio
     return None
 
 
+# Reporting-attribution verbs: "X reports / says / estimates ..." names the
+# publisher, never the subject of the number. A phrase in one of these
+# constructions is a source, not a chart entity.
+_ATTRIBUTION_VERBS = (
+    r"reports?|reported|reporting|says?|said|estimates?|estimated|"
+    r"expects?|expected|forecasts?|forecast|predicts?|predicted|"
+    r"notes?|noted|adds?|added|claims?|claimed|warns?|warned|"
+    r"tells|told|announces?|announced|writes?|wrote|publishes?|published"
+)
+
+
+def _is_reporting_attribution(window: str, phrase: str) -> bool:
+    """True when `phrase` appears as a cited source in `window`
+    ("according to Visible Alpha", "Ars Technica reports", "via Reuters",
+    "(Bloomberg)") rather than as the subject of the figure. Source names
+    must never become chart entities/labels (the Tesla why-question failure:
+    bars labelled "Ars Technica" vs "Visible Alpha"). Fail-closed: on any
+    doubt the caller treats the figure as unattributed."""
+    try:
+        name = re.escape(str(phrase or "").strip())
+        if not name:
+            return False
+        text = str(window or "")
+        patterns = (
+            r"according\s+to\s+" + name + r"\b",
+            r"\bvia\s+" + name + r"\b",
+            r"\(\s*" + name + r"\s*\)",
+            name + r"\s+(?:" + _ATTRIBUTION_VERBS + r")\b",
+        )
+        return any(
+            re.search(pattern, text, re.IGNORECASE) for pattern in patterns
+        )
+    except Exception:
+        return False
+
+
 def _resolve_chart_entity(figure: dict, queried_entities: list) -> Optional[str]:
     """The WHO for one figure, best signal first: query-bound entity, then
     the nearest product phrase (a window-leading fallback like "Headphones
@@ -510,6 +545,12 @@ def _resolve_chart_entity(figure: dict, queried_entities: list) -> Optional[str]
         window, pos, str((figure or {}).get("full_context", "") or "")
     )
     if phrase:
+        # A cited source ("according to Visible Alpha", "Ars Technica
+        # reports") is never the WHO of the number. Reject it outright and
+        # skip the window-subject fallback too — a leading byline would
+        # reintroduce the same source name through the back door.
+        if _is_reporting_attribution(window, phrase):
+            return None
         return phrase
     if entity and not _is_generic_entity(str(entity)):
         return str(entity).strip()

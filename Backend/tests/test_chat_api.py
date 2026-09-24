@@ -439,6 +439,88 @@ class TestGracefulFallbacks:
         )
 
 
+class TestWhyQuestionLiveWeb:
+    def test_why_question_has_no_junk_visuals_or_jargon(
+        self, client, seed, monkeypatch
+    ):
+        # Regression for the Tesla screenshots: "why sales of tesala cars is
+        # dropping?" over two unrelated snippet percents yielded a "Cited
+        # percents compared" bar, a "Revenue compared" table, and the
+        # internal "Excluded from this comparison" sentence in the prose.
+        # A why-question must get prose + citable figures, nothing else.
+        from types import SimpleNamespace
+
+        mock_llms(
+            monkeypatch,
+            pipeline_json={
+                **PIPELINE_JSON,
+                "answer": (
+                    "Tesla sales are falling on weaker European demand and "
+                    "tougher competition from other EV makers."
+                ),
+                "visuals": [],
+            },
+        )
+        monkeypatch.setattr(
+            "app.routes.chat.search_web",
+            lambda query, company_name=None, prior_clarification=None, **kwargs: asyncio.sleep(
+                0,
+                result=SimpleNamespace(
+                    context=[
+                        "Tesla's European sales fell 9 percent in October as "
+                        "competition intensified, Ars Technica reports.",
+                        "Tesla's global vehicle deliveries are expected to "
+                        "decline 7 percent this year, according to Visible "
+                        "Alpha, after a 1 percent drop in 2024.",
+                    ],
+                    sources=[
+                        {
+                            "title": "Tesla Europe sales",
+                            "url": "https://a.example",
+                            "provider": "Ars Technica",
+                            "retrieved_at": "x",
+                        },
+                        {
+                            "title": "Tesla deliveries forecast",
+                            "url": "https://b.example",
+                            "provider": "Visible Alpha",
+                            "retrieved_at": "x",
+                        },
+                    ],
+                    market_data=[],
+                ),
+            ),
+        )
+        resp = client.post(
+            "/chat",
+            json={
+                "query": "why sales of tesala cars is dropping?",
+                "source_scope": "live_web",
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        # A real answer, not a clarification dodge.
+        assert body["clarification"] is None
+        assert body["answer"]
+        # No pipeline jargon in the prose.
+        assert "Excluded from this comparison" not in body["answer"]
+        assert "insufficient validated evidence" not in body["answer"]
+        # No comparison-style visuals from the unrelated percent pair.
+        kinds = [visual["visual_type"] for visual in body["visuals"]]
+        assert "graph" not in kinds and "comparison" not in kinds
+        assert not any(
+            "compar" in str(visual.get("title", "")).lower()
+            for visual in body["visuals"]
+        )
+        # Figures stay citable, with excerpt artifacts cleaned: no row
+        # starts on "..." dots.
+        tables = [v for v in body["visuals"] if v["visual_type"] == "table"]
+        assert tables and tables[0]["title"] == "Figures cited"
+        for row in tables[0]["props"]["values"]:
+            assert not str(row[1]).lstrip().startswith("...")
+
+
 class TestChatStream:
     def test_stream_emits_stages_then_result(self, client, seed, monkeypatch):
         import json as jsonlib

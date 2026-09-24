@@ -24,11 +24,26 @@ def _figures_table_visual(figures: list) -> Optional[VisualOutput]:
         props={
             "columns": ["Figure", "Context"],
             "values": [
-                [f"{figure['text']} [{figure['ref']}]", figure["context"]]
+                [f"{figure['text']} [{figure['ref']}]", _clean_figure_context(figure["context"])]
                 for figure in figures
             ],
         },
     )
+
+
+def _clean_figure_context(context: str) -> str:
+    """Display cleanup for the Figures-cited table (binding untouched).
+
+    Raw search snippets carry excerpt artifacts ("...much on Europe...",
+    "Title ... body") that read as broken output. Strip leading ellipsis
+    runs so each row starts on a word; the row is still visibly an excerpt
+    via the citation number, not the dots.
+    """
+    try:
+        cleaned = re.sub(r"^[\s.…]+", "", str(context or ""))
+        return cleaned or str(context or "")
+    except Exception:
+        return str(context or "")
 
 
 def _figure_chart_group_key(figure: dict):

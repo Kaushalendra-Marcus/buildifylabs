@@ -73,20 +73,36 @@ def figure_metric_label(context: str) -> Optional[str]:
 
 
 def figures_share_metric(figures: Sequence[Dict[str, Any]]) -> Tuple[bool, str]:
-    """True when cited figures are comparable (same metric cue or uncured).
+    """True when cited figures are comparable.
 
-    Only blocks when two figures carry EXPLICITLY different cues (e.g.
-    funding vs cost) -- uncured figures stay comparable for backward
-    compatibility with existing qualitative answers.
+    Same explicit cue on every figure, or no cue on any figure. Blocks
+    explicitly different cues (funding vs cost) everywhere, and mixed
+    cued/uncued pairs inside PERCENT groups: a percent is a ratio, so a
+    cued one ("European sales fell 9%") next to an uncued one ("deliveries
+    to decline 7%") measures different things, and charting them together
+    compares unrelated meanings (the Tesla why-question failure). Money
+    keeps the legacy leniency (an uncued "$300k earned" still charts
+    against a cued "sold for $1M": amounts share an absolute scale, and
+    the currency gate handles known-different money). All-uncued pairs
+    stay comparable everywhere for backward compatibility.
     """
-    labels = [figure_metric_label(str(fig.get("context", ""))) for fig in (figures or [])]
+    figs = list(figures or [])
+    labels = [figure_metric_label(str(fig.get("context", ""))) for fig in figs]
     # "deal" (sold for) and "funding" (raised) are both transaction values:
     # normalise to one bucket so "raised $300k vs sold for $1M" still compares.
     normalised = [{"deal": "funding"}.get(label, label) for label in labels]
     present = [label for label in normalised if label]
-    if len(set(present)) <= 1:
-        return True, "same or uncured metric"
-    return False, f"metric mismatch across figures: {sorted(set(present))}"
+    if not present:
+        return True, "uncued figures"
+    if len(set(present)) > 1:
+        return False, f"metric mismatch across figures: {sorted(set(present))}"
+    if len(present) < len(figs) and all(
+        str(fig.get("unit", "") or "") == "percent" for fig in figs
+    ):
+        return False, "metric cue on some percent figures only: %s" % (
+            sorted(set(present)),
+        )
+    return True, "same or uncured metric"
 
 
 def figure_entity_label(context: str, entities: Sequence[str]) -> Optional[str]:

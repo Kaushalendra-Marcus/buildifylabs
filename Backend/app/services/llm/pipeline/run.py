@@ -26,6 +26,28 @@ logger = logging.getLogger(__name__)
 _PIPELINE_STRICT_SCHEMA = _to_strict_schema(PipelineOutput)
 
 
+def _disclose_exclusion_for_query(query_text: str) -> bool:
+    """Whether the exclusion sentence belongs in the answer prose.
+
+    It only reads sensibly on comparisons ("X vs Y, minus Z"). On anything
+    else ("why are sales dropping?") the same sentence is pipeline jargon —
+    the user compared nothing, so "Excluded from this comparison" confuses
+    instead of disclosing. Fail-open (True) when the intent check itself is
+    unavailable, preserving the honesty guarantee over silence.
+    """
+    try:
+        from .deps import is_comparison_query as _is_comp
+        if _is_comp is not None:
+            return bool(_is_comp(query_text or ""))
+    except Exception:
+        pass
+    try:
+        from .prompts import COMPARISON_INTENT_RE as _cre
+        return bool(_cre.search(query_text or ""))
+    except Exception:
+        return True
+
+
 
 def log_runtime_trace(trace: Dict[str, Any]) -> None:
     """Emit one safe structured runtime-trace line (H15)."
@@ -742,7 +764,7 @@ async def run_pipeline(
                     pass
                 if _excl_note and output.clarification is None and not validated_state.get(
                     "exclusion_disclosed"
-                ):
+                ) and _disclose_exclusion_for_query(plan_text):
                     output.answer = str(output.answer or "").rstrip() + "\n\n" + _excl_note
                     try:
                         validated_state["exclusion_disclosed"] = True

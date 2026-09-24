@@ -333,17 +333,22 @@ def mark_exclusion_disclosed(state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def exclusion_note_for(state: Dict[str, Any]) -> str:
-    """Single renderer for the exclusion disclosure (P0#5 dedup)."""
+    """Single renderer for the exclusion disclosure (P0#5 dedup).
+
+    Names render in plain words ("revenue growth", not the internal
+    "revenue_growth" slug): this sentence is pasted into the user-facing
+    answer, so it must read like prose, not a debug trace.
+    """
     try:
         bits: List[str] = []
         for item in state.get("excluded_entities", []) or []:
             name = item.get("entity") if isinstance(item, dict) else str(item)
             if name:
-                bits.append(str(name))
+                bits.append(str(name).replace("_", " "))
         for item in state.get("excluded_metrics", []) or []:
             name = item.get("metric") if isinstance(item, dict) else str(item)
             if name:
-                bits.append(str(name))
+                bits.append(str(name).replace("_", " "))
         if not bits:
             return ""
         return (
