@@ -6,6 +6,9 @@ from app.config import get_settings
 from app.services.auth.email_verification import create_verification_token
 from app.services.auth.email_sender import send_verification_email
 from app.services.auth.token_service import create_access_token, create_refresh_token
+import logging
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 pwd_manager = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -35,7 +38,13 @@ async def register_user(db: AsyncSession, email, password, name):
     await db.commit()
     await db.refresh(user)
     token = create_verification_token(user.id)
-    await send_verification_email(user.email, token)
+    # The account is already committed — a mail-server hiccup must never turn
+    # signup into a 500. Log it and let the user in; a lost link is recoverable
+    # anytime via POST /auth/resend-verification.
+    try:
+        await send_verification_email(user.email, token)
+    except Exception as e:
+        logger.warning("Verification email to %s failed: %s", user.email, e)
     return {
         "user": user,
         "access_token": create_access_token(user.id),

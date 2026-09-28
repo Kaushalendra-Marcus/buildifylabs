@@ -5,7 +5,7 @@ from app.config import get_settings
 settings = get_settings()
 
 async def send_verification_email(to_email: str, token: str):
-    link = f"{settings.FRONTEND_URL}/verify?token={token}"
+    link = f"{settings.FRONTEND_URL}/verify-email?token={token}"
 
     msg = EmailMessage()
     msg["Subject"] = "Verify your email"
