@@ -24,6 +24,93 @@
   border-right: 1px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
   padding: 16px 12px;
   z-index: 20;
+  overflow: hidden;
+  white-space: nowrap;
+  transition:
+    width 0.22s cubic-bezier(0.32, 0.72, 0, 1),
+    padding 0.22s cubic-bezier(0.32, 0.72, 0, 1),
+    border-color 0.22s ease,
+    transform 0.22s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.18s ease;
+}
+
+/* Collapsed global nav — keeps DOM (tests / a11y) but gives the content
+ * full width. This is what fixes the old double-sidebar squeeze on /app/chat:
+ * hide this AND the history rail => true focus mode. */
+.app-shell--nav-collapsed .app-shell__sidebar {
+  width: 0;
+  min-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border-right-color: transparent;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app-shell__sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.app-shell__sidebar-head .app-shell__brand {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-shell__collapse-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.app-shell__collapse-btn:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* Floating restore pill — desktop only, hidden on /app/chat where the chat
+ * header already owns the nav toggle (avoids a duplicate floating button). */
+.app-shell__expand-fab {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 25;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: inherit;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface-raised, var(--surface-card));
+  border: 1px solid color-mix(in srgb, var(--text-muted) 35%, transparent);
+  border-radius: 999px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+  padding: 7px 13px 7px 10px;
+  cursor: pointer;
+}
+
+.app-shell__expand-fab:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.app-shell--on-chat .app-shell__expand-fab {
+  display: none;
+}
+
+.app-shell__main {
+  position: relative;
 }
 
 .app-shell__brand {
@@ -170,6 +257,11 @@
 
 @media (max-width: 767.98px) {
   .app-shell__sidebar {
+    display: none;
+  }
+
+  /* No floating restore on mobile — the bottom tab bar is the nav there. */
+  .app-shell__expand-fab {
     display: none;
   }
 

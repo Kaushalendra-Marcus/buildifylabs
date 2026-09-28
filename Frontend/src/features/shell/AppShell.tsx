@@ -5,14 +5,15 @@
  * every other page renders inside this frame: left sidebar on desktop
  * (>=768px), bottom tab bar on narrow viewports. Amber accent only.
  */
-import { Activity, Database, LayoutDashboard, MessageSquare, Pin, Search } from 'lucide-react';
+import { Activity, Database, LayoutDashboard, MessageSquare, PanelLeftClose, PanelLeftOpen, Pin, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { PlanBadge } from '../../components/PlanBadge';
 import { ThemeToggle } from '../../components/ThemeToggle';
 import { useAuth } from '../../hooks/useAuth';
 import { AccountMenu } from '../chat/AccountMenu';
 import { CommandPalette } from './CommandPalette';
+import { useShellStore } from './shell-store';
 import './app-shell.css';
 
 const NAV = [
@@ -26,6 +27,10 @@ const NAV = [
 export function AppShell() {
   const { user } = useAuth();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const navOpen = useShellStore((state) => state.navOpen);
+  const toggleNav = useShellStore((state) => state.toggleNav);
+  const location = useLocation();
+  const isChatRoute = location.pathname.startsWith('/app/chat');
 
   // Global quick switcher: Ctrl/⌘+K toggles from anywhere in the app.
   useEffect(() => {
@@ -39,18 +44,61 @@ export function AppShell() {
     return () => document.removeEventListener('keydown', handleKey);
   }, []);
 
+  // Modern rail shortcut: Ctrl/⌘+Shift+B toggles the global navigation from
+  // anywhere (mirrors the chat header toggle). Ignored while typing so we
+  // never steal keystrokes from the composer.
+  useEffect(() => {
+    function handleKey(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const typing =
+        target != null &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable);
+      if (typing) return;
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === 'b'
+      ) {
+        event.preventDefault();
+        toggleNav();
+      }
+    }
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [toggleNav]);
+
   return (
-    <div className="app-shell">
-      <aside className="app-shell__sidebar" aria-label="App navigation">
-        <NavLink to="/" className="app-shell__brand" aria-label="Buildify Labs home">
-          <span className="brand-tile brand-tile--sm" aria-hidden="true">
-            <img src="/logo.png" alt="" />
-          </span>
-          <span className="app-shell__brand-text">
-            <span className="app-shell__brand-name">Buildify Labs</span>
-            <span className="app-shell__brand-sub">Intelligence</span>
-          </span>
-        </NavLink>
+    <div
+      className={`app-shell${navOpen ? '' : ' app-shell--nav-collapsed'}${isChatRoute ? ' app-shell--on-chat' : ''}`}
+    >
+      <aside
+        className="app-shell__sidebar"
+        aria-label="App navigation"
+        aria-hidden={navOpen ? undefined : true}
+        inert={!navOpen}
+      >
+        <div className="app-shell__sidebar-head">
+          <NavLink to="/" className="app-shell__brand" aria-label="Buildify Labs home">
+            <span className="brand-tile brand-tile--sm" aria-hidden="true">
+              <img src="/logo.png" alt="" />
+            </span>
+            <span className="app-shell__brand-text">
+              <span className="app-shell__brand-name">Buildify Labs</span>
+              <span className="app-shell__brand-sub">Intelligence</span>
+            </span>
+          </NavLink>
+          <button
+            type="button"
+            className="app-shell__collapse-btn"
+            onClick={toggleNav}
+            aria-label="Hide navigation"
+            title="Hide navigation (Ctrl+Shift+B) — more space for content"
+          >
+            <PanelLeftClose size={16} aria-hidden="true" />
+          </button>
+        </div>
 
         <nav className="app-shell__nav" aria-label="Primary">
           {NAV.map(({ to, end, label, icon: Icon }) => (
@@ -87,6 +135,18 @@ export function AppShell() {
       </aside>
 
       <div className="app-shell__main">
+        {!navOpen && (
+          <button
+            type="button"
+            className="app-shell__expand-fab"
+            onClick={toggleNav}
+            aria-label="Show navigation"
+            title="Show navigation (Ctrl+Shift+B)"
+          >
+            <PanelLeftOpen size={16} aria-hidden="true" />
+            <span>Menu</span>
+          </button>
+        )}
         <header className="app-shell__topbar">
           <NavLink to="/" className="app-shell__brand app-shell__brand--top" aria-label="Buildify Labs home">
             <span className="brand-tile brand-tile--sm" aria-hidden="true">

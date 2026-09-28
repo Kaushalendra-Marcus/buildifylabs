@@ -42,15 +42,45 @@
   width: 34px;
   height: 34px;
   padding: 0;
-  border: none;
+  border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .chat-header__rail-toggle:hover {
   background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
+}
+
+/* Dual sidebar controls: [nav toggle] [history toggle] as one modern group. */
+.chat-header__toggles {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: color-mix(in srgb, var(--text-secondary) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 25%, transparent);
+  border-radius: 10px;
+  padding: 2px;
+}
+
+.chat-header__toggles .chat-header__rail-toggle {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+}
+
+.chat-header__toggles .chat-header__rail-toggle:hover {
+  background: var(--surface-raised, color-mix(in srgb, var(--text-secondary) 12%, transparent));
+  color: var(--accent);
+}
+
+.chat-header__nav-toggle[aria-expanded='false'] {
+  color: var(--accent);
 }
 
 .chat-header__brand {
@@ -483,13 +513,71 @@ a.chat-header__brand:hover .chat-header__brand-name {
   flex-direction: column;
   background: var(--surface-card);
   border-right: 1px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
-  transition: width 0.18s ease;
+  transition:
+    width 0.22s cubic-bezier(0.32, 0.72, 0, 1),
+    border-color 0.22s ease,
+    opacity 0.18s ease;
   overflow: hidden;
+  white-space: nowrap;
 }
 
 .history-rail--closed {
   width: 0;
   border-right-width: 0;
+  opacity: 0;
+}
+
+.history-rail--closed .history-rail__top,
+.history-rail--closed .history-rail__body,
+.history-rail--closed .history-rail__footer {
+  visibility: hidden;
+}
+
+/* Focus mode (BOTH sidebars hidden): give the stream + composer max space
+ * with a wider, calmer column — the whole point of the hide toggles. */
+.chat-workspace--focus .message-stream__list {
+  max-width: 960px;
+}
+
+.chat-workspace__focus-hint {
+  flex: none;
+  margin: 10px auto 0;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-secondary) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 28%, transparent);
+  border-radius: 999px;
+  padding: 5px 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: calc(100% - 32px);
+}
+
+.chat-workspace__focus-hint kbd {
+  display: inline-block;
+  font-family: inherit;
+  font-size: 10px;
+  background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 35%, transparent);
+  border-radius: 5px;
+  padding: 0 5px;
+  margin: 0 3px;
+}
+
+/* De-dup the double brand on /app/chat: the AppShell sidebar already shows
+ * "Buildify Labs Intelligence", so when the global nav is OPEN the chat
+ * header keeps its logo tile but visually hides the repeated wordmark
+ * (DOM stays for a11y/tests). When nav is hidden, the header brand returns
+ * so identity is never lost. */
+.app-shell--on-chat:not(.app-shell--nav-collapsed) .chat-header__brand-text {
+  display: none;
+}
+
+.app-shell--nav-collapsed .chat-header__brand-text {
+  display: inline-flex;
 }
 
 .history-rail__body {
@@ -852,6 +940,24 @@ a.chat-header__brand:hover .chat-header__brand-name {
   .chat-header__brand-sub {
     display: none;
   }
+
+  /* Focus hint is desktop-only chrome — no room for it on phones. */
+  .chat-workspace__focus-hint {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  /* Compact header actions on small phones: icon-only New chat. */
+  .chat-header__new-chat {
+    font-size: 0;
+    gap: 0;
+    padding: 8px 9px;
+  }
+
+  .chat-header__new-chat svg {
+    flex: none;
+  }
 }
 
 /* ----- History rail: OVERLAY on narrow viewports (<768px) -----
@@ -865,9 +971,17 @@ a.chat-header__brand:hover .chat-header__brand-name {
     bottom: 0;
     left: 0;
     width: 280px;
+    opacity: 1;
     transition: transform 0.18s ease;
     transform: translateX(-100%);
     box-shadow: var(--elevation-raised);
+  }
+
+  /* Overlay hides via slide, not via width-collapse (desktop mechanism). */
+  .history-rail--closed {
+    width: 280px;
+    opacity: 1;
+    border-right-width: 1px;
   }
 
   .history-rail--open {
