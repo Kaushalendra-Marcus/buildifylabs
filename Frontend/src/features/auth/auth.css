@@ -283,6 +283,48 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
+/* Password field with show/hide ("eye") toggle. The wrap keeps the input
+ * full-width while the toggle sits inside its right edge. */
+.auth-field__password-wrap {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.auth-field__input--with-toggle {
+  flex: 1;
+  min-width: 0;
+  padding-right: 40px;
+}
+
+.auth-field__password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.auth-field__password-toggle:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.auth-field__password-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .auth-form__error {
   font-size: var(--font-size-caption);
   color: var(--danger);

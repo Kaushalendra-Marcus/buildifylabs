@@ -149,6 +149,29 @@ describe('Auth screens (F1)', () => {
       )
       expect(authApi.signup).not.toHaveBeenCalled()
     })
+
+    it('toggles confirm password visibility via the eye button', async () => {
+      const user = userEvent.setup()
+
+      render(
+        <MemoryRouter>
+          <SignupScreen />
+        </MemoryRouter>,
+      )
+
+      const confirm = screen.getByLabelText('Confirm password')
+      expect(confirm).toHaveAttribute('type', 'password')
+
+      await user.click(
+        screen.getByRole('button', { name: 'Show Confirm password' }),
+      )
+      expect(confirm).toHaveAttribute('type', 'text')
+
+      await user.click(
+        screen.getByRole('button', { name: 'Hide Confirm password' }),
+      )
+      expect(confirm).toHaveAttribute('type', 'password')
+    })
   })
 
   describe('ForgotPasswordScreen', () => {

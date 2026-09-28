@@ -12,6 +12,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { getErrorMessage } from '../../lib/errors';
 import { getOrCreateDeviceId } from './device-id';
 import { FormError } from './FormError';
+import { PasswordField } from './PasswordField';
 
 export function SigninScreen() {
   const { signin, signInAsGuest } = useAuth();
@@ -60,17 +61,13 @@ export function SigninScreen() {
         />
       </label>
 
-      <label className="auth-field">
-        <span className="auth-field__label">Password</span>
-        <input
-          className="auth-field__input"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-      </label>
+      <PasswordField
+        label="Password"
+        value={password}
+        onChange={setPassword}
+        autoComplete="current-password"
+        required
+      />
 
       <FormError message={error} />
 

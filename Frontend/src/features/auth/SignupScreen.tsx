@@ -10,6 +10,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { getErrorMessage } from '../../lib/errors';
 import { FormError } from './FormError';
+import { PasswordField } from './PasswordField';
 
 const PASSWORD_MIN = 8;
 
@@ -72,30 +73,22 @@ export function SignupScreen() {
         />
       </label>
 
-      <label className="auth-field">
-        <span className="auth-field__label">Password</span>
-        <input
-          className="auth-field__input"
-          type="password"
-          autoComplete="new-password"
-          minLength={PASSWORD_MIN}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-      </label>
+      <PasswordField
+        label="Password"
+        value={password}
+        onChange={setPassword}
+        autoComplete="new-password"
+        minLength={PASSWORD_MIN}
+        required
+      />
 
-      <label className="auth-field">
-        <span className="auth-field__label">Confirm password</span>
-        <input
-          className="auth-field__input"
-          type="password"
-          autoComplete="new-password"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          required
-        />
-      </label>
+      <PasswordField
+        label="Confirm password"
+        value={confirm}
+        onChange={setConfirm}
+        autoComplete="new-password"
+        required
+      />
 
       <FormError message={error} />
 
