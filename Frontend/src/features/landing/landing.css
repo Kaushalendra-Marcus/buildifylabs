@@ -2194,6 +2194,33 @@
   .bl-mock__row {
     flex-direction: column;
   }
+  /* Mobile demo card: tighter card, wrapping pills (no sideways scroll),
+     stacked versus cards, and tempered display numerals. */
+  .bl-mock {
+    margin-top: 32px;
+    border-radius: 12px;
+  }
+  .bl-mock__body {
+    padding: 14px;
+  }
+  .bl-mock__tabs {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+  .bl-mock__versus {
+    grid-template-columns: 1fr;
+  }
+  .bl-mock__metric-value,
+  .bl-mock__versus-value {
+    font-size: 22px;
+  }
+  .bl-mock__bar em {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .bl-ask__input {
     padding-inline: 48px 12px;
     height: auto;
