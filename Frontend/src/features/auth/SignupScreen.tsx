@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
+import { GoogleButton } from '../../components/GoogleButton';
 import { useAuth } from '../../hooks/useAuth';
 import { getErrorMessage } from '../../lib/errors';
 import { FormError } from './FormError';
@@ -49,6 +50,12 @@ export function SignupScreen() {
   return (
     <form className="auth-form" onSubmit={handleSubmit}>
       <h1 className="auth-form__title">Create your account</h1>
+
+      <GoogleButton onError={(err) => setError(getErrorMessage(err))} />
+
+      <div className="auth-form__divider">
+        <span>or sign up with email</span>
+      </div>
 
       <label className="auth-field">
         <span className="auth-field__label">Name (optional)</span>

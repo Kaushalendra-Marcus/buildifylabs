@@ -1,7 +1,11 @@
 /* GoogleButton (F1) — the Sign In With Google button (GIS) fills its row. The
- * wrapper div the GIS library mounts into is stretched to the button width. */
+ * wrapper div the GIS library mounts into is stretched to the button width.
+ * Capped and centered so the third-party button never stretches awkwardly
+ * on wide forms nor hugs an edge on narrow ones. */
 .google-button {
   width: 100%;
+  max-width: 340px;
+  margin: 0 auto;
   min-height: 40px;
   display: flex;
   justify-content: center;
