@@ -41,6 +41,11 @@
   /* Positioning context for .bl-grid-bg so the grid runs from the very
      top of the page (behind the sticky nav), not just inside the hero. */
   position: relative;
+  /* The page-level backdrop (800px grid + 480px orbs) bleeds past narrow
+     viewports: clip it horizontally so mobile never gets a sideways scroll
+     into the body background. `clip` (not `hidden`) keeps the sticky nav
+     working — same reason .bl-hero uses it. */
+  overflow-x: clip;
 }
 
 /* Explicit dark — same values as the base, so an explicit choice always
