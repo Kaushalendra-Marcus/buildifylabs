@@ -42,14 +42,17 @@ starting; don't fix from this summary alone.
 - **[Closed, B3]** Empty (0-byte) uploads are rejected explicitly with a `400` in the validator.
 - **[Closed, Part C]** `.xlsx` uploads parse into the per-user SQL table exactly like CSV
   (`parser.parse_xlsx_bytes` → same `clean_dataframe` + `upsert_user_table`; `openpyxl`).
-- **[Closed, Part C]** `.pdf` uploads extract text (`pdf_parser.extract_pdf_text`/`chunk_text`),
-  embed (HF Inference API, `embeddings.py`) and store in `document_chunks` (pgvector on the
-  existing Neon Postgres — Pinecone superseded, no second vendor/key). Retrieved per query by
-  cosine similarity scoped to `user_id`, merged into the answer inside a reserved sub-budget
-  (`MAX_DOCUMENT_CONTEXT_CHARS`) ranked ahead of web evidence, tagged `your_documents`
-  end-to-end (prompt tag + frontend "your documents" badge). `ENABLE_DOCUMENT_QA=false`
-   degrades cleanly (ingest still succeeds; retrieval skipped). Scanned/image-only PDFs fail
-   honestly (OCR out of scope).
+- **[Closed, Part C]** `.pdf` uploads extract text (`pdf_parser.extract_pdf_text`/`chunk_text`)
+  and store plain-text chunks in `document_chunks` on the existing Neon Postgres
+  (no embedding service, no second vendor/key — the earlier HF-Inference-API +
+  pgvector design was removed after the vendor endpoint became unreachable from
+  prod). Retrieved per query by keyword overlap scoped to `user_id` (first
+  chunks as fallback when no keyword hits), merged into the answer inside a
+  reserved sub-budget (`MAX_DOCUMENT_CONTEXT_CHARS`) ranked ahead of web
+  evidence, tagged `your_documents` end-to-end (prompt tag + frontend "your
+  documents" badge). `ENABLE_DOCUMENT_QA=false` degrades cleanly (ingest still
+  succeeds; retrieval skipped). Scanned/image-only PDFs fail honestly (OCR out
+  of scope).
 - **[Closed]** File management round-trip exists: `DELETE /files/{id}` (own-only,
   guest 403; drops the per-user data table only when the deleted file is the
   latest completed tabular upload, deletes PDF `document_chunks`, removes raw
