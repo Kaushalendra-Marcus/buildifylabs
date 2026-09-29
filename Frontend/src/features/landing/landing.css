@@ -2191,13 +2191,22 @@
   .bl-footer__grid {
     grid-template-columns: 1fr;
   }
-  /* Mobile footer: tighter rhythm and a stacked bottom bar — the two
-     mono labels collide side-by-side on 360px screens. */
+  /* Mobile footer: brand full-width on top, the two link columns
+     side-by-side, trust full-width below, and a stacked bottom bar — the
+     two mono labels collide side-by-side on 360px screens. */
   .bl-footer {
     padding: 48px 16px 0;
   }
   .bl-footer__grid {
+    grid-template-columns: 1fr 1fr;
     gap: 28px;
+  }
+  .bl-footer__grid > :first-child {
+    grid-column: 1 / -1;
+  }
+  .bl-footer__grid > :nth-child(3) {
+    grid-column: 1 / -1;
+    order: 1;
   }
   .bl-footer__bar {
     flex-direction: column;
