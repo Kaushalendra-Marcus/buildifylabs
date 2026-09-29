@@ -884,7 +884,7 @@ class TestDocumentEvidence:
     TEST_ID_DOCS = uuid.UUID("eeeeeeee-0000-1111-2222-333344445555")
 
     def _mock_docs(self, monkeypatch):
-        async def fake_docs(db, user_id, query_text):
+        async def fake_docs(db, user_id, query_text, file_ids=None):
             return (
                 ["Annual revenue was five million, per the report."],
                 [

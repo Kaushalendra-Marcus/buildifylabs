@@ -25,6 +25,8 @@ import { isQuotaError } from '../../lib/http';
 import type { SourceScope } from '../../types/chat';
 import { useChatStore, type PendingKind } from './chat-store';
 import { useScopeStore } from './scope-store';
+import { useDocFilterStore } from './doc-filter-store';
+import { DocumentPicker } from './DocumentPicker';
 import { WINDOW_MS, useQuotaStore } from './quota-store';
 import { QuotaChip } from './QuotaChip';
 import { UploadPopover } from './UploadPopover';
@@ -106,6 +108,12 @@ export function Composer() {
           query: text,
           source_scope: scope,
           thread_id: useChatStore.getState().activeConversationId ?? undefined,
+          // Document picker: only for scopes with document evidence, and
+          // only when the user actually picked files (empty = all PDFs).
+          ...((scope === 'own_data' || scope === 'both') &&
+          useDocFilterStore.getState().selectedFileIds.length > 0
+            ? { file_ids: useDocFilterStore.getState().selectedFileIds }
+            : {}),
         },
         (stage) => useChatStore.getState().setPendingStage(stage),
         (delta) => useChatStore.getState().appendStreamingText(delta),
@@ -183,6 +191,9 @@ export function Composer() {
           </div>
           <QuotaChip />
         </div>
+
+        {/* Document picker: PDF multi-select for Your data / Both scopes. */}
+        <DocumentPicker />
 
         {/* 5.1 text input + 5.3 upload + 5.4 send */}
         <div className="composer__row">

@@ -540,7 +540,9 @@ async def _answer_request(
         if effective_scope not in ("own_data", "both"):
             return [], []
         from app.services.data.vector_store import retrieve_document_evidence
-        return await retrieve_document_evidence(db, user_id, plan_query)
+        return await retrieve_document_evidence(
+            db, user_id, plan_query, request.file_ids
+        )
 
     await emit("evidence")
     try:

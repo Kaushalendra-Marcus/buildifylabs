@@ -14,6 +14,7 @@ import { Composer } from './Composer'
 import { useChatStore } from './chat-store'
 import { useQuotaStore } from './quota-store'
 import { useScopeStore } from './scope-store'
+import { useDocFilterStore } from './doc-filter-store'
 import { useAuthStore } from '../auth/auth-store'
 import { sendQuery } from '../../api/chat'
 import { listFiles } from '../../api/files'
@@ -67,6 +68,7 @@ beforeEach(() => {
     questionsLifetime: 0,
   })
   useScopeStore.setState({ scope: 'own_data' })
+  useDocFilterStore.setState({ selectedFileIds: [] })
   useAuthStore.getState().signOut()
   vi.clearAllMocks()
 })
@@ -302,6 +304,32 @@ describe('Composer (F5, specs/14 §5)', () => {
     expect(vi.mocked(sendQuery).mock.calls[0][0]).toMatchObject({
       query: 'threaded question',
       thread_id: activeId,
+    })
+  })
+
+  it('sends picked document ids, and omits file_ids when nothing is picked', async () => {
+    signedInAs('free')
+    vi.mocked(sendQuery).mockResolvedValue(makeOutput())
+    vi.mocked(listFiles).mockResolvedValue([])
+    const user = userEvent.setup()
+    render(<Composer />)
+
+    await user.type(
+      screen.getByPlaceholderText('Why did revenue drop last week?'),
+      'first question',
+    )
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    expect(vi.mocked(sendQuery).mock.calls[0][0]).not.toHaveProperty('file_ids')
+
+    useDocFilterStore.getState().toggleFile('pdf-9')
+    await user.type(
+      screen.getByPlaceholderText('Why did revenue drop last week?'),
+      'second question',
+    )
+    await user.click(screen.getByRole('button', { name: 'Send message' }))
+    expect(vi.mocked(sendQuery).mock.calls[1][0]).toMatchObject({
+      query: 'second question',
+      file_ids: ['pdf-9'],
     })
   })
 })

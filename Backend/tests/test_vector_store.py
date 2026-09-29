@@ -25,6 +25,7 @@ def run(coro):
 USER_ID = uuid.uuid4()
 OTHER_ID = uuid.uuid4()
 FILE_ID = uuid.uuid4()
+FILE_ID_B = uuid.uuid4()
 
 
 def _compiled_sql(statement):
@@ -47,27 +48,38 @@ class _Result:
         return self._scalar
 
 
-def _chunk(user_id, content, index=0):
+def _chunk(user_id, content, index=0, file_id=FILE_ID):
     return {
         "content": content,
         "file_name": "report.pdf",
         "chunk_index": index,
         "created_at": "2026-09-01T00:00:00",
         "user_id": user_id,
+        "file_id": file_id,
     }
 
 
-def _db_with_chunks(chunks, viewer=USER_ID):
-    """Fake session whose filtering mirrors the real WHERE user_id clause.
-    It also asserts the caller's user_id actually reached the SQL."""
+def _db_with_chunks(chunks, viewer=USER_ID, file_ids=None):
+    """Fake session whose filtering mirrors the real WHERE user_id (+ file_id)
+    clauses. It also asserts the caller's ids actually reached the SQL."""
+
+    def _ids_in(sql, ids):
+        flat = sql.replace("-", "")
+        return all(str(i).replace("-", "") in flat for i in ids)
 
     async def execute(statement, *args, **kwargs):
         sql = _compiled_sql(statement).replace("-", "")
         assert str(viewer).replace("-", "") in sql, "user_id must be bound in the SQL itself"
+        picked = file_ids if file_ids else None
+        if picked:
+            assert _ids_in(sql, picked), "picked file_ids must be bound in the SQL itself"
+        mine = [
+            c for c in chunks
+            if c["user_id"] == viewer and (picked is None or c["file_id"] in picked)
+        ]
         if "document_chunks.id" in sql:
-            mine = [c for c in chunks if c["user_id"] == viewer]
             return _Result(scalar=object() if mine else None)
-        rows = [dict(c) for c in chunks if c["user_id"] == viewer]
+        rows = [dict(c) for c in mine]
         return _Result(mappings=rows)
 
     return SimpleNamespace(execute=execute)
@@ -161,3 +173,20 @@ class TestRetrieveDocumentEvidence:
         texts, sources = run(retrieve_document_evidence(db, USER_ID, "penguins"))
         assert texts == ["Revenue was five million.", "Costs held steady."]
         assert all(s["provider"] == "your_documents" for s in sources)
+
+    def test_file_ids_restrict_to_picked_files(self):
+        chunks = [
+            _chunk(USER_ID, "Revenue was five million.", index=0, file_id=FILE_ID),
+            _chunk(USER_ID, "Penguins migrate south.", index=0, file_id=FILE_ID_B),
+        ]
+        db = _db_with_chunks(chunks, viewer=USER_ID, file_ids=[FILE_ID_B])
+        texts, sources = run(
+            retrieve_document_evidence(db, USER_ID, "revenue?", [FILE_ID_B])
+        )
+        assert texts == ["Penguins migrate south."]
+        assert sources[0]["title"] == "report.pdf"
+
+    def test_file_ids_with_no_match_returns_empty(self):
+        chunks = [_chunk(USER_ID, "Revenue was five million.", file_id=FILE_ID)]
+        db = _db_with_chunks(chunks, viewer=USER_ID, file_ids=[FILE_ID_B])
+        assert run(retrieve_document_evidence(db, USER_ID, "revenue?", [FILE_ID_B])) == ([], [])

@@ -108,6 +108,7 @@ interface ChatRequest {
   query: string;
   source_scope?: "own_data" | "live_web" | "both";   // only "own_data" is fully supported today
   company_name?: string | null;          // reserved for benchmarking (specs/11), unused in B4
+  file_ids?: string[];                   // document picker: picked PDF upload ids; omitted/empty = all PDFs
 }
 
 interface FlagRequest { query_log_id: string; }          // POST /chat/flag

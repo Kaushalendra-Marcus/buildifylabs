@@ -56,6 +56,9 @@ export interface ChatRequest {
   company_name?: string | null; // reserved for benchmarking (specs/11)
   /** Per-conversation thread id — the active chat-store conversation id. */
   thread_id?: string;
+  /** Document picker: restrict PDF evidence to these upload ids.
+   *  Omitted/empty = all of the user's PDFs. */
+  file_ids?: string[];
 }
 
 export interface FlagRequest {
