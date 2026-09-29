@@ -108,6 +108,35 @@ async def user_has_document_chunks(db: AsyncSession, user_id) -> bool:
     return result.scalar_one_or_none() is not None
 
 
+async def first_chunks(db: AsyncSession, user_id, top_k: int) -> List[dict]:
+    """First top_k chunks in document order, tenant-scoped. The fallback
+    for queries that share no keywords with the text (e.g. "summarize my
+    PDF", "what do you know about my data"): vector search used to always
+    return nearest chunks even at low similarity, so returning the opening
+    chunks keeps that contract — the judge still decides relevance."""
+    result = await db.execute(
+        select(
+            DocumentChunk.content,
+            DocumentChunk.file_name,
+            DocumentChunk.chunk_index,
+            DocumentChunk.created_at,
+        )
+        .where(DocumentChunk.user_id == user_id)
+        .order_by(DocumentChunk.chunk_index)
+        .limit(top_k)
+    )
+    return [
+        {
+            "content": row["content"],
+            "file_name": row["file_name"],
+            "chunk_index": row["chunk_index"],
+            "created_at": row["created_at"],
+            "score": None,
+        }
+        for row in result.mappings()
+    ]
+
+
 async def retrieve_document_evidence(
     db: AsyncSession, user_id, query_text: str,
 ) -> Tuple[List[str], List[dict]]:
@@ -125,6 +154,10 @@ async def retrieve_document_evidence(
         rows = await search_chunks(
             db, user_id, query_text, settings.MAX_DOCUMENT_CHUNKS_PER_QUERY,
         )
+        if not rows:
+            rows = await first_chunks(
+                db, user_id, settings.MAX_DOCUMENT_CHUNKS_PER_QUERY,
+            )
     except Exception as exc:
         logger.warning(f"Document retrieval skipped (fail-soft): {exc}")
         return [], []

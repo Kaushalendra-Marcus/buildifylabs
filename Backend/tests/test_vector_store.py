@@ -152,3 +152,12 @@ class TestRetrieveDocumentEvidence:
         assert texts == ["Revenue was five million."]
         assert sources[0]["provider"] == "your_documents"
         assert sources[0]["title"] == "report.pdf"
+
+    def test_keyword_miss_falls_back_to_first_chunks(self):
+        db = _db_with_chunks([
+            _chunk(USER_ID, "Revenue was five million.", index=0),
+            _chunk(USER_ID, "Costs held steady.", index=1),
+        ])
+        texts, sources = run(retrieve_document_evidence(db, USER_ID, "penguins"))
+        assert texts == ["Revenue was five million.", "Costs held steady."]
+        assert all(s["provider"] == "your_documents" for s in sources)
