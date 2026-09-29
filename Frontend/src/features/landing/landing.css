@@ -2130,6 +2130,29 @@
 }
 
 @media (max-width: 560px) {
+  /* Mobile nav: the pill keeps brand + signup + theme only. The Log in
+     link hides here (one tap away via the signup page's Sign in link), so
+     the row never overflows on 360px screens. */
+  .bl-nav {
+    gap: 8px;
+    padding: 8px 8px 8px 12px;
+  }
+  .bl-nav__brand {
+    font-size: 14px;
+  }
+  .bl-nav__login {
+    display: none;
+  }
+  .bl-nav__actions {
+    gap: 8px;
+  }
+  .bl-nav__signup {
+    padding: 7px 10px;
+  }
+  .bl-nav .theme-toggle.bl-nav__theme {
+    width: 30px;
+    height: 30px;
+  }
   .bl-hero {
     padding: 64px 16px 48px;
   }
