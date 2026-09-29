@@ -434,7 +434,6 @@ class TestPreviewFile:
                         file_name="doc.pdf",
                         chunk_index=0,
                         content="first chunk",
-                        embedding=[0.0] * 384,
                     )
                 )
                 await session.commit()

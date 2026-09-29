@@ -8,19 +8,18 @@ from typing_extensions import Annotated
 class Settings(BaseSettings):
     APP_NAME: str = "BACKEND"
     VERSION: str = "1.0.0"
-    # NoDecode: pydantic-settings ka apna JSON-parse validator se PEHLE
-    # chalta hai aur comma-separated value pe SettingsError deke app ko
-    # boot hone se rok deta tha. NoDecode se raw string validator tak
-    # pahunchti hai, jo JSON array aur comma-separated dono accept karta hai.
+    # NoDecode: pydantic-settings JSON-decodes complex fields before any
+    # field_validator runs, so a comma-separated value used to crash the app
+    # at boot with SettingsError. NoDecode passes the raw string through to
+    # the validator below, which accepts both JSON arrays and plain
+    # comma-separated strings.
     ALLOWED_ORIGIN: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
 
     @field_validator("ALLOWED_ORIGIN", mode="before")
     @classmethod
     def parse_allowed_origin(cls, v):
-        # Render dashboard me log aksar comma-separated ya bina-bracket
-        # URL daal dete hain ("https://a,https://b"), jo pydantic ka
-        # list[str] JSON-parse fail karke CORS tod deta hai. Dono format
-        # accept karo: JSON array ya comma-separated string.
+        # Accept a JSON array ('["https://a","https://b"]') or a plain
+        # comma-separated string ("https://a, https://b") for the same list.
         if isinstance(v, str):
             s = v.strip()
             if s.startswith("["):
@@ -39,7 +38,7 @@ class Settings(BaseSettings):
     SQL_ECHO: bool = False
 
     # These back features that are planned but not wired into any route yet
-    # (LLM pipeline, embeddings/vector store, payments). Making them required
+    # (LLM pipeline, payments). Making them required
     # meant the app couldn't boot at all without dummy values for keys nothing
     # currently uses. They become required again as each feature actually
     # ships.
@@ -130,7 +129,7 @@ class Settings(BaseSettings):
     # a silent full failure) — see Phase 6.
     ENABLE_LIVE_WEB_SCOPE: bool = Field(True, env="ENABLE_LIVE_WEB_SCOPE")
 
-    # --- Document QA (Part C): PDF text → chunks → pgvector evidence ---
+    # --- Document QA (Part C): PDF text → chunks → keyword evidence ---
 
     # Kill switch, same shape as ENABLE_LIVE_WEB_SCOPE above: when false,
     # PDF uploads still succeed (parsed and chunked) but retrieval at query
@@ -141,9 +140,6 @@ class Settings(BaseSettings):
     DOCUMENT_CHUNK_OVERLAP_CHARS: int = 150
     MAX_DOCUMENT_CHARS: int = 200_000  # safety cap on extracted PDF text before chunking
     MAX_CHUNKS_PER_FILE: int = 400  # independent backstop
-
-    DOCUMENT_EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
-    DOCUMENT_EMBEDDING_DIM: int = 384
 
     MAX_DOCUMENT_CHUNKS_PER_QUERY: int = 6  # top-K retrieval
     MAX_DOCUMENT_CONTEXT_CHARS: int = 4000  # reserved sub-budget for documents

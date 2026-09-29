@@ -181,7 +181,7 @@ async def preview_file(
 ):
     """First rows of a dataset for the Data page preview drawer. Tabular
     files read the per-user data table; PDFs return the first stored chunks
-    (a plain select — no embedding call). Anything without landed data
+    (a plain select). Anything without landed data
     (processing/failed rows, or a replaced table) is an honest 404."""
     upload = await _own_upload_or_404(db, user, file_id)
     namespace = upload.pinecone_namespace or ""

@@ -1,11 +1,10 @@
-"""Minimal ingestion for Phase B3 (specs/04): CSV -> defensive clean -> a
-queryable per-user data table the SQL layer (B2) executes against.
+"""Ingestion for Phase B3 (specs/04): files -> queryable per-user storage.
 
-CSV is the *minimum* for this phase. XLSX/PDF are still valid upload types per
-the validator, but their parsing is deferred ("XLSX next, PDF later" per the
-planning master B3), so uploading them lands a FileUpload row with
-status="failed" and a stored reason. Pinecone/embeddings are skipped entirely
-this pass - the parsed table is queried directly.
+CSV/XLSX are tabular: defensively cleaned, then landed in the per-user
+data table the SQL layer (B2) executes against. PDF is text: extracted,
+chunked, and stored in `document_chunks` for keyword retrieval at query
+time. Anything un-ingestable raises ValueError so the route records
+status="failed" with a stored reason.
 
 The table is created with the exact name `user_data_table_name(user_id)`
 produces (the B2<->B3 co-design contract), so user-scoping stays structural:
@@ -133,7 +132,8 @@ async def ingest_file(db: AsyncSession, user_id, upload_id, filename: str, conte
 
     CSV/XLSX are tabular: cleaned and (re)created as the user's data table
     (returns the per-user table name). PDF is text: extracted, chunked,
-    embedded and stored in `document_chunks` (returns f"vector:{upload_id}").
+    and stored in `document_chunks` for keyword retrieval
+    (returns f"vector:{upload_id}").
     Raises ValueError for anything un-ingestable so the route can record
     status="failed" with a stored reason.
     """

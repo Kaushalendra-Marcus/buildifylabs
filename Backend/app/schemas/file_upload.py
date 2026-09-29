@@ -22,7 +22,7 @@ class FilePreview(BaseModel):
     """First rows of a dataset for the Data page preview drawer.
 
     `kind` is "table" (CSV/XLSX — columns/rows from the per-user data table)
-    or "documents" (PDF — the first stored chunks, no embedding needed).
+    or "documents" (PDF — the first stored text chunks).
     """
 
     file_id: UUID

@@ -2,7 +2,7 @@
 
 The fixture PDF is generated at test time with fpdf2 (dev-only, guarded by
 importorskip) so no binary fixture is checked in. The parser branch itself
-is covered with a mocked store_chunks (no network/embeddings needed).
+is covered with a mocked store_chunks (no network needed).
 """
 
 import asyncio
