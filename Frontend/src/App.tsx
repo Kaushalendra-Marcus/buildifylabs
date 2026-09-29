@@ -16,7 +16,7 @@
  * `useTokenRefresh` re-establishes a session from the stored 7-day refresh
  * token on app load (in-memory access token, F0 decision).
  */
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
 import { AuthLayout } from './features/auth/AuthLayout';
 import { ForgotPasswordScreen } from './features/auth/ForgotPasswordScreen';
@@ -33,7 +33,20 @@ import { OverviewPage } from './features/overview/OverviewPage';
 import { ReportsPage } from './features/reports/ReportsPage';
 import { AppShell } from './features/shell/AppShell';
 import { useTokenRefresh } from './hooks/useTokenRefresh';
+import { initAnalytics, trackPageview } from './lib/analytics';
 import { applyTheme, useThemeStore } from './lib/theme-store';
+
+/** SPA page views for analytics (no-op unless VITE_GA_MEASUREMENT_ID is set). */
+function RouteTracker() {
+  const location = useLocation();
+  useEffect(() => {
+    initAnalytics();
+  }, []);
+  useEffect(() => {
+    trackPageview(location.pathname + location.search);
+  }, [location]);
+  return null;
+}
 
 function AppRoutes() {
   useTokenRefresh();
@@ -71,6 +84,7 @@ function AppRoutes() {
 export default function App() {
   return (
     <BrowserRouter>
+      <RouteTracker />
       <AppRoutes />
     </BrowserRouter>
   );
