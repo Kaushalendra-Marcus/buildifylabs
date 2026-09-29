@@ -2240,7 +2240,8 @@
   scroll-margin-top: 88px;
 }
 
-/* Hero ambient orbs behind the grid. */
+/* Hero ambient orbs behind the grid — page-level like .bl-grid-bg above,
+ * so the theme tint covers the gridlines from the very top of the page. */
 .bl-hero__orbs {
   position: absolute;
   inset: 0;

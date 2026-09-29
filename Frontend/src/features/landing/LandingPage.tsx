@@ -176,6 +176,12 @@ export function LandingPage() {
     <div className="bl-landing">
       {/* Page-level grid backdrop (behind sticky nav + hero) */}
       <div className="bl-grid-bg" aria-hidden="true" />
+      {/* Page-level ambient orbs — same backdrop layer as the grid, so the
+          theme tint sits on the gridlines from the very top */}
+      <div className="bl-hero__orbs" aria-hidden="true">
+        <i className="bl-hero__orb bl-hero__orb--amber" />
+        <i className="bl-hero__orb bl-hero__orb--ember" />
+      </div>
       {/* Floating pill nav — maritime / graphify pattern */}
       <header className="bl-navwrap">
         <nav className="bl-nav" aria-label="Primary">
@@ -205,10 +211,6 @@ export function LandingPage() {
       <main id="main" ref={revealRef}>
         {/* ---------- HERO ---------- */}
         <section className="bl-hero" aria-labelledby="bl-hero-title">
-          <div className="bl-hero__orbs" aria-hidden="true">
-            <i className="bl-hero__orb bl-hero__orb--amber" />
-            <i className="bl-hero__orb bl-hero__orb--ember" />
-          </div>
           <div className="bl-hero__inner">
             <p className="bl-eyebrow">Upload CSV &rarr; Ask in English &rarr; Trusted answer</p>
             <h1 id="bl-hero-title" className="bl-hero__title">
