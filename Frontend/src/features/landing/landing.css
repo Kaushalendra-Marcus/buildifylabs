@@ -438,6 +438,10 @@
   color: var(--bl-amber);
 }
 
+.bl-demo-pin__eyebrow--tap {
+  display: none;
+}
+
 .bl-demo-pin__title {
   margin: 0 0 16px;
   max-width: 22ch;
@@ -465,6 +469,14 @@
     position: static;
     min-height: 0;
     padding: 48px 20px;
+  }
+  /* No scroll-driving on small screens either (see LandingPage): the tabs
+     below stay tappable, so label them that way. */
+  .bl-demo-pin__eyebrow--scroll {
+    display: none;
+  }
+  .bl-demo-pin__eyebrow--tap {
+    display: block;
   }
 }
 

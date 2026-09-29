@@ -123,17 +123,23 @@ export function LandingPage() {
    * `landing.css`) scrolls past — one slide per stretch, the fourth
    * landing just before release into the rest of the page. Works in both
    * directions: scrolling back up steps slides back. Off while
-   * `prefers-reduced-motion` is set (the runway collapses via CSS too). */
+   * `prefers-reduced-motion` is set (the runway collapses via CSS too), and
+   * off on small screens where the runway is a static block (tabs stay
+   * tappable there instead). */
   useEffect(() => {
-    if (
-      typeof window.matchMedia === 'function' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    ) {
+    if (typeof window.matchMedia !== 'function') return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       return;
     }
+    // Same breakpoint as the CSS that collapses the pin runway: with no
+    // runway, a few pixels of scroll would flip all four slides at once.
+    // Evaluated per update (not once) so rotation across the breakpoint
+    // picks the right behavior without remounting.
+    const staticPin = window.matchMedia('(max-width: 700px)');
     let raf = 0;
     const update = () => {
       raf = 0;
+      if (staticPin.matches) return;
       const node = pinRef.current;
       if (!node) return;
       const rect = node.getBoundingClientRect();
@@ -273,7 +279,8 @@ export function LandingPage() {
                 the runway scrolls past, one slide per stretch. */}
             <div className="bl-demo-pin" ref={pinRef}>
               <div className="bl-demo-pin__stage">
-                <p className="bl-demo-pin__eyebrow">Scroll — watch it answer</p>
+                <p className="bl-demo-pin__eyebrow bl-demo-pin__eyebrow--scroll">Scroll — watch it answer</p>
+                <p className="bl-demo-pin__eyebrow bl-demo-pin__eyebrow--tap">Tap an example</p>
                 <h2 className="bl-demo-pin__title">
                   Four questions. <span className="bl-hero__accent">Four traced answers.</span>
                 </h2>

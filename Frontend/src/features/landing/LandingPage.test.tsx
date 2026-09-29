@@ -1,7 +1,7 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useThemeStore } from '../../lib/theme-store'
 import { LandingPage } from './LandingPage'
 
@@ -10,6 +10,41 @@ beforeEach(() => {
   useThemeStore.setState({ theme: 'system' })
   document.documentElement.removeAttribute('data-theme')
 })
+
+afterEach(() => {
+  if (hadMatchMedia) {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      configurable: true,
+      value: originalMatchMedia,
+    })
+  } else {
+    // @ts-expect-error jsdom has no matchMedia by default — restore that.
+    delete window.matchMedia
+  }
+})
+
+// jsdom ships no matchMedia; the page guards its absence. These tests
+// install one per-test and always restore the absence above.
+let originalMatchMedia: typeof window.matchMedia | undefined;
+let hadMatchMedia = false;
+
+function mockSmallScreen(small: boolean) {
+  if (!hadMatchMedia && typeof window.matchMedia === 'function') {
+    originalMatchMedia = window.matchMedia;
+    hadMatchMedia = true;
+  }
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: query === '(max-width: 700px)' ? small : false,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  });
+}
 
 function renderLanding() {
   return render(
@@ -159,5 +194,44 @@ describe('LandingPage', () => {
       ...panel.querySelectorAll('.bl-mock__donut-seg title'),
     ].map((el) => el.textContent)
     expect(segTitles).toContain('Online · 46% · $69.0k')
+  })
+
+  it('ignores scroll-driving on small screens where the pin runway is static', async () => {
+    mockSmallScreen(true)
+    const { container } = renderLanding()
+    const pin = container.querySelector('.bl-demo-pin') as HTMLElement
+    vi.spyOn(pin, 'getBoundingClientRect').mockReturnValue({
+      top: -1900,
+      height: window.innerHeight + 2000,
+    } as DOMRect)
+    window.dispatchEvent(new Event('scroll'))
+    // Let any rAF-driven update run — the first tab must stay put.
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole('tab')[0],
+      ).toHaveAttribute('aria-selected', 'true'),
+    )
+    expect(screen.getByRole('tab', { name: 'Channel mix' })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    )
+    expect(screen.getByText('Tap an example')).toBeInTheDocument()
+  })
+
+  it('scroll-drives the demo tabs on wide screens', async () => {
+    mockSmallScreen(false)
+    const { container } = renderLanding()
+    const pin = container.querySelector('.bl-demo-pin') as HTMLElement
+    vi.spyOn(pin, 'getBoundingClientRect').mockReturnValue({
+      top: -1900,
+      height: window.innerHeight + 2000,
+    } as DOMRect)
+    window.dispatchEvent(new Event('scroll'))
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'Channel mix' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      ),
+    )
   })
 })
