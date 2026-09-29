@@ -2191,6 +2191,19 @@
   .bl-footer__grid {
     grid-template-columns: 1fr;
   }
+  /* Mobile footer: tighter rhythm and a stacked bottom bar — the two
+     mono labels collide side-by-side on 360px screens. */
+  .bl-footer {
+    padding: 48px 16px 0;
+  }
+  .bl-footer__grid {
+    gap: 28px;
+  }
+  .bl-footer__bar {
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 32px;
+  }
   .bl-mock__row {
     flex-direction: column;
   }
