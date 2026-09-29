@@ -1,13 +1,18 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, NoDecode
 from pydantic import Field, field_validator
 from functools import lru_cache
 from typing import Optional
+from typing_extensions import Annotated
 
 
 class Settings(BaseSettings):
     APP_NAME: str = "BACKEND"
     VERSION: str = "1.0.0"
-    ALLOWED_ORIGIN: list[str] = ["http://localhost:5173"]
+    # NoDecode: pydantic-settings ka apna JSON-parse validator se PEHLE
+    # chalta hai aur comma-separated value pe SettingsError deke app ko
+    # boot hone se rok deta tha. NoDecode se raw string validator tak
+    # pahunchti hai, jo JSON array aur comma-separated dono accept karta hai.
+    ALLOWED_ORIGIN: Annotated[list[str], NoDecode] = ["http://localhost:5173"]
 
     @field_validator("ALLOWED_ORIGIN", mode="before")
     @classmethod
