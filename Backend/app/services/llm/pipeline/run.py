@@ -91,6 +91,7 @@ async def run_pipeline(
     prior_research_state: Optional[Dict[str, Any]] = None,
     plan_query: Optional[str] = None,
     on_token: Optional[Callable[[str], Awaitable[None]]] = None,
+    documents_scoped: bool = False,
 ) -> PipelineOutput:
     """Decision-driven pipeline: judge -> narrate -> ground -> guarantee (specs/06).
 
@@ -301,6 +302,12 @@ async def run_pipeline(
     # Using the fragment for narration while the gate used the merged plan
     # let period/metric diverge (e.g. gate PASSED 3Y while the prompt asked
     # 1Y). Every stage below reads plan_text.
+    document_titles = list(dict.fromkeys(
+        str(source.get("title", "")).strip()
+        for source in (web_sources or [])
+        if str(source.get("provider", "")) == "your_documents"
+        and str(source.get("title", "")).strip()
+    ))
     try:
         await emit("judging")
         decision = await judge_sufficiency(
@@ -315,6 +322,8 @@ async def run_pipeline(
                 macro_data=macro_data,
                 price_history=price_history,
                 financial_history=financial_history,
+                document_titles=document_titles,
+                documents_scoped=documents_scoped,
             ),
             prior_clarification=prior_clarification,
             prior_data=prior_data,
@@ -379,6 +388,39 @@ async def run_pipeline(
                         )
         except Exception as exc:
             logger.warning("Clarification-ban check failed: %s", exc)
+        # Document-identity clarification ban: the judge can see evidence is
+        # present but cannot see file names, so it asks for the "title" or
+        # "URL" of a PDF the user already uploaded (or explicitly picked via
+        # the document picker). That question is redundant exactly when the
+        # answer is already known: the user scoped the evidence to picked
+        # files, or a single document is in evidence. Several unpicked files
+        # stay genuinely ambiguous and may still clarify.
+        try:
+            if decision.decision == "clarify" and _asks_for_known_document(
+                decision.missing,
+                decision.suggested_options,
+                document_titles,
+                documents_scoped,
+            ):
+                logger.warning(
+                    "Redundant document-identity clarification suppressed; "
+                    "answering from uploaded documents."
+                )
+                thinking.append(
+                    "Document-identity clarification suppressed "
+                    "(titles already in evidence); answering best-effort."
+                )
+                decision = Decision(
+                    decision="answer",
+                    missing="",
+                    chart_from_prior=decision.chart_from_prior,
+                    visual_plan=decision.visual_plan,
+                    suggested_options=[],
+                    preferred_visual=decision.preferred_visual,
+                    tools_needed=decision.tools_needed,
+                )
+        except Exception as exc:
+            logger.warning("Document-clarification check failed: %s", exc)
         logger.info(
             f"Pipeline decision: {decision.decision} "
             f"(chart_from_prior={decision.chart_from_prior}, "
@@ -1455,6 +1497,38 @@ def evidence_confidence_cap(
         return cap
 
 
+_DOCUMENT_IDENTITY_CUES = (
+    "title",
+    "identifier",
+    "file name",
+    "filename",
+    "which pdf",
+    "which file",
+    "which document",
+    "url",
+    "location",
+)
+
+
+def _asks_for_known_document(
+    missing: Optional[str],
+    suggested_options: Optional[list],
+    document_titles: Optional[list],
+    documents_scoped: bool,
+) -> bool:
+    """True when a clarify verdict asks for a document identity we already
+    have: the user picked files in the document picker (scoped), or exactly
+    one document is in evidence. With several unpicked files the question is
+    genuine, so this stays False and the clarification is allowed."""
+    titles = [str(title) for title in (document_titles or []) if str(title)]
+    if not titles:
+        return False
+    if not documents_scoped and len(titles) != 1:
+        return False
+    text = f"{missing or ''} {' '.join(str(o) for o in (suggested_options or []))}".lower()
+    return any(cue in text for cue in _DOCUMENT_IDENTITY_CUES)
+
+
 def _evidence_inventory(
     rows: Sequence[dict],
     computed_numbers: dict,
@@ -1464,6 +1538,8 @@ def _evidence_inventory(
     macro_data: Optional[list] = None,
     price_history: Optional[list] = None,
     financial_history: Optional[list] = None,
+    document_titles: Optional[list] = None,
+    documents_scoped: bool = False,
 ) -> Dict[str, Any]:
     """Describe what the tools actually returned, for the judge's verdict."""
     rows = list(rows or [])
@@ -1473,6 +1549,9 @@ def _evidence_inventory(
         "columns": columns,
         "computed_stat_keys": sorted((computed_numbers or {}).keys()),
         "web_snippet_count": len(news_context or []),
+        "document_snippet_count": len(document_titles or []),
+        "document_titles": list(document_titles or []),
+        "documents_scoped_to_pick": bool(documents_scoped),
         "market_entities": [
             str(item.get("entity", "series")) for item in (market_data or [])
         ],

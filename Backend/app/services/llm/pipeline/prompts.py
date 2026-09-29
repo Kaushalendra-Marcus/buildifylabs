@@ -177,9 +177,10 @@ DECISION_SYSTEM_PROMPT = """You are the decision step of a business-intelligence
 the user. You judge whether the retrieved evidence suffices and plan the response.
 
 You receive: the user query, an evidence inventory (what the tools actually
-returned: row counts, columns, computed-stat keys, web snippet counts, market
-series), the previous clarification question if the last turn asked one, and a
-digest of the previous answer's data if this looks like a follow-up.
+returned: row counts, columns, computed-stat keys, web snippet counts,
+uploaded-document titles, market series), the previous clarification
+question if the last turn asked one, and a digest of the previous answer's
+data if this looks like a follow-up.
 
 Decide exactly one action:
 - "answer" when the evidence can support a response: the query is clear, OR the
@@ -195,6 +196,11 @@ Decide exactly one action:
   already names the companies, the metrics, and the period, the research
   stage owns data collection: choose "answer" and let the response state
   which evidence could not be obtained.
+- NEVER "clarify" by asking for the identity of an uploaded document (its
+  title, filename, URL, or location) when the inventory already names it:
+  document_titles lists the uploaded PDFs in evidence, and
+  documents_scoped_to_pick true means the user already picked them. Answer
+  from those snippets instead.
 
 Follow-up intents ("chart that", "show it as bars", "break it down", "why did
 that happen") refer to PRIOR DATA: set chart_from_prior true when the query

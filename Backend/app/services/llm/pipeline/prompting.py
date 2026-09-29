@@ -143,6 +143,24 @@ def build_prompt(
 
     company_section = company_name or "Not provided"
 
+    # Uploaded-document identity: the snippets below are tagged per item, but
+    # the file names live on the sources, so name them once up front. The
+    # model must never ask the user for a title/URL it can read here.
+    document_names = list(dict.fromkeys(
+        str(source.get("title", "")).strip()
+        for source in web_sources
+        if str(source.get("provider", "")) == "your_documents"
+        and str(source.get("title", "")).strip()
+    ))
+    document_section = (
+        "Your uploaded documents in evidence: "
+        + ", ".join(document_names)
+        + ". Answer from these snippets; NEVER ask the user for the title, "
+        "identity, URL, or location of these files."
+        if document_names
+        else "Your uploaded documents in evidence: none."
+    )
+
     # Separate channels (P0#15): market_data and macro_data are NEVER merged.
     # A market chart must never contain CPI/GDP/unemployment series.
     market_section = (
@@ -343,6 +361,8 @@ Fundamentals (CURRENT snapshot values - quote these, never re-derive, never use 
 
 Retrieved Evidence (web search and/or your uploaded documents — each item's source is tagged inline):
 {news_section}
+
+{document_section}
 
 {forbid_section}
 

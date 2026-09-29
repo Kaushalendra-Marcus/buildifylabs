@@ -718,6 +718,7 @@ async def _answer_request(
             prior_research_state=prior_research_state,
             plan_query=plan_query,
             on_token=on_token,
+            documents_scoped=bool(request.file_ids),
         )
     except Exception as exc:
         # Never let the pipeline crash the request: fall back per specs/06 FR4.

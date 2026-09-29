@@ -871,3 +871,75 @@ class TestTimeRangeCurrencyConfidence:
         extracted = _extract_financials_from_snippets("BYD", byd, years=3)
         assert extracted is not None
         assert extracted[1]["revenue"]["currency"] == "CNY"
+
+
+# ---------------------------------------------------------------------------
+# TEST P: uploaded-document identity must never be re-asked
+# ---------------------------------------------------------------------------
+class TestDocumentIdentityNeverReasked:
+    """The judge sees evidence counts but not file names, so it used to ask
+    for the "title" of a PDF the user already uploaded (or picked). The
+    deterministic ban + prompt titles close that loop."""
+
+    def test_helper_fires_only_for_known_identity(self):
+        from app.services.llm.pipeline.run import _asks_for_known_document
+
+        assert _asks_for_known_document(
+            "Provide the title or identifier of the PDF",
+            ["Give the URL of the file"], ["Untitled 2.pdf"], True,
+        ) is True
+        # Single unpicked document in evidence is known too.
+        assert _asks_for_known_document(
+            "Which file should I read?", [], ["only.pdf"], False,
+        ) is True
+        # No documents at all: nothing known, clarification allowed.
+        assert _asks_for_known_document(
+            "Provide the title of the PDF", [], [], True,
+        ) is False
+        # Several unpicked files: genuinely ambiguous, allowed.
+        assert _asks_for_known_document(
+            "Which PDF should I read?", [], ["a.pdf", "b.pdf"], False,
+        ) is False
+        # A metrics question is not an identity question.
+        assert _asks_for_known_document(
+            "Which metric should I chart?", ["revenue"], ["only.pdf"], True,
+        ) is False
+
+    def test_picked_document_never_clarifies_for_title(self, monkeypatch):
+        # Even a non-compliant judge asking for the title is overridden.
+        monkeypatch.setattr(
+            pipeline_mod, "generate_response",
+            _sequenced_fake(
+                _decision_json(decision="clarify",
+                               missing="Provide the title or identifier of the PDF",
+                               suggested_options=["Give the URL of the file"]),
+                _pipeline_json(answer="Best-effort from your PDF.", confidence=0.5),
+            ),
+        )
+        output = asyncio.run(run_pipeline(
+            user_query="what is this PDF about?",
+            db_data=[], source_scope="own_data",
+            news_context=["FDE Interview Assignment v2 Section 1."],
+            web_sources=[{
+                "title": "Untitled 2.pdf", "url": "",
+                "provider": "your_documents",
+                "retrieved_at": "2026-09-29T00:00:00+00:00",
+            }],
+            documents_scoped=True,
+        ))
+        assert output.clarification is None
+        assert "Best-effort" in output.answer
+
+    def test_build_prompt_names_documents_and_forbids_asking(self):
+        prompt = build_prompt(
+            "what is this PDF about?", [], {}, ["some chunk"],
+            source_scope="own_data",
+            web_sources=[{"title": "Untitled 2.pdf", "provider": "your_documents"}],
+        )
+        assert "Untitled 2.pdf" in prompt
+        assert "NEVER ask the user for the title" in prompt
+
+    def test_build_prompt_without_documents_states_none(self):
+        prompt = build_prompt("q", [{"revenue": 1}], source_scope="own_data")
+        assert "Your uploaded documents in evidence: none." in prompt
+        assert "NEVER ask the user for the title" not in prompt
