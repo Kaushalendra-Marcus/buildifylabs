@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, field_validator
 from functools import lru_cache
 from typing import Optional
 
@@ -8,6 +8,27 @@ class Settings(BaseSettings):
     APP_NAME: str = "BACKEND"
     VERSION: str = "1.0.0"
     ALLOWED_ORIGIN: list[str] = ["http://localhost:5173"]
+
+    @field_validator("ALLOWED_ORIGIN", mode="before")
+    @classmethod
+    def parse_allowed_origin(cls, v):
+        # Render dashboard me log aksar comma-separated ya bina-bracket
+        # URL daal dete hain ("https://a,https://b"), jo pydantic ka
+        # list[str] JSON-parse fail karke CORS tod deta hai. Dono format
+        # accept karo: JSON array ya comma-separated string.
+        if isinstance(v, str):
+            s = v.strip()
+            if s.startswith("["):
+                import json
+
+                try:
+                    parsed = json.loads(s)
+                    if isinstance(parsed, list):
+                        return parsed
+                except Exception:
+                    pass
+            return [x.strip().strip("\"'") for x in s.split(",") if x.strip()]
+        return v
 
     DATABASE_URL: str = Field(..., env="DATABASE_URL")
     SQL_ECHO: bool = False
