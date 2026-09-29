@@ -3,8 +3,9 @@ fastapi
 uvicorn
 pydantic_settings
 pydantic
-sqlalchemy
+sqlalchemy[asyncio]
 asyncpg
+greenlet
 alembic
 psycopg2-binary
 passlib
