@@ -38,6 +38,9 @@
   background: var(--bl-bg);
   color: var(--bl-text);
   color-scheme: dark;
+  /* Positioning context for .bl-grid-bg so the grid runs from the very
+     top of the page (behind the sticky nav), not just inside the hero. */
+  position: relative;
 }
 
 /* Explicit dark — same values as the base, so an explicit choice always
@@ -500,7 +503,9 @@
   color: var(--bl-muted);
 }
 
-/* Faint grid backdrop — supplied `.grid`, warmed to the theme */
+/* Faint grid backdrop — page-level, behind the sticky nav and hero.
+ * Anchored to .bl-landing (not the hero) so no solid strip shows above
+ * the grid on any viewport. */
 .bl-grid-bg {
   height: 800px;
   width: 800px;

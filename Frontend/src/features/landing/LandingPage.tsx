@@ -174,6 +174,8 @@ export function LandingPage() {
 
   return (
     <div className="bl-landing">
+      {/* Page-level grid backdrop (behind sticky nav + hero) */}
+      <div className="bl-grid-bg" aria-hidden="true" />
       {/* Floating pill nav — maritime / graphify pattern */}
       <header className="bl-navwrap">
         <nav className="bl-nav" aria-label="Primary">
@@ -203,7 +205,6 @@ export function LandingPage() {
       <main id="main" ref={revealRef}>
         {/* ---------- HERO ---------- */}
         <section className="bl-hero" aria-labelledby="bl-hero-title">
-          <div className="bl-grid-bg" aria-hidden="true" />
           <div className="bl-hero__orbs" aria-hidden="true">
             <i className="bl-hero__orb bl-hero__orb--amber" />
             <i className="bl-hero__orb bl-hero__orb--ember" />
