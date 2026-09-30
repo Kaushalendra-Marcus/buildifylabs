@@ -1209,14 +1209,31 @@
 }
 
 @media (max-width: 560px) {
-  .process-card__body {
-    flex-direction: column;
-    align-items: stretch;
+  /* Mini loading row on phones: only the active step shows (single
+     spinner + label); eyebrow and BoxLoader hide. */
+  .process-card {
+    padding: 8px 12px;
+    gap: 0;
   }
-
+  .process-card__eyebrow {
+    display: none;
+  }
+  .process-card__body {
+    gap: 10px;
+  }
   .process-card__body .bl-boxloader {
-    align-self: center;
-    margin: 0;
+    display: none;
+  }
+  .process-card__steps {
+    gap: 0;
+  }
+  .process-card__row {
+    display: none;
+  }
+  .process-card__row:has(.process-card__status--active) {
+    display: flex;
+    flex: 1;
+    min-width: 0;
   }
 }
 
@@ -1263,5 +1280,34 @@
 @media (prefers-reduced-motion: reduce) {
   .message--assistant-streaming .streaming-cursor {
     animation: none;
+  }
+}
+
+/* ---------- Small-phone stream tightening ---------- */
+
+@media (max-width: 560px) {
+  /* Icon-only trust row: labels and timestamp hide (text stays in the
+     a11y tree), the confidence meter shrinks but stays visible. */
+  .trust-footer {
+    gap: 6px 8px;
+  }
+  .trust-footer__action {
+    font-size: 0;
+    gap: 0;
+    padding: 5px 7px;
+  }
+  .trust-footer__confidence {
+    gap: 6px;
+  }
+  .trust-footer__confidence-label,
+  .trust-footer__confidence-value {
+    display: none;
+  }
+  .trust-footer__confidence-track {
+    width: 54px;
+    height: 6px;
+  }
+  .trust-footer__time {
+    display: none;
   }
 }

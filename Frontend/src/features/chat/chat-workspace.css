@@ -958,6 +958,11 @@ a.chat-header__brand:hover .chat-header__brand-name {
   .chat-header__new-chat svg {
     flex: none;
   }
+
+  /* Plan badge duplicates the account menu — hide for stream space. */
+  .chat-header .plan-badge {
+    display: none;
+  }
 }
 
 /* ----- History rail: OVERLAY on narrow viewports (<768px) -----

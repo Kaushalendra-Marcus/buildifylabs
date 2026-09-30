@@ -323,6 +323,34 @@
   .upload-popover {
     margin: 0 12px 12px;
   }
+
+  /* Compact composer chrome on phones: tighter paddings, smaller icon
+     buttons and scope pills — more room for the stream. */
+  .composer {
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  }
+  .composer__top {
+    margin-bottom: 8px;
+  }
+  .composer__scope-segment {
+    padding: 4px 9px;
+  }
+  .composer__row {
+    padding: 6px 6px 6px 12px;
+    gap: 6px;
+    border-radius: 12px;
+  }
+  .composer__icon-button,
+  .composer__send {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+  }
+  .composer__icon-button svg,
+  .composer__send svg {
+    width: 15px;
+    height: 15px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

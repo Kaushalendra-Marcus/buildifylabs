@@ -309,4 +309,42 @@
   .app-shell__tab--active {
     color: var(--accent);
   }
+
+  /* Chat route on phones: single header + full-height stream (ChatGPT
+     pattern). The shell topbar duplicates the chat header, and the tab
+     bar eats stream space — both hide; the sidebar becomes a left
+     overlay drawer opened from the chat header's nav toggle. */
+  .app-shell--on-chat .app-shell__topbar,
+  .app-shell--on-chat .app-shell__tabbar {
+    display: none;
+  }
+
+  .app-shell--on-chat .app-shell__sidebar {
+    display: flex;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(280px, 84vw);
+    z-index: 60;
+    opacity: 1;
+    border-right-width: 1px;
+    box-shadow: var(--elevation-raised);
+    transform: translateX(-105%);
+  }
+
+  .app-shell--on-chat:not(.app-shell--nav-collapsed) .app-shell__sidebar {
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+
+  .app-shell__nav-backdrop {
+    position: absolute;
+    inset: 0;
+    z-index: 55;
+    background: color-mix(in srgb, var(--text-primary) 30%, transparent);
+    border: none;
+    padding: 0;
+    cursor: default;
+  }
 }

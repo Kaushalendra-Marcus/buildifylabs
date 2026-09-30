@@ -11,6 +11,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { PlanBadge } from '../../components/PlanBadge';
 import { ThemeToggle } from '../../components/ThemeToggle';
 import { useAuth } from '../../hooks/useAuth';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { AccountMenu } from '../chat/AccountMenu';
 import { CommandPalette } from './CommandPalette';
 import { useShellStore } from './shell-store';
@@ -28,9 +29,17 @@ export function AppShell() {
   const { user } = useAuth();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const navOpen = useShellStore((state) => state.navOpen);
+  const setNavOpen = useShellStore((state) => state.setNavOpen);
   const toggleNav = useShellStore((state) => state.toggleNav);
   const location = useLocation();
   const isChatRoute = location.pathname.startsWith('/app/chat');
+  // On phones the chat route hides the topbar + tab bar (single-header,
+  // full-height chat); the sidebar becomes a left overlay drawer there.
+  const isNarrow = useMediaQuery('(max-width: 767.98px)');
+  const showNavDrawer = isChatRoute && isNarrow && navOpen;
+  const closeNav = () => {
+    if (isNarrow) setNavOpen(false);
+  };
 
   // Global quick switcher: Ctrl/⌘+K toggles from anywhere in the app.
   useEffect(() => {
@@ -106,6 +115,7 @@ export function AppShell() {
               key={to + label}
               to={to}
               end={end}
+              onClick={closeNav}
               className={({ isActive }) =>
                 `app-shell__link${isActive ? ' app-shell__link--active' : ''}`
               }
@@ -135,6 +145,14 @@ export function AppShell() {
       </aside>
 
       <div className="app-shell__main">
+        {showNavDrawer && (
+          <button
+            type="button"
+            className="app-shell__nav-backdrop"
+            aria-label="Close navigation"
+            onClick={() => setNavOpen(false)}
+          />
+        )}
         {!navOpen && (
           <button
             type="button"
