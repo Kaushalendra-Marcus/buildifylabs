@@ -15,7 +15,7 @@
  *   5.7  cold start: the session's first request marks pending as
  *        `cold-start` (named wake-up state, distinct from thinking)
  */
-import { SendHorizontal, Paperclip } from 'lucide-react';
+import { SendHorizontal, Paperclip, Database, Globe, Layers } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { sendQuery } from '../../api/chat';
@@ -25,6 +25,7 @@ import { isQuotaError } from '../../lib/http';
 import type { SourceScope } from '../../types/chat';
 import { useChatStore, type PendingKind } from './chat-store';
 import { useScopeStore } from './scope-store';
+import { ScopePopover } from './ScopePopover';
 import { useDocFilterStore } from './doc-filter-store';
 import { DocumentPicker } from './DocumentPicker';
 import { WINDOW_MS, useQuotaStore } from './quota-store';
@@ -41,6 +42,13 @@ const SCOPE_SEGMENTS: Array<{ value: SourceScope; label: string }> = [
   { value: 'both', label: 'Both' },
 ];
 
+/** Mobile-compact scope button icon per scope (the full row hides ≤768px). */
+const SCOPE_ICON = {
+  own_data: Database,
+  live_web: Globe,
+  both: Layers,
+} as const;
+
 export function Composer() {
   const { user } = useAuth();
   const isGuest = user?.plan === 'guest';
@@ -50,6 +58,7 @@ export function Composer() {
 
   const [draft, setDraft] = useState('');
   const [popoverOpen, setPopoverOpen] = useState(false);
+  const [scopeOpen, setScopeOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Overview quick-ask handoff: a template stored as `bl-pending-question`
@@ -68,6 +77,8 @@ export function Composer() {
   }, []);
 
   const canSend = draft.trim().length > 0; // §5.4: quota NEVER disables send.
+  const ScopeIcon =
+    SCOPE_ICON[scope as keyof typeof SCOPE_ICON] ?? Database;
 
   // 5.1 auto-grow: shrink-free sizing from content (capped, scrolls past max).
   useEffect(() => {
@@ -197,6 +208,18 @@ export function Composer() {
 
         {/* 5.1 text input + 5.3 upload + 5.4 send */}
         <div className="composer__row">
+          {/* Mobile-compact scope + quota (the top row hides ≤768px). */}
+          <button
+            type="button"
+            className="composer__compact-scope"
+            aria-expanded={scopeOpen}
+            aria-haspopup="dialog"
+            aria-label="Change answer source"
+            title="Answer source and quota"
+            onClick={() => setScopeOpen((value) => !value)}
+          >
+            <ScopeIcon size={15} aria-hidden="true" />
+          </button>
           <textarea
             ref={inputRef}
             className="composer__input"
@@ -233,6 +256,19 @@ export function Composer() {
           </button>
         </div>
       </form>
+
+      {scopeOpen && (
+        <div className="composer__popover-layer">
+          <button
+            type="button"
+            className="composer__popover-backdrop"
+            aria-label="Close source options"
+            tabIndex={-1}
+            onClick={() => setScopeOpen(false)}
+          />
+          <ScopePopover onClose={() => setScopeOpen(false)} />
+        </div>
+      )}
 
       {popoverOpen && (
         <div className="composer__popover-layer">

@@ -316,12 +316,111 @@
   cursor: pointer;
 }
 
+/* ----- Mobile-compact scope + quota (icon button + popover) ----- */
+
+.composer__compact-scope {
+  display: none;
+}
+
+.scope-popover {
+  position: relative;
+  z-index: 59;
+  width: min(300px, calc(100vw - 32px));
+  margin: 0 auto 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--surface-raised);
+  border-radius: 12px;
+  box-shadow: var(--elevation-raised);
+  border: 1px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
+}
+
+.scope-popover__title {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.scope-popover__options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.scope-popover__option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: inherit;
+  text-align: left;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+
+.scope-popover__option[aria-pressed='true'] {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.scope-popover__option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.scope-popover__option-label {
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+}
+
+.scope-popover__option-hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.scope-popover__quota {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
 @media (max-width: 767.98px) {
   .composer__popover-layer {
     left: 0;
   }
   .upload-popover {
     margin: 0 12px 12px;
+  }
+
+  /* The full scope + quota row collapses into one icon button. */
+  .composer__top {
+    display: none;
+  }
+  .composer__compact-scope {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    cursor: pointer;
+  }
+  .composer__compact-scope:hover,
+  .composer__compact-scope[aria-expanded='true'] {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 50%, transparent);
   }
 
   /* Compact composer chrome on phones: tighter paddings, smaller icon

@@ -7,7 +7,7 @@
  * Send disabled ONLY when empty — never by quota (5.4), and both 429 states
  * flowing from a rejected `/chat` into stream notices (5.6).
  */
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Composer } from './Composer'
@@ -331,5 +331,21 @@ describe('Composer (F5, specs/14 §5)', () => {
       query: 'second question',
       file_ids: ['pdf-9'],
     })
+  })
+
+  it('compact scope button opens the popover and applies the picked scope', async () => {
+    signedInAs('free')
+    const user = userEvent.setup()
+    render(<Composer />)
+
+    await user.click(screen.getByRole('button', { name: 'Change answer source' }))
+    const dialog = screen.getByRole('dialog', { name: 'Answer source and quota' })
+    expect(dialog).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: /^Both/ }))
+    expect(useScopeStore.getState().scope).toBe('both')
+    expect(
+      screen.queryByRole('dialog', { name: 'Answer source and quota' }),
+    ).not.toBeInTheDocument()
   })
 })
