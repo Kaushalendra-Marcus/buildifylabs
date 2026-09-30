@@ -7,7 +7,7 @@ from typing_extensions import Annotated
 
 class Settings(BaseSettings):
     APP_NAME: str = "BACKEND"
-    VERSION: str = "1.1.0"
+    VERSION: str = "1.2.0"
     # NoDecode: pydantic-settings JSON-decodes complex fields before any
     # field_validator runs, so a comma-separated value used to crash the app
     # at boot with SettingsError. NoDecode passes the raw string through to

@@ -290,7 +290,7 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
   it('renders the neutral fallback notice for a degraded response', () => {
     useChatStore.getState().addAssistantMessage(
       makeOutput({
-        answer: '',
+        answer: 'I ran into a problem gathering evidence - please try again.',
         visuals: [],
         confidence: 0,
         sql_query: null,
@@ -304,6 +304,10 @@ describe('MessageStream — four message types (F3, specs/14 §4)', () => {
       screen.getByText("Couldn't produce a reliable answer for that").closest(
         '.message--fallback',
       ),
+    ).toBeInTheDocument()
+    // The backend's own reason names the failed step.
+    expect(
+      screen.getByText('I ran into a problem gathering evidence - please try again.'),
     ).toBeInTheDocument()
     // No trust footer on a fallback.
     expect(

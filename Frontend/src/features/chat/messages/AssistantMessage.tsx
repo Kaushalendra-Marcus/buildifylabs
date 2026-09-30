@@ -31,7 +31,7 @@ export function AssistantMessage({ message }: { message: AssistantChatMessage })
     if (hasData === false && scope !== 'live_web') {
       return <NoDataMessage />;
     }
-    return <FallbackMessage />;
+    return <FallbackMessage reason={message.output.answer} />;
   }
   return <AssistantAnswer output={message.output} answeredAt={message.createdAt} conversationId={message.conversationId} />;
 }
