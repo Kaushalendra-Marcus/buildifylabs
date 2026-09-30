@@ -5,6 +5,13 @@
  * hardcode colors/sizes here. Popover sits one elevation step above cards
  * (specs/14 §7: surface-raised). */
 
+/* The form caps at the stream width (880px, see .message-stream__list)
+ * so the input bar never stretches wider than the conversation above it. */
+.composer__form {
+  max-width: 880px;
+  margin: 0 auto;
+}
+
 .composer {
   flex: none;
   position: relative;
