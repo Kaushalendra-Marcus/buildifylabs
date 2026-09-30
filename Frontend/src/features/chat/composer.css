@@ -457,6 +457,15 @@
     width: 15px;
     height: 15px;
   }
+
+  /* Slimmer input on phones: smaller text box, sooner scroll instead of
+     tall auto-grow. */
+  .composer__input {
+    font-size: 14px;
+    line-height: 1.4;
+    padding: 4px 0;
+    max-height: 120px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

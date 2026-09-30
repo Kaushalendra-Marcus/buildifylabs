@@ -60,3 +60,25 @@
 .document-picker__reset:hover {
   color: var(--text-primary);
 }
+
+@media (max-width: 767.98px) {
+  /* Single slim strip on phones: label + horizontally scrolling chips,
+     so the picker never doubles the composer height. */
+  .document-picker {
+    flex-wrap: nowrap;
+    margin-bottom: 8px;
+  }
+  .document-picker__label {
+    font-size: var(--font-size-xs);
+  }
+  .document-picker__chips {
+    flex: 1;
+    min-width: 0;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .document-picker__chip {
+    flex: none;
+    padding: 3px 10px;
+  }
+}
