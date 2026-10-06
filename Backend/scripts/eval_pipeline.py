@@ -1,22 +1,44 @@
-"""Live pipeline eval: real Groq keys, canned evidence, property checks.
+"""Tier-B nightly eval: golden cases through the real pipeline.
 
-Runs the decision loop end-to-end (judge -> narrate -> guarantee) against a
-handful of generic scenarios and asserts *properties* (visuals present,
-citations resolve, no repeated clarification, fallback only when evidence is
-absent) rather than exact wording, so model phrasing drift never breaks it.
+Runs Backend/evals/golden.jsonl through `run_pipeline` with the REAL Groq
+model (live keys required) and scores each answer with DETERMINISTIC
+property checks only (no LLM judge, no new dependencies):
 
-Usage (real keys required):
-    GROQ_API_KEY=... [GROQ_API_KEY2=...] \
-      python scripts/eval_pipeline.py
+- clarification / confidence contract (clarify, clarify_or_lowconf, caps)
+- gate contract (blocked_expected, partial_expected via research_state)
+- visual contract (no_chart, want_visual_type, min_visuals, no_forecast,
+  no_scenario, excluded_entities absent from visuals)
+- citation contract (every [n] resolves to a listed snippet)
+- number contract (every non-year number in prose + visuals traces to
+  rows/computed/snippets/series within 1%)
+- disclosure contract (excluded entities named in prose, must_contain in
+  prose, must_not_contain absent)
 
-Needs DATABASE_URL/JWT_SECRET/etc. only because importing app.config
-validates them — dummy values are filled in below; only Groq keys must be
-real. Exits non-zero on any failing case.
+Usage:
+    GROQ_API_KEY=... python scripts/eval_pipeline.py
+    GROQ_API_KEY=... python scripts/eval_pipeline.py --only web
+    GROQ_API_KEY=... python scripts/eval_pipeline.py --case web-02-partial-3y
+    python scripts/eval_pipeline.py --dry-run   # no keys, no LLM: validates
+                                                # the golden file + evidence
+                                                # wiring + local gates only
+    python scripts/eval_pipeline.py --list      # list case ids, no keys needed
+
+Results: one JSON object per line in Backend/evals/results/eval-<ts>.jsonl
+(gitignored). Exits non-zero when any case fails. Blocked-gate charts are a
+hard failure. Keep out of CI (needs live keys + flaky vendors); run nightly.
 """
-import asyncio
-import os
-import sys
 
+import argparse
+import asyncio
+import json
+import os
+import re
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+# Dummy env: importing app.config validates these, but only Groq keys must
+# be real. Mirrors the convention used by the repo's test conftest.
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("JWT_SECRET", "eval-secret")
 os.environ.setdefault("FRONTEND_URL", "http://localhost:5173")
@@ -30,103 +52,688 @@ os.environ.setdefault("GOOGLE_CLIENT_ID", "eval")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.services.llm.langchain_pipeline import run_pipeline  # noqa: E402
+from app.services.data.stats import (  # noqa: E402
+    apply_what_if,
+    compute_forecast,
+    compute_statistics,
+    infer_forecast_columns,
+    is_forecast_query,
+    parse_what_if,
+)
+from app.services.llm.langchain_pipeline import (  # noqa: E402
+    _historical_comparison_gate,
+    run_pipeline,
+)
+from app.services.llm.pipeline.grounding import _parse_scaled_number  # noqa: E402
+_HERE = Path(__file__).resolve().parent
+DEFAULT_GOLDEN = _HERE.parent / "evals" / "golden.jsonl"
+DEFAULT_OUT_DIR = _HERE.parent / "evals" / "results"
 
-ROWS = [
-    {"created_at": "2024-01-01", "revenue": 100, "region": "east"},
-    {"created_at": "2024-01-02", "revenue": 250, "region": "west"},
-    {"created_at": "2024-01-03", "revenue": 175, "region": "east"},
-    {"created_at": "2024-01-04", "revenue": 300, "region": "west"},
-]
-
-COMPUTED = {
-    "row_count": 4,
-    "averages": {"revenue": 206.25},
-    "totals": {"revenue": 825.0},
+_NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_.])\$?\d[\d,]*(?:\.\d+)?")
+_CITATION_RE = re.compile(r"\[(\d+)\]")
+_ISO_DATE_RE = re.compile(r"\b\d{4}-\d{2}(?:-\d{2})?\b")
+# LLMs emit non-ASCII hyphens (U+2010-U+2015) inside dates ("2022‑06‑30"):
+# normalize them first or the ISO strip misses and day fragments leak as
+# numbers. Maps to the production gap, not just an eval concern.
+_UNICODE_DASHES = {
+    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-",
+    "\u2014": "-", "\u2015": "-", "\u2212": "-",
 }
+_MONTH_DAY_RE = re.compile(
+    r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?"
+    r"\s+\d{1,2}(?:st|nd|rd|th)?\b",
+    re.IGNORECASE,
+)
+_PROJECTED_VALUE_RE = re.compile(r"project\w*[^.\n]{0,40}\d|projected_value")
 
-SNIPPETS = [
-    "Acme raised $50M in 2024 to expand its AI support tooling.",
-    "Globex launched a usage-based pricing tier in early 2025.",
-    "Analysts expect AI support tooling to double by 2027.",
-]
-
-SOURCES = [
-    {"title": "Acme funding", "url": "https://a.example", "provider": "Tavily"},
-    {"title": "Globex pricing", "url": "https://b.example", "provider": "Tavily"},
-    {"title": "Analyst outlook", "url": "", "provider": "DuckDuckGo"},
-]
-
-
-def check(name, condition, detail=""):
-    status = "PASS" if condition else "FAIL"
-    print(f"[{status}] {name}" + (f" — {detail}" if detail and not condition else ""))
-    return condition
+# Expect keys the runner understands (unknown keys fail loading: a golden
+# file that silently ignores assertions is worse than no golden file).
+KNOWN_EXPECT_KEYS = frozenset({
+    "clarify", "clarify_or_lowconf", "blocked_expected", "partial_expected",
+    "max_confidence", "min_confidence", "must_contain", "must_not_contain",
+    "no_chart", "want_visual_type", "min_visuals", "citations_resolve",
+    "no_invented_numbers", "excluded_entities", "no_forecast", "no_scenario",
+    "forecast_computable", "answer_nonempty",
+})
 
 
-async def main():
-    if not os.environ.get("GROQ_API_KEY"):
-        print("GROQ_API_KEY is required (real key). Refusing to run.")
-        return 1
+def ensure_live_keys():
+    """Accept keys from the environment or the local Backend/.env file.
+
+    Nightly runs execute from Backend/ where .env holds the real Groq keys
+    but those may not be exported into the shell — pydantic reads them via
+    env_file only after import. Seed os.environ from .env first so the guard
+    below sees the same keys.
+    """
+    if os.environ.get("GROQ_API_KEY"):
+        return True
+    dotenv = _HERE.parent / ".env"
+    try:
+        for line in dotenv.read_text().splitlines():
+            line = line.strip()
+            if line.startswith("GROQ_API_KEY") and "=" in line:
+                _, _, value = line.partition("=")
+                value = value.strip().strip("\"'")
+                if value:
+                    os.environ.setdefault("GROQ_API_KEY", value)
+                    return True
+    except OSError:
+        pass
+    return bool(os.environ.get("GROQ_API_KEY"))
+
+
+def load_golden(path):
+    cases = []
+    with open(path, encoding="utf-8") as fh:
+        for lineno, line in enumerate(fh, start=1):
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            try:
+                case = json.loads(line)
+            except ValueError as exc:
+                raise SystemExit(f"{path}:{lineno}: invalid JSON: {exc}")
+            for key in ("id", "query", "source_scope", "seed", "expect"):
+                if key not in case:
+                    raise SystemExit(f"{path}:{lineno}: case missing {key!r}")
+            unknown = set(case.get("expect", {})) - KNOWN_EXPECT_KEYS
+            if unknown:
+                raise SystemExit(
+                    f"{path}:{lineno} ({case.get('id')}): unknown expect "
+                    f"keys {sorted(unknown)} (runner would ignore them)"
+                )
+            if case["source_scope"] not in ("own_data", "live_web", "both"):
+                raise SystemExit(
+                    f"{path}:{lineno} ({case.get('id')}): bad source_scope"
+                )
+            cases.append(case)
+    ids = [c["id"] for c in cases]
+    dupes = sorted({i for i in ids if ids.count(i) > 1})
+    if dupes:
+        raise SystemExit(f"{path}: duplicate case ids: {dupes}")
+    return cases
+
+
+def _seed_entities(seed):
+    """Entity/symbol names in the seed evidence (E1, TSLA, ...). Their
+    trailing digits are identifiers, not numeric claims."""
+    names = set()
+    for key in ("price_history", "financial_history", "market_data", "fundamentals"):
+        for item in seed.get(key, []) or []:
+            if isinstance(item, dict):
+                for field in ("entity", "symbol"):
+                    name = str(item.get(field, "") or "").strip()
+                    if len(name) >= 2:
+                        names.add(name)
+    return names
+
+
+def _blank_tokens(text, tokens):
+    try:
+        for token in sorted(tokens, key=len, reverse=True):
+            if token and len(str(token)) >= 2:
+                text = re.sub(
+                    r"(?<!\w)" + re.escape(str(token)) + r"(?!\w)",
+                    " ",
+                    text,
+                    flags=re.IGNORECASE,
+                )
+    except Exception:
+        pass
+    return text
+
+
+def _answer_numbers(text, ignore=()):
+    """Scaled floats in prose ($520M -> 520000000), so magnitudes compare
+    like-for-like with the scaled evidence pool. Citation markers are
+    stripped first (a [2] is a pointer, not a claim); ISO dates are stripped
+    (month/day fragments like the 06 in 2022-06-30 are labels, not claims);
+    entity-name digits (E1, Series 2) are blanked via `ignore`;
+    year-like ints are skipped — same discipline as the CI golden tests."""
+    out = []
+    scrubbed = _CITATION_RE.sub(" ", text or "")
+    for dash, ascii_dash in _UNICODE_DASHES.items():
+        scrubbed = scrubbed.replace(dash, ascii_dash)
+    scrubbed = _ISO_DATE_RE.sub(" ", scrubbed)
+    scrubbed = _MONTH_DAY_RE.sub(" ", scrubbed)
+    scrubbed = _blank_tokens(scrubbed, ignore)
+    try:
+        return list(_parse_scaled_number(scrubbed))
+    except Exception:
+        pass
+    for match in _NUMBER_RE.finditer(scrubbed):
+        raw = match.group(0).replace("$", "").replace(",", "")
+        try:
+            value = float(raw)
+        except ValueError:
+            continue
+        if 1900 <= value <= 2100 and value.is_integer():
+            continue
+        if len(raw) == 4 and raw.startswith(("19", "20")):
+            continue
+        out.append(value)
+    return out
+
+
+def _flatten(obj):
+    found = []
+    if isinstance(obj, bool):
+        return found
+    if isinstance(obj, (int, float)):
+        return [float(obj)]
+    if isinstance(obj, dict):
+        for value in obj.values():
+            found.extend(_flatten(value))
+    elif isinstance(obj, (list, tuple)):
+        for value in obj:
+            found.extend(_flatten(value))
+    return found
+
+
+def _visual_numbers(visuals):
+    found = []
+
+    def walk(node):
+        if isinstance(node, bool):
+            return
+        if isinstance(node, (int, float)):
+            found.append(float(node))
+        elif isinstance(node, dict):
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, (list, tuple)):
+            for value in node:
+                walk(value)
+
+    for visual in visuals or []:
+        props = visual.props if hasattr(visual, "props") else visual.get("props", {})
+        walk(props or {})
+    return found
+
+
+def evidence_numbers(seed, computed, case_query=""):
+    """Every validated numeric value the answer may legitimately reuse:
+    rows (incl. prior-turn rows), deterministic computed stats, snippet
+    figures, and structured series values."""
+    pool = []
+    prior_rows = ((seed.get("prior_data", {}) or {}).get("rows", []) or [])
+    for row in (seed.get("rows", []) or []) + prior_rows:
+        if isinstance(row, dict):
+            pool.extend(
+                float(v) for v in row.values() if isinstance(v, (int, float))
+            )
+    pool.extend(_flatten(computed or {}))
+    entities = _seed_entities(seed)
+    for snippet in seed.get("snippets", []) or []:
+        try:
+            pool.extend(_parse_scaled_number(_blank_tokens(str(snippet), entities)))
+        except Exception:
+            pass
+    for item in (seed.get("price_history", []) or []) + (
+        seed.get("market_data", []) or []
+    ):
+        if isinstance(item, dict):
+            pool.extend(
+                float(v)
+                for v in (item.get("values") or [])
+                if isinstance(v, (int, float))
+            )
+    for item in seed.get("financial_history", []) or []:
+        if not isinstance(item, dict):
+            continue
+        for block_key in ("revenue", "net_income"):
+            block = item.get(block_key, {}) or {}
+            if isinstance(block, dict):
+                pool.extend(
+                    float(v)
+                    for v in (block.get("values") or [])
+                    if isinstance(v, (int, float))
+                )
+    for item in seed.get("fundamentals", []) or []:
+        pool.extend(_flatten(item))
+    # Validated comparison stats are quotable evidence: the narrator is
+    # REQUIRED to quote them exactly (winners + pct changes), so rebuild the
+    # deterministic gate over the same seeds and admit its numbers.
+    try:
+        gate = _historical_comparison_gate(
+            case_query,
+            market_data=seed.get("market_data", []) or [],
+            price_history=seed.get("price_history", []) or [],
+            financial_history=seed.get("financial_history", []) or [],
+            fundamentals=seed.get("fundamentals", []) or [],
+        )
+        pool.extend(_flatten((gate or {}).get("comparison_stats")))
+    except Exception:
+        pass
+    return pool
+
+
+def precompute_numbers(query, rows):
+    """Mirror app/routes/chat.py: deterministic stats always, then the
+    row-level what-if and forecast when the query asks for them.
+
+    run_pipeline narrates precomputed numbers only; the eval must feed it
+    the same computed_numbers the route would, or forecast/scenario cases
+    measure the wrong thing.
+    """
+    computed = compute_statistics(rows) if rows else {}
+    if rows:
+        try:
+            scenario = parse_what_if(query)
+            if scenario is not None:
+                what_if = apply_what_if(rows, *scenario)
+                if what_if is not None:
+                    computed = {**computed, "what_if": what_if}
+        except Exception:
+            pass
+        try:
+            if is_forecast_query(query):
+                date_col, value_col = infer_forecast_columns(rows)
+                if date_col and value_col:
+                    forecast = compute_forecast(rows, date_col, value_col)
+                    if forecast is not None:
+                        computed = {**computed, "forecast": forecast}
+        except Exception:
+            pass
+    return computed
+
+
+def check_case(case, output, computed):
+    """Deterministic property checks. Returns a list of failure strings."""
+    failures = []
+    seed = case.get("seed", {}) or {}
+    expect = case.get("expect", {}) or {}
+    answer = output.answer or ""
+    lowered = answer.lower()
+    visuals = list(output.visuals or [])
+    kinds = [getattr(v, "visual_type", "") for v in visuals]
+    research_state = output.research_state or {}
+    gate = research_state.get("gate", {}) or {}
+    snippets = seed.get("snippets", []) or []
+    visuals_blob = json.dumps(
+        [getattr(v, "props", None) or {} for v in visuals], default=str
+    )
+    blob = (answer + " " + visuals_blob).lower()
+
+    if "clarify" in expect:
+        want = bool(expect["clarify"])
+        got = output.clarification is not None
+        if want != got:
+            failures.append(
+                f"clarify: expected clarification={want}, got {got}"
+            )
+
+    if expect.get("clarify_or_lowconf"):
+        try:
+            low = float(output.confidence or 0.0) <= 0.35
+        except (TypeError, ValueError):
+            low = True
+        if output.clarification is None and not low:
+            failures.append(
+                f"clarify_or_lowconf: no clarification and confidence "
+                f"{output.confidence} > 0.35"
+            )
+
+    if "blocked_expected" in expect:
+        want = bool(expect["blocked_expected"])
+        got = bool(gate.get("blocked"))
+        if want != got:
+            failures.append(
+                f"blocked_expected: research_state gate blocked={got}, "
+                f"expected {want}"
+            )
+
+    if expect.get("partial_expected") and not gate.get("partial"):
+        failures.append("partial_expected: research_state gate partial is not true")
+
+    if "max_confidence" in expect:
+        try:
+            conf = float(output.confidence)
+        except (TypeError, ValueError):
+            failures.append(
+                f"max_confidence: confidence {output.confidence!r} not numeric"
+            )
+            conf = None
+        if conf is not None and conf > float(expect["max_confidence"]) + 1e-9:
+            failures.append(
+                f"max_confidence: {conf} exceeds {expect['max_confidence']}"
+            )
+
+    if "min_confidence" in expect:
+        try:
+            conf = float(output.confidence)
+        except (TypeError, ValueError):
+            failures.append(
+                f"min_confidence: confidence {output.confidence!r} not numeric"
+            )
+            conf = None
+        if conf is not None and conf < float(expect["min_confidence"]) - 1e-9:
+            failures.append(
+                f"min_confidence: {conf} below {expect['min_confidence']}"
+            )
+
+    for phrase in expect.get("must_contain", []) or []:
+        if str(phrase).lower() not in lowered:
+            failures.append(f"must_contain: {phrase!r} not in answer")
+
+    for phrase in expect.get("must_not_contain", []) or []:
+        if str(phrase).lower() in blob:
+            failures.append(f"must_not_contain: {phrase!r} leaked into answer/visuals")
+
+    if expect.get("no_chart"):
+        bad = [k for k in kinds if k in ("graph", "comparison")]
+        if bad:
+            failures.append(f"no_chart: chart visuals shipped: {bad}")
+
+    if expect.get("want_visual_type"):
+        if expect["want_visual_type"] not in kinds:
+            failures.append(
+                f"want_visual_type: no {expect['want_visual_type']} visual "
+                f"(got {kinds})"
+            )
+
+    if "min_visuals" in expect and len(visuals) < int(expect["min_visuals"]):
+        failures.append(
+            f"min_visuals: {len(visuals)} < {expect['min_visuals']}"
+        )
+
+    if expect.get("citations_resolve"):
+        cited = set()
+        for match in _CITATION_RE.finditer(answer):
+            raw = match.group(1)
+            if len(raw) >= 4:  # years are never citations
+                continue
+            try:
+                cited.add(int(raw))
+            except ValueError:
+                pass
+        bad = sorted(n for n in cited if n < 1 or n > len(snippets))
+        if bad:
+            failures.append(
+                f"citations_resolve: markers {bad} point outside "
+                f"{len(snippets)} snippet(s)"
+            )
+
+    if expect.get("no_invented_numbers"):
+        if output.clarification is not None:
+            pass  # a clarification makes no numeric claims to ground
+        else:
+            pool = evidence_numbers(seed, computed, case.get("query", ""))
+            # A stated scenario lever ("raise price 10%") and its factor
+            # (1.10) are derived from the QUESTION, not invented: symbolic
+            # reasoning over them (30 x P -> 30 x 1.10 x P) is legitimate.
+            try:
+                parsed = parse_what_if(case.get("query", ""))
+                if parsed:
+                    pool.append(float(parsed[1]))
+                    pool.append(round(1.0 + float(parsed[1]) / 100.0, 4))
+            except Exception:
+                pass
+            if not pool:
+                failures.append(
+                    "no_invented_numbers: empty evidence pool (case needs "
+                    "numeric seeds to check grounding)"
+                )
+            else:
+                entities = _seed_entities(seed) | {
+                    str(e) for e in (expect.get("excluded_entities", []) or [])
+                }
+                claimed = _answer_numbers(answer, ignore=entities) + _visual_numbers(
+                    visuals
+                )
+                for value in claimed:
+                    if not any(
+                        abs(c - value) <= max(1e-6, abs(value) * 0.01)
+                        for c in pool
+                    ):
+                        failures.append(f"no_invented_numbers: {value} untraceable")
+                        break
+
+    for entity in expect.get("excluded_entities", []) or []:
+        if str(entity).lower() not in lowered:
+            failures.append(
+                f"excluded_entities: {entity!r} missing from answer "
+                f"(exclusion undisclosed)"
+            )
+        if str(entity).lower() in visuals_blob.lower():
+            failures.append(
+                f"excluded_entities: {entity!r} present in a visual"
+            )
+
+    if expect.get("no_forecast"):
+        titles = " ".join(str(getattr(v, "title", "") or "") for v in visuals)
+        # An honest refusal ("cannot project ...") is not a forecast leak:
+        # only a projected VALUE (number attached to project*/forecast
+        # language) or a forecast-flavoured visual fails.
+        if "forecast" in (
+            titles.lower() + visuals_blob.lower()
+        ) or _PROJECTED_VALUE_RE.search(lowered):
+            failures.append("no_forecast: projected numbers or visuals emitted")
+
+    if expect.get("no_scenario"):
+        # Intent tags ("intent": "what_if") ride on every row visual for a
+        # what-if query and are NOT scenario math: only a what-if
+        # computation_id, a scenario-titled visual, or scenario totals in
+        # prose count as emitting a scenario.
+        bad_visual = False
+        for visual in visuals:
+            prov = getattr(visual, "provenance", None) or {}
+            comp_ids = [str(c).lower() for c in (prov.get("computation_ids") or [])]
+            if any("what_if" in c or "scenario" in c for c in comp_ids):
+                bad_visual = True
+            title = str(getattr(visual, "title", "") or "").lower()
+            if "scenario" in title or "what-if" in title or "what if" in title:
+                bad_visual = True
+        if "what_if" in (computed or {}) or bad_visual or "scenario_total" in lowered:
+            failures.append("no_scenario: scenario math or visuals emitted")
+
+    if expect.get("forecast_computable"):
+        rows = seed.get("rows", []) or []
+        ok = False
+        try:
+            if is_forecast_query(case["query"]):
+                date_col, value_col = infer_forecast_columns(rows)
+                ok = (
+                    bool(date_col and value_col)
+                    and compute_forecast(rows, date_col, value_col) is not None
+                )
+        except Exception:
+            ok = False
+        if not ok:
+            failures.append(
+                "forecast_computable: deterministic forecast gate produced nothing"
+            )
+
+    if expect.get("answer_nonempty") and not answer.strip():
+        # A clarification IS the response (alternate mode): only a silent
+        # empty answer with no clarification fails.
+        if output.clarification is None:
+            failures.append("answer_nonempty: empty answer with no clarification")
+
+    return failures
+
+
+async def run_case(case):
+    seed = case.get("seed", {}) or {}
+    rows = list(seed.get("rows", []) or [])
+    computed = precompute_numbers(case["query"], rows)
+    try:
+        from app.services import web_search_cache
+
+        web_search_cache._reset_cache_state()
+    except Exception:
+        pass
+    output = await run_pipeline(
+        user_query=case["query"],
+        db_data=rows,
+        computed_numbers=computed,
+        news_context=list(seed.get("snippets", []) or []),
+        source_scope=case.get("source_scope", "own_data"),
+        prior_clarification=seed.get("prior_clarification"),
+        prior_data=seed.get("prior_data"),
+        market_data=list(seed.get("market_data", []) or []),
+        web_sources=list(seed.get("sources", []) or []),
+        fundamentals=list(seed.get("fundamentals", []) or []),
+        price_history=list(seed.get("price_history", []) or []),
+        financial_history=list(seed.get("financial_history", []) or []),
+        documents_scoped=bool(seed.get("documents_scoped", False)),
+    )
+    try:
+        from app.services import web_search_cache
+
+        web_search_cache._reset_cache_state()
+    except Exception:
+        pass
+    return output, computed
+
+
+def dry_run(cases):
+    """No keys, no LLM: validate the file + evidence wiring + local gates."""
+    print(f"dry-run: {len(cases)} cases loaded, no LLM calls made")
     ok = True
-
-    out = await run_pipeline(
-        user_query="how is revenue trending?",
-        db_data=ROWS,
-        computed_numbers=COMPUTED,
-    )
-    kinds = [v.visual_type for v in out.visuals]
-    ok &= check("data answer has visuals", bool(kinds), f"kinds={kinds}")
-    ok &= check("data answer not a clarification", out.clarification is None)
-    ok &= check("thinking trace present", bool(out.thinking))
-
-    out = await run_pipeline(
-        user_query="show revenue as a bar chart", db_data=ROWS
-    )
-    graphs = [v for v in out.visuals if v.visual_type == "graph"]
-    ok &= check(
-        "requested bar shape honored",
-        any(g.props.get("chart_type") == "bar" for g in graphs),
-        f"got={[g.props.get('chart_type') for g in graphs]}",
-    )
-
-    out = await run_pipeline(
-        user_query="startup funding news",
-        db_data=[],
-        source_scope="live_web",
-        news_context=SNIPPETS,
-        web_sources=SOURCES,
-    )
-    import re
-
-    cited = {int(n) for n in re.findall(r"\[(\d+)\]", out.answer)}
-    ok &= check(
-        "citations resolve to listed snippets",
-        not cited or max(cited) <= len(SNIPPETS),
-        f"cited={sorted(cited)} snippets={len(SNIPPETS)}",
-    )
-    ok &= check("web answer has visuals", bool(out.visuals))
-
-    prior = "What metric should I use?"
-    out = await run_pipeline(
-        user_query="still deciding",
-        db_data=[],
-        prior_clarification=prior,
-    )
-    repeated = out.clarification is not None and prior.lower() in (
-        out.clarification.question or ""
-    ).lower()
-    ok &= check("never repeats the prior question", not repeated)
-
-    out = await run_pipeline(user_query="q", db_data=[])
-    ok &= check(
-        "empty evidence degrades honestly",
-        out.clarification is not None or out.confidence <= 0.35,
-    )
-
-    print("EVAL " + ("PASSED" if ok else "FAILED"))
+    for case in cases:
+        seed = case.get("seed", {}) or {}
+        expect = case.get("expect", {}) or {}
+        rows = list(seed.get("rows", []) or [])
+        problems = []
+        if expect.get("no_invented_numbers"):
+            computed = precompute_numbers(case["query"], rows)
+            if not evidence_numbers(seed, computed, case.get("query", "")):
+                problems.append("empty evidence pool (no numeric seeds)")
+        if expect.get("forecast_computable"):
+            try:
+                date_col, value_col = infer_forecast_columns(rows)
+                if not (date_col and value_col) or compute_forecast(
+                    rows, date_col, value_col
+                ) is None:
+                    problems.append("local forecast gate yields nothing")
+            except Exception as exc:
+                problems.append(f"forecast gate raised: {exc}")
+        if expect.get("excluded_entities") and not (
+            seed.get("price_history") or seed.get("financial_history")
+        ):
+            problems.append("excluded_entities without history seeds")
+        status = "OK  " if not problems else "FAIL"
+        if problems:
+            ok = False
+        print(f"[{status}] {case['id']}" + (f" — {'; '.join(problems)}" if problems else ""))
+    print("DRY-RUN " + ("PASSED" if ok else "FAILED"))
     return 0 if ok else 1
 
 
+async def live_main(cases, out_dir):
+    os.makedirs(out_dir, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    out_path = os.path.join(out_dir, f"eval-{stamp}.jsonl")
+    passed = failed = 0
+    component_stats = {}
+    with open(out_path, "w", encoding="utf-8") as fh:
+        for case in cases:
+            comp = case["id"].split("-")[0]
+            stats = component_stats.setdefault(comp, {"pass": 0, "fail": 0})
+            try:
+                output, computed = await run_case(case)
+                failures = check_case(case, output, computed)
+                clar = output.clarification
+                record = {
+                    "id": case["id"],
+                    "query": case["query"],
+                    "source_scope": case.get("source_scope"),
+                    "passed": not failures,
+                    "failures": failures,
+                    "confidence": output.confidence,
+                    "clarification": bool(clar is not None),
+                    "clarification_question": (
+                        getattr(clar, "question", "") if clar is not None else ""
+                    ),
+                    "visual_types": [
+                        getattr(v, "visual_type", "") for v in (output.visuals or [])
+                    ],
+                    "visuals_detail": [
+                        {
+                            "type": getattr(v, "visual_type", ""),
+                            "title": getattr(v, "title", ""),
+                            "props": getattr(v, "props", None) or {},
+                            "provenance": getattr(v, "provenance", None) or {},
+                        }
+                        for v in (output.visuals or [])
+                    ],
+                    "gate": (output.research_state or {}).get("gate", {}),
+                    "answer": output.answer or "",
+                    "answer_excerpt": (output.answer or "")[:300],
+                }
+            except Exception as exc:  # never let one case kill the night
+                record = {
+                    "id": case["id"],
+                    "query": case["query"],
+                    "source_scope": case.get("source_scope"),
+                    "passed": False,
+                    "failures": [f"eval harness error: {type(exc).__name__}: {exc}"],
+                    "confidence": None,
+                    "clarification": None,
+                    "visual_types": [],
+                    "gate": {},
+                    "answer_excerpt": "",
+                }
+            fh.write(json.dumps(record, default=str) + "\n")
+            if record["failures"]:
+                failed += 1
+                stats["fail"] += 1
+                print(f"[FAIL] {case['id']} — {'; '.join(record['failures'])}")
+            else:
+                passed += 1
+                stats["pass"] += 1
+                print(f"[PASS] {case['id']}")
+    print(f"\nWrote {passed + failed} records to {out_path}")
+    print("== Component summary ==")
+    for comp in sorted(component_stats):
+        stats = component_stats[comp]
+        print(f"  {comp}: {stats['pass']} pass / {stats['fail']} fail")
+    print(f"EVAL {'PASSED' if not failed else 'FAILED'} "
+          f"({passed} passed, {failed} failed)")
+    return 0 if not failed else 1
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Tier-B nightly eval: golden cases through the real pipeline."
+    )
+    parser.add_argument("--golden", default=str(DEFAULT_GOLDEN))
+    parser.add_argument("--out-dir", default=str(DEFAULT_OUT_DIR))
+    parser.add_argument("--only", default=None,
+                        help="component prefix filter: own, doc, web, adv")
+    parser.add_argument("--case", default=None, help="run one case id only")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="run only the first N selected cases")
+    parser.add_argument("--list", action="store_true",
+                        help="list case ids and exit (no keys needed)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="validate the golden file without LLM calls")
+    args = parser.parse_args(argv)
+    cases = load_golden(args.golden)
+    if args.list:
+        for case in cases:
+            print(f"{case['id']}\t{case.get('query', '')}")
+        return 0
+    if args.only:
+        cases = [c for c in cases if c["id"].startswith(args.only + "-")]
+    if args.case:
+        cases = [c for c in cases if c["id"] == args.case]
+    if args.limit:
+        cases = cases[: args.limit]
+    if args.dry_run:
+        if not cases:
+            print("No cases selected.")
+            return 1
+        return dry_run(cases)
+    if not cases:
+        print("No cases selected.")
+        return 1
+    if not ensure_live_keys():
+        print("GROQ_API_KEY is required for live eval (real keys). "
+              "Use --dry-run for keyless validation.")
+        return 2
+    return asyncio.run(live_main(cases, args.out_dir))
+
+
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(main())

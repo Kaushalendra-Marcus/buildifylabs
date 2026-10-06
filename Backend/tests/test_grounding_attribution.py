@@ -253,3 +253,95 @@ class TestRankBeforeBudget:
         assert source.index("rank_snippet_pairs(") < source.index(
             "fit_pairs_to_budget("
         )
+
+
+class TestSingleEntityExclusion:
+    """Live incident: a single-company live_web answer flagged its own
+    subject ('Amazon') as an excluded entity and its snippet-cited figure
+    as an ungrounded number -- both thinking-trace false positives on a
+    correct answer. Exclusion is comparison-shaped; single-entity subjects
+    are unvalidated, never excluded. Snippet evidence belongs in the
+    narration-contract pool."""
+
+    def test_single_entity_never_self_excluded(self):
+        from app.services.llm.pipeline.grounding import (
+            build_validated_evidence_state,
+        )
+
+        state = build_validated_evidence_state(
+            query="what is revenue of amazon in last year",
+            plan={"entities": ["Amazon"], "metrics": ["revenue_growth"]},
+            gate={"applies": False, "blocked": False},
+            completeness=None,
+        )
+        assert state["excluded_entities"] == []
+
+    def test_multi_entity_still_derives_exclusion(self):
+        from app.services.llm.pipeline.grounding import (
+            build_validated_evidence_state,
+        )
+
+        state = build_validated_evidence_state(
+            query="Compare E1, E2 and E3 on revenue growth",
+            plan={"entities": ["E1", "E2", "E3"], "metrics": ["revenue_growth"]},
+            gate={"applies": False, "blocked": False,
+                  "validated_entities": ["E1", "E2"]},
+            completeness=None,
+        )
+        assert state["excluded_entities"] == ["E3"]
+
+    def test_snippet_figure_passes_narration_contract(self):
+        from app.services.llm.pipeline.grounding import (
+            apply_narration_contract,
+            build_validated_evidence_state,
+        )
+        from app.services.llm.pipeline.models import PipelineOutput
+
+        state = build_validated_evidence_state(
+            query="what does the report say about revenue?",
+            plan={"entities": ["Acme"], "metrics": []},
+            gate={"applies": False, "blocked": False},
+            completeness=None,
+        )
+        output = PipelineOutput(
+            answer="Acme revenue was 520 dollars [1].",
+            visuals=[], insights=[], summary="", root_causes=[],
+            recommendations=[], news_context=[], anomalies=[],
+            confidence=0.7, clarification=None,
+        )
+        thinking: list = []
+        out = apply_narration_contract(
+            output, validated_state=state, computed_numbers={},
+            gate={}, thinking=thinking,
+            snippets=["Acme FY2024 report states revenue of 520 dollars."],
+        )
+        assert out.confidence == 0.7
+        assert not any("outside validated evidence" in line for line in thinking)
+
+    def test_completeness_subject_exclusion_filtered_for_single_entity(self):
+        from app.services.llm.pipeline.grounding import (
+            build_validated_evidence_state,
+        )
+
+        state = build_validated_evidence_state(
+            query="what is revenue of amazon in last year",
+            plan={"entities": ["Amazon"], "metrics": ["revenue_growth"]},
+            gate={"applies": False, "blocked": False},
+            completeness={
+                "validated_entities": [],
+                "excluded_entities": [
+                    {"entity": "Amazon", "reason": "no validated evidence"}
+                ],
+            },
+        )
+        assert state["excluded_entities"] == []
+
+    def test_subject_followups_survive_single_entity_answer(self):
+        from app.services.data.canonical import ground_followups
+
+        state = {"excluded_entities": [], "excluded_metrics": []}
+        followups = [
+            "Compare Amazon to Microsoft",
+            "What is Amazon revenue growth over 5 years?",
+        ]
+        assert ground_followups(followups, state) == followups

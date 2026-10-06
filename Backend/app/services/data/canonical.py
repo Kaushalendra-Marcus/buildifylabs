@@ -461,8 +461,10 @@ _WINNER_WORDS_RE = re.compile(
     re.IGNORECASE,
 )
 _NUMBER_RE = re.compile(
-    r"([$€₹£])?\s?(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand|%|percent)?"
+    r"([$€₹£])?\s?(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand|%|percent)?(?![A-Za-z])"
 )
+# NOTE: trailing (?![A-Za-z]) mirrors grounding._VISUAL_NUMBER_RE — without
+# it "120, Mar 2024" parses as 120M (scale letter stealing a word initial).
 _YEAR_RE = re.compile(r"\b(19\d{2}|20\d{2})\b")
 
 
@@ -478,6 +480,10 @@ def _numbers_in_text(text: str, ignore_tokens: Sequence[str] = ()) -> List[float
     except Exception:
         cleaned = text or ""
     out: List[float] = []
+    # Citation markers ([1], [12]) are pointers, not claims -- strip them
+    # before extracting numbers so a cited figure never reads as an extra
+    # ungrounded value (same discipline as the eval harness).
+    cleaned = re.sub(r"\[\d{1,3}\]", " ", cleaned)
     for match in _NUMBER_RE.finditer(cleaned):
         raw = (match.group(2) or "").replace(",", "")
         if not match.group(1) and not match.group(3):
