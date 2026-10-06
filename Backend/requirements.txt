@@ -1,3 +1,6 @@
+# NOTE: run everything (pytest, uvicorn) with the project interpreter
+# Backend/.venv/bin/python — the system python lacks these deps (pandas,
+# pypdf, ...). E.g.: .venv/bin/python -m pytest -q
 #basic
 fastapi
 uvicorn
@@ -24,7 +27,7 @@ sqlglot
 pandas
 # Part C: XLSX read support for pandas (tabular ingestion, same path as CSV)
 openpyxl
-# Part C: PDF text extraction (lightweight, no native deps)
+# Part C: PDF text extraction (pypdf: lightweight, no native deps)
 pypdf
 # Part C: pgvector Python/SQLAlchemy integration
 pgvector

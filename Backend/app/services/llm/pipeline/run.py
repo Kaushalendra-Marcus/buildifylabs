@@ -49,6 +49,142 @@ def _disclose_exclusion_for_query(query_text: str) -> bool:
 
 
 
+# Forecast dead-end sentence (specs/11 §5: say so, never force an answer).
+# Appended verbatim when the query asks for a forecast but no deterministic
+# projection exists — the answer must state the gap instead of letting the
+# narration invent trend numbers.
+_FORECAST_MISSING_SENTENCE = (
+    "I don't have enough usable history in your data to forecast this, "
+    "so I'm not showing a projection rather than guessing."
+)
+
+
+def _forecast_gap(
+    plan_text: str,
+    computed_numbers: Optional[dict],
+    source_scope: Optional[str] = None,
+) -> tuple:
+    """Whether a forecast was asked for but deterministically unavailable.
+
+    Returns (missing, detail): missing True exactly when the query is
+    forecast-phrased yet `computed_numbers` carries no `forecast` dict
+    (ambiguous columns or insufficient history — chat.py records which).
+    Own-data only: live-web forecasts narrate from retrieved snippets under
+    the normal evidence/confidence contract, never from this deterministic
+    projection path. Pure, never raises; import failure means "no opinion"
+    (False).
+    """
+    try:
+        if source_scope in ("live_web", "both"):
+            return False, ""
+        from app.services.data.stats import is_forecast_query as _is_fc
+
+        if not _is_fc(plan_text or ""):
+            return False, ""
+    except Exception:
+        return False, ""
+    try:
+        computed = computed_numbers or {}
+        if isinstance(computed.get("forecast"), dict) and computed["forecast"]:
+            return False, ""
+        unavailable = computed.get("forecast_unavailable") or {}
+        if isinstance(unavailable, dict) and unavailable.get("detail"):
+            return True, str(unavailable["detail"])
+        if (
+            isinstance(unavailable, dict)
+            and unavailable.get("reason") == "ambiguous_columns"
+        ):
+            return (
+                True,
+                "Your data has no single date-plus-value series "
+                "I can unambiguously project.",
+            )
+        return True, "Not enough dated history in your data to project a trend."
+    except Exception:
+        return False, ""
+
+
+def _normalize_provenance_source_ids(
+    visuals: list, web_sources: Optional[list], *, is_forecast: bool = False
+) -> List[str]:
+    """Rewrite visual provenance source_ids to real evidence indices.
+
+    `snippet:<n>` (a 1-based citation into the retrieved snippet list) is not
+    traceable on its own: it becomes `web:<i>` / `doc:<i>` — the 0-based
+    index into the actual `web_sources` list (`doc:` when that entry came
+    from the user's uploaded documents). `rows` and `computed:*` ids
+    (deterministic own-data / computation outputs) are already real and pass
+    through, as do channel-qualified series ids (`market:`/`fundamentals:`).
+    An unresolvable ref is kept verbatim (never invented, never destroyed —
+    value grounding decides that visual's fate separately). Forecast visuals
+    gain `computed:forecast` so the projection traces to its computation.
+    Returns short thinking notes; never raises.
+    """
+    notes: List[str] = []
+    try:
+        providers: List[str] = []
+        for item in web_sources or []:
+            try:
+                if isinstance(item, dict):
+                    providers.append(str(item.get("provider", "") or ""))
+                else:
+                    providers.append(str(getattr(item, "provider", "") or ""))
+            except Exception:
+                providers.append("")
+        for visual in visuals or []:
+            try:
+                prov = getattr(visual, "provenance", None) or {}
+                ids = list(prov.get("source_ids") or [])
+                title = str(getattr(visual, "title", "") or "")
+                is_forecast_visual = "forecast" in title.lower()
+                if not ids and not (is_forecast or is_forecast_visual):
+                    continue
+                new_ids: List[str] = []
+                changed = False
+                for sid in ids:
+                    text = str(sid)
+                    if text.startswith("snippet:"):
+                        try:
+                            ref = int(text.split(":", 1)[1])
+                        except (TypeError, ValueError):
+                            new_ids.append(text)
+                            continue
+                        idx = ref - 1
+                        if 0 <= idx < len(providers):
+                            mapped = (
+                                f"doc:{idx}"
+                                if providers[idx] == "your_documents"
+                                else f"web:{idx}"
+                            )
+                            new_ids.append(mapped)
+                            changed = True
+                            note = f"Provenance {text} -> {mapped}."
+                            if note not in notes:
+                                notes.append(note)
+                        else:
+                            new_ids.append(text)
+                    else:
+                        new_ids.append(text)
+                if (is_forecast or is_forecast_visual) and "computed:forecast" not in new_ids:
+                    new_ids.append("computed:forecast")
+                    changed = True
+                    note = "Provenance traces forecast visual to computed:forecast."
+                    if note not in notes:
+                        notes.append(note)
+                if changed:
+                    try:
+                        prov = dict(prov)
+                        prov["source_ids"] = new_ids
+                        visual.provenance = prov
+                    except Exception:
+                        pass
+            except Exception:
+                continue
+    except Exception as exc:
+        logger.warning("Provenance normalization failed: %s", exc)
+    return notes
+
+
 def log_runtime_trace(trace: Dict[str, Any]) -> None:
     """Emit one safe structured runtime-trace line (H15)."
 
@@ -639,6 +775,30 @@ async def run_pipeline(
                 f"Clarifying (one question): {output.clarification.question[:120]}"
             )
         else:
+            # Forecast dead-end (specs/11 §5): asked for but not computed —
+            # force confidence 0 NOW so every downstream zero-confidence
+            # strip (below + ensure_visuals) fires, and no forecast visual
+            # or invented trend number can ship as trustworthy.
+            try:
+                _fc_missing, _fc_detail = _forecast_gap(
+                    plan_text, computed_numbers, source_scope
+                )
+            except Exception:
+                _fc_missing, _fc_detail = False, ""
+            if _fc_missing:
+                if float(output.confidence or 0.0) != 0.0:
+                    thinking.append(
+                        "Forecast unavailable "
+                        f"({(_fc_detail or '')[:120]}); confidence forced to 0.0."
+                    )
+                else:
+                    thinking.append(
+                        f"Forecast unavailable ({(_fc_detail or '')[:120]})."
+                    )
+                try:
+                    output.confidence = 0.0
+                except Exception:
+                    pass
             # Phase 13 contract (hard gate, enforced in CODE, never by
             # prompt): when the historical gate BLOCKED, the narrator must
             # not ship comparison visuals. Strip any LLM-fabricated graph /
@@ -990,6 +1150,18 @@ async def run_pipeline(
             thinking.append(
                 f"Visuals out: {', '.join(v.visual_type for v in output.visuals)}"
             )
+        # Provenance is real indices, not citation-shaped strings: rewrite
+        # `snippet:<n>` to the `web:<i>`/`doc:<i>` web_sources index it
+        # cites BEFORE the narration contract validates provenance below.
+        try:
+            _prov_notes = _normalize_provenance_source_ids(
+                list(output.visuals or []),
+                web_sources,
+                is_forecast=bool((computed_numbers or {}).get("forecast")),
+            )
+            thinking.extend(_prov_notes[:6])
+        except Exception as exc:
+            logger.warning("Provenance normalization failed: %s", exc)
         # Deterministic visual-plan reconciliation (P0#18): the judge's
         # visual_plan is advisory; the deterministic planner below is
         # authoritative. Divergence is logged (never silent) and the
@@ -1028,6 +1200,48 @@ async def run_pipeline(
             )
         except Exception as exc:
             logger.warning("Narration contract failed (fail-open prose kept): %s", exc)
+        # Forecast dead-end, final enforcement (specs/11 §5): no deterministic
+        # projection means confidence 0, NO graph/comparison visual, and an
+        # explicit missing-data sentence in the prose — the LLM must never be
+        # left to invent a trend. Idempotent: the exact sentence is never
+        # appended twice.
+        try:
+            _late_missing, _late_detail = _forecast_gap(
+                plan_text, computed_numbers, source_scope
+            )
+        except Exception:
+            _late_missing, _late_detail = False, ""
+        if _late_missing and output.clarification is None:
+            try:
+                if output.visuals and any(
+                    getattr(v, "visual_type", "") in ("graph", "comparison")
+                    for v in (output.visuals or [])
+                ):
+                    output.visuals = [
+                        v for v in (output.visuals or [])
+                        if getattr(v, "visual_type", "") not in ("graph", "comparison")
+                    ]
+                    thinking.append(
+                        "Stripped forecast visuals: no deterministic projection to show."
+                    )
+            except Exception as exc:
+                logger.warning("Forecast visual strip failed: %s", exc)
+            try:
+                output.confidence = 0.0
+            except Exception:
+                pass
+            try:
+                sentence = _FORECAST_MISSING_SENTENCE
+                if _late_detail and _late_detail not in (output.answer or ""):
+                    sentence = f"{sentence} {_late_detail}"
+                if sentence not in (output.answer or ""):
+                    output.answer = f"{(output.answer or '').rstrip()}\n\n{sentence}"
+                    thinking.append(
+                        "Stated missing forecast data explicitly "
+                        "(no invented projection)."
+                    )
+            except Exception as exc:
+                logger.warning("Forecast missing-data sentence failed: %s", exc)
         # Phase 18: compact structured research state for follow-ups (never
         # raw payloads). Phase 19: structured trace log (no secrets/PII).
         try:
@@ -1578,9 +1792,11 @@ __all__ = [
     "_attempt_validation_repair",
     "_evidence_inventory",
     "_extract_answer_prefix",
+    "_forecast_gap",
     "_narrate",
     "_narrate_prose_rescue",
     "_narrate_streaming",
+    "_normalize_provenance_source_ids",
     "evidence_confidence_cap",
     "log_runtime_trace",
     "run_pipeline",

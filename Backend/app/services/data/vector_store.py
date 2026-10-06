@@ -29,11 +29,32 @@ MAX_CANDIDATE_CHUNKS = 500
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
+# Summarize-style queries carry no keywords to match ("summarize my PDF",
+# "what do you know about my data"): the opening chunks ARE the answer, so
+# they keep the first_chunks fallback. Any other query with tokens but zero
+# hits returns [] so the judge can clarify instead of answering off-topic.
+_SUMMARIZE_RE = re.compile(
+    r"summar(y|ies|ize|ise|izing|ising)|overview|tldr\b|"
+    r"what\s+do\s+you\s+know|about\s+my\s+(data|document|file|pdf|report)|"
+    r"\bdescribe\b.*(data|document|file)|"
+    r"\blist\b.*(file|document)|"
+    r"\bshow\b.*(file|document)",
+    re.IGNORECASE,
+)
+
 
 def _query_tokens(query_text: str) -> List[str]:
     """Lowercase alphanumeric tokens of length >= 3. Short tokens ("is",
     "of", "Q1") match everywhere and only add noise to the ranking."""
     return [w for w in _WORD_RE.findall(query_text.lower()) if len(w) >= 3]
+
+
+def _is_summarize_query(query_text: str) -> bool:
+    """True when the query asks for an overview rather than keywords."""
+    try:
+        return bool(_SUMMARIZE_RE.search(str(query_text or "")))
+    except Exception:
+        return False
 
 
 async def store_chunks(
@@ -95,8 +116,14 @@ async def search_chunks(
     )
     scored = []
     for row in result.mappings():
-        haystack = (row["content"] or "").lower()
-        score = sum(haystack.count(tok) for tok in tokens)
+        # Word-boundary matching: exact token hits, never substring counts
+        # ("car" must not match "scar"/"oscar"; "art" must not match
+        # "heart"/"cart"). Score is the total whole-word hit count.
+        haystack_tokens = _WORD_RE.findall((row["content"] or "").lower())
+        counts: dict = {}
+        for word in haystack_tokens:
+            counts[word] = counts.get(word, 0) + 1
+        score = sum(counts.get(tok, 0) for tok in tokens)
         if score > 0:
             scored.append((score, row))
     scored.sort(key=lambda item: (-item[0], item[1]["chunk_index"]))
@@ -178,10 +205,17 @@ async def retrieve_document_evidence(
             file_ids,
         )
         if not rows:
-            rows = await first_chunks(
-                db, user_id, settings.MAX_DOCUMENT_CHUNKS_PER_QUERY,
-                file_ids,
-            )
+            # Zero hits with real query tokens -> [] so the judge can
+            # clarify (never answer off-topic from unrelated opening
+            # chunks). Only summarize-style queries keep the opening-chunks
+            # fallback: they share no keywords by construction.
+            if _is_summarize_query(query_text):
+                rows = await first_chunks(
+                    db, user_id, settings.MAX_DOCUMENT_CHUNKS_PER_QUERY,
+                    file_ids,
+                )
+            else:
+                return [], []
     except Exception as exc:
         logger.warning(f"Document retrieval skipped (fail-soft): {exc}")
         return [], []

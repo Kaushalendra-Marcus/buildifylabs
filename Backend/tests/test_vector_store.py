@@ -165,12 +165,22 @@ class TestRetrieveDocumentEvidence:
         assert sources[0]["provider"] == "your_documents"
         assert sources[0]["title"] == "report.pdf"
 
-    def test_keyword_miss_falls_back_to_first_chunks(self):
+    def test_keyword_miss_returns_empty_so_judge_can_clarify(self):
         db = _db_with_chunks([
             _chunk(USER_ID, "Revenue was five million.", index=0),
             _chunk(USER_ID, "Costs held steady.", index=1),
         ])
-        texts, sources = run(retrieve_document_evidence(db, USER_ID, "penguins"))
+        # Non-summarize query with tokens but zero hits -> [] (no fallback).
+        assert run(retrieve_document_evidence(db, USER_ID, "penguins")) == ([], [])
+
+    def test_summarize_query_keeps_first_chunks_fallback(self):
+        db = _db_with_chunks([
+            _chunk(USER_ID, "Revenue was five million.", index=0),
+            _chunk(USER_ID, "Costs held steady.", index=1),
+        ])
+        texts, sources = run(
+            retrieve_document_evidence(db, USER_ID, "summarize my report")
+        )
         assert texts == ["Revenue was five million.", "Costs held steady."]
         assert all(s["provider"] == "your_documents" for s in sources)
 
@@ -180,8 +190,9 @@ class TestRetrieveDocumentEvidence:
             _chunk(USER_ID, "Penguins migrate south.", index=0, file_id=FILE_ID_B),
         ]
         db = _db_with_chunks(chunks, viewer=USER_ID, file_ids=[FILE_ID_B])
+        # Keyword hit inside the picked file (word-boundary match).
         texts, sources = run(
-            retrieve_document_evidence(db, USER_ID, "revenue?", [FILE_ID_B])
+            retrieve_document_evidence(db, USER_ID, "penguins?", [FILE_ID_B])
         )
         assert texts == ["Penguins migrate south."]
         assert sources[0]["title"] == "report.pdf"

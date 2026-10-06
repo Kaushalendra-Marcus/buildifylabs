@@ -18,7 +18,203 @@ logger = logging.getLogger(__name__)
 # --- Grounding: the LLM may propose comparison/graph visuals for web-only
 # evidence; trust there is checked, not implicit. Every numeric value in the
 # visual must appear in the cited snippets (formatting slop allowed) or the
-# visual is discarded for the deterministic figures fallback. ---
+# visual is discarded for the deterministic figures fallback.
+#
+# Attributed grounding: numbers carry (value, source_idx) and each
+# prose/visual claim must cite the source it came from. A value that merely
+# exists somewhere in the pool does NOT ground a claim that cites a
+# different source (same number, different context is rejected). Tolerance
+# is unchanged (1% visual, 5% prose) -- only the match scope is stricter.
+# ---
+
+_CITATION_RE = re.compile(r"\[(\d+)\]")
+_YEAR_LIKE_RE = re.compile(r"^(19\d{2}|20\d{2})$")
+
+
+def _is_citation_token(raw: str) -> bool:
+    """True when a bracketed number reads as a citation, not a year/count."""
+    try:
+        text = str(raw or "").strip()
+        if len(text) >= 4:
+            return False
+        if _YEAR_LIKE_RE.match(text):
+            return False
+        num = int(text)
+        return 1 <= num <= 999
+    except Exception:
+        return False
+
+
+def _visual_cited_indices(visual: VisualOutput) -> set[int]:
+    """Source indices a visual cites via [N] markers in its props."""
+    cited: set[int] = set()
+    try:
+        stack = [getattr(visual, "props", None)]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, str):
+                for match in _CITATION_RE.finditer(node):
+                    if _is_citation_token(match.group(1)):
+                        try:
+                            cited.add(int(match.group(1)))
+                        except ValueError:
+                            pass
+            elif isinstance(node, dict):
+                stack.extend(node.values())
+            elif isinstance(node, (list, tuple)):
+                stack.extend(node)
+    except Exception:
+        pass
+    return cited
+
+
+def _strip_citations(text: str) -> str:
+    """Remove [N] citation markers so they never parse as data numbers."""
+    try:
+        return _CITATION_RE.sub(" ", str(text or ""))
+    except Exception:
+        return str(text or "")
+
+
+def _numbers_match(candidate: float, value: float, tol: float = 0.01) -> bool:
+    """Tolerance match shared by visual (1%) and prose (5%) grounding."""
+    try:
+        return abs(candidate - value) <= max(
+            1e-6, abs(value) * tol, abs(candidate) * tol
+        )
+    except Exception:
+        return False
+
+
+def _attributed_snippet_values(snippets: Optional[list]) -> list[tuple[float, int]]:
+    """Snippet numbers as (value, source_idx) with 1-based snippet indices.
+
+    1-based so the index equals the [N] citation number used in prompts,
+    figures (ref), and deterministic visuals.
+    """
+    out: list[tuple[float, int]] = []
+    for idx, snippet in enumerate(snippets or [], start=1):
+        try:
+            for value in _parse_scaled_number(str(snippet)):
+                out.append((float(value), idx))
+        except Exception:
+            continue
+    return out
+
+
+def _evidence_numbers_attributed(
+    snippets: Optional[list] = None,
+    rows: Optional[Sequence[dict]] = None,
+    price_history: Optional[list] = None,
+    financial_history: Optional[list] = None,
+    market_data: Optional[list] = None,
+    computed_numbers: Optional[dict] = None,
+) -> list[tuple[float, int]]:
+    """Attributed evidence pool: (value, source_idx).
+
+    Snippet numbers keep their 1-based snippet index (citation scope);
+    structured/deterministic numbers (rows, history, market, computed) get
+    source_idx 0 -- they ground any visual without a snippet citation, so
+    row-derived charts never need a [N] marker. Pure; never raises.
+    """
+    out: list[tuple[float, int]] = []
+    try:
+        for value, idx in _attributed_snippet_values(snippets):
+            out.append((value, idx))
+    except Exception:
+        pass
+    try:
+        for row in list(rows or [])[:500]:
+            if not isinstance(row, dict):
+                continue
+            for value in row.values():
+                if _is_number(value):
+                    out.append((float(value), 0))
+                elif isinstance(value, str):
+                    for parsed in _parse_scaled_number(value):
+                        out.append((float(parsed), 0))
+    except Exception:
+        pass
+    try:
+        for lst in (list(price_history or []) + list(market_data or [])):
+            if isinstance(lst, dict):
+                for value in list(lst.get("values") or [])[:500]:
+                    if _is_number(value):
+                        out.append((float(value), 0))
+        for item in list(financial_history or []):
+            if not isinstance(item, dict):
+                continue
+            for block_key in ("revenue", "net_income"):
+                block = (item.get(block_key, {}) or {})
+                if isinstance(block, dict):
+                    for value in list(block.get("values") or [])[:500]:
+                        if _is_number(value):
+                            out.append((float(value), 0))
+    except Exception:
+        pass
+    try:
+        stack = [computed_numbers or {}]
+        while stack:
+            node = stack.pop()
+            if _is_number(node):
+                out.append((float(node), 0))
+            elif isinstance(node, dict):
+                stack.extend(node.values())
+            elif isinstance(node, (list, tuple)):
+                stack.extend(node)
+    except Exception:
+        pass
+    return out
+
+
+def _prose_claims_grounded(
+    answer: str,
+    snippets: Optional[list],
+    tol: float = 0.05,
+) -> bool:
+    """True when every numeric prose claim cites its own source.
+
+    Each sentence's numbers (5% tolerance, years excluded) must match a
+    value from one of THAT sentence's cited snippets -- not merely any pool
+    entry. A number with no citation, or citing a source that lacks the
+    number, is ungrounded. Sentences without numbers need no citation.
+    """
+    try:
+        attributed = _attributed_snippet_values(snippets)
+        if not (answer or "").strip():
+            return True
+        # Sentences keep their own citation scope ("$300k [2]" grounds only
+        # against snippet 2, even when snippet 1 holds the same figure).
+        sentences = re.split(r"(?<=[.!?\n])\s+", str(answer or ""))
+        has_number_anywhere = False
+        for sentence in sentences:
+            cited: set[int] = set()
+            for match in _CITATION_RE.finditer(sentence):
+                if _is_citation_token(match.group(1)):
+                    try:
+                        cited.add(int(match.group(1)))
+                    except ValueError:
+                        pass
+            numbers = _parse_scaled_number(_strip_citations(sentence))
+            if not numbers:
+                continue
+            has_number_anywhere = True
+            if not cited:
+                return False
+            if not attributed:
+                return False
+            for value in numbers:
+                ok = any(
+                    idx in cited and _numbers_match(candidate, float(value), tol)
+                    for candidate, idx in attributed
+                )
+                if not ok:
+                    return False
+        # No numeric claims at all -> trivially grounded.
+        return True if has_number_anywhere else True
+    except Exception:
+        return False
+
 
 _VISUAL_NUMBER_RE = re.compile(
     r"([$€₹£])?\s?(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand|%|percent)?"
@@ -55,7 +251,8 @@ def _parse_scaled_number(text: str) -> list[float]:
 def _iter_visual_numbers(props: Any) -> list[float]:
     """All plottable numbers in a visual's props: numeric leaves verbatim +
     scaled numbers parsed from money/percent-like strings. Label-only date
-    strings contribute nothing (no money/percent marker, years skipped)."""
+    strings contribute nothing (no money/percent marker, years skipped).
+    [N] citation markers are stripped first so they never parse as data."""
     found: list[float] = []
     stack = [props]
     while stack:
@@ -70,7 +267,7 @@ def _iter_visual_numbers(props: Any) -> list[float]:
             if re.search(r"[$€₹£%]", node) or re.search(
                 r"\b(k|K|M|B|million|billion|thousand|percent)\b", node
             ):
-                found.extend(_parse_scaled_number(node))
+                found.extend(_parse_scaled_number(_strip_citations(node)))
             elif re.fullmatch(r"\s*[\d,]+(\.\d+)?\s*", node):
                 try:
                     found.append(float(node.replace(",", "").strip()))
@@ -84,27 +281,34 @@ def _iter_visual_numbers(props: Any) -> list[float]:
 
 
 def _visual_numbers_grounded(visual: VisualOutput, snippets: list) -> bool:
-    """True when every number in the visual appears in the snippets.
+    """True when every number in the visual is cited by its own source.
 
-    Both sides go through the same scaled parser ($300k == 300000), so
-    formatting slop is allowed but invented magnitudes are not. Years are
-    excluded on both sides (dates, not data). Tolerance is tight (1%) to
-    absorb rounding, not to bless nearby-but-different figures.
+    Attributed grounding (1% tolerance): both sides go through the same
+    scaled parser ($300k == 300000), years excluded on both sides. When the
+    visual carries [N] citations, each number must match (1%) a value from
+    one of the CITED snippets -- a pool-wide match in an uncited source
+    does not ground (same number, different context is rejected). Visuals
+    without citations keep the legacy any-pool check so pre-attribution
+    callers stay compatible.
     """
     numbers = _iter_visual_numbers(visual.props)
     if not numbers:
         return True  # qualitative cards (timeline, outlook) need no grounding
-    snippet_values: list[float] = []
-    for snippet in snippets or []:
-        snippet_values.extend(_parse_scaled_number(str(snippet)))
-    if not snippet_values:
+    attributed = _attributed_snippet_values(snippets)
+    if not attributed:
         return False
+    cited = _visual_cited_indices(visual)
     for value in numbers:
-        grounded = any(
-            abs(candidate - value)
-            <= max(1e-6, abs(value) * 0.01, abs(candidate) * 0.01)
-            for candidate in snippet_values
-        )
+        if cited:
+            grounded = any(
+                idx in cited and _numbers_match(candidate, float(value), 0.01)
+                for candidate, idx in attributed
+            )
+        else:
+            grounded = any(
+                _numbers_match(candidate, float(value), 0.01)
+                for candidate, _idx in attributed
+            )
         if not grounded:
             return False
     return True
@@ -173,19 +377,58 @@ def _evidence_numbers(
     return pool
 
 
-def _visual_numbers_grounded_in_pool(visual: VisualOutput, pool: list[float]) -> bool:
-    """True when every number in the visual appears in the evidence pool."""
+def _visual_numbers_grounded_in_pool(visual: VisualOutput, pool: list) -> bool:
+    """True when every number in the visual is cited by its own source.
+
+    Accepts both legacy pools (list[float], any-pool 1% match) and
+    attributed pools (list[(value, source_idx)]). For attributed pools,
+    snippet entries (idx >= 1) require a citation-index match while
+    structured entries (idx == 0: rows/history/computed) ground without
+    one. Uncited visuals keep the legacy any-pool check.
+    """
     numbers = _iter_visual_numbers(visual.props)
     if not numbers:
         return True  # qualitative cards need no grounding
     if not pool:
         return False
+    # Detect attributed pool: sequence of (value, idx) pairs.
+    attributed: Optional[list[tuple[float, int]]] = None
+    try:
+        first = pool[0] if len(pool) else None
+        if isinstance(first, (tuple, list)) and len(first) == 2:
+            attributed = [(float(v), int(i)) for v, i in pool]  # type: ignore[misc]
+    except Exception:
+        attributed = None
+    if attributed is None:
+        for value in numbers:
+            grounded = any(
+                _numbers_match(float(candidate), float(value), 0.01)
+                for candidate in pool  # type: ignore[union-attr]
+            )
+            if not grounded:
+                return False
+        return True
+    cited = _visual_cited_indices(visual)
     for value in numbers:
-        grounded = any(
-            abs(candidate - value)
-            <= max(1e-6, abs(value) * 0.01, abs(candidate) * 0.01)
-            for candidate in pool
-        )
+        # Structured evidence (idx 0) grounds any visual: row/history charts
+        # never carry snippet citations.
+        if any(
+            idx == 0 and _numbers_match(candidate, float(value), 0.01)
+            for candidate, idx in attributed
+        ):
+            continue
+        if cited:
+            grounded = any(
+                idx in cited and _numbers_match(candidate, float(value), 0.01)
+                for candidate, idx in attributed
+                if idx != 0
+            )
+        else:
+            grounded = any(
+                _numbers_match(candidate, float(value), 0.01)
+                for candidate, idx in attributed
+                if idx != 0
+            ) or not any(idx != 0 for _, idx in attributed)
         if not grounded:
             return False
     return True
@@ -236,9 +479,12 @@ def drop_ungrounded_visuals_evidence(
 
     No exemptions for row-derived, table, or financial-history visuals: any
     displayed numeric value must be traceable to validated evidence or a
-    deterministic computation. Fail-closed on checker exceptions.
+    deterministic computation. Snippet numbers are attributed (value,
+    source_idx) so a claim citing [N] must match source N, not any pool
+    entry; structured numbers (idx 0) ground without citations.
+    Fail-closed on checker exceptions.
     """
-    pool = _evidence_numbers(
+    pool = _evidence_numbers_attributed(
         snippets=snippets, rows=rows, price_history=price_history,
         financial_history=financial_history, market_data=market_data,
         computed_numbers=computed_numbers,
@@ -792,13 +1038,21 @@ def apply_narration_contract(
     return output
 
 __all__ = [
+    "_CITATION_RE",
     "_VISUAL_NUMBER_RE",
     "_VISUAL_SCALE",
     "_attach_history_provenance",
+    "_attributed_snippet_values",
     "_evidence_numbers",
+    "_evidence_numbers_attributed",
+    "_is_citation_token",
     "_iter_visual_numbers",
+    "_numbers_match",
     "_parse_scaled_number",
+    "_prose_claims_grounded",
     "_provenance_filter_final",
+    "_strip_citations",
+    "_visual_cited_indices",
     "_visual_entities",
     "_visual_numbers_grounded",
     "_visual_numbers_grounded_in_pool",

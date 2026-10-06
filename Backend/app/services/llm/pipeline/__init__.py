@@ -141,6 +141,7 @@ __all__ = [
     "check_entity_completeness",
     "check_research_completeness",
     "clarification_asks_for_researchable_data",
+    "coerce_web_sources",
     "comparison_confidence",
     "compute_comparison_stats",
     "compute_net_margins",

@@ -4,6 +4,12 @@ Compiled across all spec files for fast scanning. Each entry is one line — if 
 fixing one, open the cited spec file for the full edge-case writeup and acceptance criteria before
 starting; don't fix from this summary alone.
 
+## Tooling (not a product gap — local dev contract)
+
+- Tests (and uvicorn) must run with the project interpreter `Backend/.venv/bin/python`
+  (e.g. `.venv/bin/python -m pytest -q` from `Backend/`); the system python lacks deps
+  (`pandas`, `pypdf`, ...). `pypdf` is the PDF text extractor: lightweight, no native deps.
+
 ## Auth (`specs/01-authentication.md`)
 
 - `UserCreate.password` is `Optional` but `register_user()` assumes it's set — omitting it throws
