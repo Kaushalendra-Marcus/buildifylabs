@@ -1197,6 +1197,11 @@ async def run_pipeline(
                 computed_numbers=computed_numbers,
                 gate=gate,
                 thinking=thinking,
+                snippets=news_context,
+                rows=narrate_rows,
+                price_history=price_history,
+                financial_history=financial_history,
+                market_data=market_data,
             )
         except Exception as exc:
             logger.warning("Narration contract failed (fail-open prose kept): %s", exc)
@@ -1259,6 +1264,10 @@ async def run_pipeline(
                     "applies": bool(gate.get("applies")),
                     "blocked": bool(gate.get("blocked")),
                     "blocked_reason": str(gate.get("blocked_reason", "") or "")[:300],
+                    "partial": bool(gate.get("partial")),
+                    "excluded_entities": list(gate.get("excluded_entities", []) or []),
+                    "validated_entities": list(gate.get("validated_entities", []) or []),
+                    "validated_metrics": list(gate.get("validated_metrics", []) or []),
                 },
                 "confidence": output.confidence,
                 "sources": [

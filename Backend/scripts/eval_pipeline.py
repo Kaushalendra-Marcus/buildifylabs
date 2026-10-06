@@ -60,15 +60,31 @@ from app.services.data.stats import (  # noqa: E402
     is_forecast_query,
     parse_what_if,
 )
-from app.services.llm.langchain_pipeline import run_pipeline  # noqa: E402
+from app.services.llm.langchain_pipeline import (  # noqa: E402
+    _historical_comparison_gate,
+    run_pipeline,
+)
 from app.services.llm.pipeline.grounding import _parse_scaled_number  # noqa: E402
-
 _HERE = Path(__file__).resolve().parent
 DEFAULT_GOLDEN = _HERE.parent / "evals" / "golden.jsonl"
 DEFAULT_OUT_DIR = _HERE.parent / "evals" / "results"
 
 _NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_.])\$?\d[\d,]*(?:\.\d+)?")
 _CITATION_RE = re.compile(r"\[(\d+)\]")
+_ISO_DATE_RE = re.compile(r"\b\d{4}-\d{2}(?:-\d{2})?\b")
+# LLMs emit non-ASCII hyphens (U+2010-U+2015) inside dates ("2022‑06‑30"):
+# normalize them first or the ISO strip misses and day fragments leak as
+# numbers. Maps to the production gap, not just an eval concern.
+_UNICODE_DASHES = {
+    "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-",
+    "\u2014": "-", "\u2015": "-", "\u2212": "-",
+}
+_MONTH_DAY_RE = re.compile(
+    r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?"
+    r"\s+\d{1,2}(?:st|nd|rd|th)?\b",
+    re.IGNORECASE,
+)
+_PROJECTED_VALUE_RE = re.compile(r"project\w*[^.\n]{0,40}\d|projected_value")
 
 # Expect keys the runner understands (unknown keys fail loading: a golden
 # file that silently ignores assertions is worse than no golden file).
@@ -137,12 +153,53 @@ def load_golden(path):
     return cases
 
 
-def _answer_numbers(text):
-    """Floats in prose. Citation markers are stripped first (a [2] is a
-    pointer, not a claim); year-like ints (1900-2100) are labels, not claims
-    — same discipline as the CI golden tests."""
+def _seed_entities(seed):
+    """Entity/symbol names in the seed evidence (E1, TSLA, ...). Their
+    trailing digits are identifiers, not numeric claims."""
+    names = set()
+    for key in ("price_history", "financial_history", "market_data", "fundamentals"):
+        for item in seed.get(key, []) or []:
+            if isinstance(item, dict):
+                for field in ("entity", "symbol"):
+                    name = str(item.get(field, "") or "").strip()
+                    if len(name) >= 2:
+                        names.add(name)
+    return names
+
+
+def _blank_tokens(text, tokens):
+    try:
+        for token in sorted(tokens, key=len, reverse=True):
+            if token and len(str(token)) >= 2:
+                text = re.sub(
+                    r"(?<!\w)" + re.escape(str(token)) + r"(?!\w)",
+                    " ",
+                    text,
+                    flags=re.IGNORECASE,
+                )
+    except Exception:
+        pass
+    return text
+
+
+def _answer_numbers(text, ignore=()):
+    """Scaled floats in prose ($520M -> 520000000), so magnitudes compare
+    like-for-like with the scaled evidence pool. Citation markers are
+    stripped first (a [2] is a pointer, not a claim); ISO dates are stripped
+    (month/day fragments like the 06 in 2022-06-30 are labels, not claims);
+    entity-name digits (E1, Series 2) are blanked via `ignore`;
+    year-like ints are skipped — same discipline as the CI golden tests."""
     out = []
     scrubbed = _CITATION_RE.sub(" ", text or "")
+    for dash, ascii_dash in _UNICODE_DASHES.items():
+        scrubbed = scrubbed.replace(dash, ascii_dash)
+    scrubbed = _ISO_DATE_RE.sub(" ", scrubbed)
+    scrubbed = _MONTH_DAY_RE.sub(" ", scrubbed)
+    scrubbed = _blank_tokens(scrubbed, ignore)
+    try:
+        return list(_parse_scaled_number(scrubbed))
+    except Exception:
+        pass
     for match in _NUMBER_RE.finditer(scrubbed):
         raw = match.group(0).replace("$", "").replace(",", "")
         try:
@@ -193,7 +250,7 @@ def _visual_numbers(visuals):
     return found
 
 
-def evidence_numbers(seed, computed):
+def evidence_numbers(seed, computed, case_query=""):
     """Every validated numeric value the answer may legitimately reuse:
     rows (incl. prior-turn rows), deterministic computed stats, snippet
     figures, and structured series values."""
@@ -205,9 +262,10 @@ def evidence_numbers(seed, computed):
                 float(v) for v in row.values() if isinstance(v, (int, float))
             )
     pool.extend(_flatten(computed or {}))
+    entities = _seed_entities(seed)
     for snippet in seed.get("snippets", []) or []:
         try:
-            pool.extend(_parse_scaled_number(str(snippet)))
+            pool.extend(_parse_scaled_number(_blank_tokens(str(snippet), entities)))
         except Exception:
             pass
     for item in (seed.get("price_history", []) or []) + (
@@ -232,6 +290,20 @@ def evidence_numbers(seed, computed):
                 )
     for item in seed.get("fundamentals", []) or []:
         pool.extend(_flatten(item))
+    # Validated comparison stats are quotable evidence: the narrator is
+    # REQUIRED to quote them exactly (winners + pct changes), so rebuild the
+    # deterministic gate over the same seeds and admit its numbers.
+    try:
+        gate = _historical_comparison_gate(
+            case_query,
+            market_data=seed.get("market_data", []) or [],
+            price_history=seed.get("price_history", []) or [],
+            financial_history=seed.get("financial_history", []) or [],
+            fundamentals=seed.get("fundamentals", []) or [],
+        )
+        pool.extend(_flatten((gate or {}).get("comparison_stats")))
+    except Exception:
+        pass
     return pool
 
 
@@ -385,14 +457,29 @@ def check_case(case, output, computed):
         if output.clarification is not None:
             pass  # a clarification makes no numeric claims to ground
         else:
-            pool = evidence_numbers(seed, computed)
+            pool = evidence_numbers(seed, computed, case.get("query", ""))
+            # A stated scenario lever ("raise price 10%") and its factor
+            # (1.10) are derived from the QUESTION, not invented: symbolic
+            # reasoning over them (30 x P -> 30 x 1.10 x P) is legitimate.
+            try:
+                parsed = parse_what_if(case.get("query", ""))
+                if parsed:
+                    pool.append(float(parsed[1]))
+                    pool.append(round(1.0 + float(parsed[1]) / 100.0, 4))
+            except Exception:
+                pass
             if not pool:
                 failures.append(
                     "no_invented_numbers: empty evidence pool (case needs "
                     "numeric seeds to check grounding)"
                 )
             else:
-                claimed = _answer_numbers(answer) + _visual_numbers(visuals)
+                entities = _seed_entities(seed) | {
+                    str(e) for e in (expect.get("excluded_entities", []) or [])
+                }
+                claimed = _answer_numbers(answer, ignore=entities) + _visual_numbers(
+                    visuals
+                )
                 for value in claimed:
                     if not any(
                         abs(c - value) <= max(1e-6, abs(value) * 0.01)
@@ -414,24 +501,29 @@ def check_case(case, output, computed):
 
     if expect.get("no_forecast"):
         titles = " ".join(str(getattr(v, "title", "") or "") for v in visuals)
-        if (
-            "project" in lowered
-            or "project" in visuals_blob.lower()
-            or "forecast" in (titles.lower() + visuals_blob.lower())
-        ):
+        # An honest refusal ("cannot project ...") is not a forecast leak:
+        # only a projected VALUE (number attached to project*/forecast
+        # language) or a forecast-flavoured visual fails.
+        if "forecast" in (
+            titles.lower() + visuals_blob.lower()
+        ) or _PROJECTED_VALUE_RE.search(lowered):
             failures.append("no_forecast: projected numbers or visuals emitted")
 
     if expect.get("no_scenario"):
-        prov_blob = json.dumps(
-            [getattr(v, "provenance", None) or {} for v in visuals],
-            default=str,
-        ).lower()
-        titles = " ".join(str(getattr(v, "title", "") or "") for v in visuals)
-        if (
-            "what_if" in prov_blob
-            or "scenario" in (titles.lower() + prov_blob)
-            or "scenario_total" in lowered
-        ):
+        # Intent tags ("intent": "what_if") ride on every row visual for a
+        # what-if query and are NOT scenario math: only a what-if
+        # computation_id, a scenario-titled visual, or scenario totals in
+        # prose count as emitting a scenario.
+        bad_visual = False
+        for visual in visuals:
+            prov = getattr(visual, "provenance", None) or {}
+            comp_ids = [str(c).lower() for c in (prov.get("computation_ids") or [])]
+            if any("what_if" in c or "scenario" in c for c in comp_ids):
+                bad_visual = True
+            title = str(getattr(visual, "title", "") or "").lower()
+            if "scenario" in title or "what-if" in title or "what if" in title:
+                bad_visual = True
+        if "what_if" in (computed or {}) or bad_visual or "scenario_total" in lowered:
             failures.append("no_scenario: scenario math or visuals emitted")
 
     if expect.get("forecast_computable"):
@@ -452,7 +544,10 @@ def check_case(case, output, computed):
             )
 
     if expect.get("answer_nonempty") and not answer.strip():
-        failures.append("answer_nonempty: empty answer with no clarification")
+        # A clarification IS the response (alternate mode): only a silent
+        # empty answer with no clarification fails.
+        if output.clarification is None:
+            failures.append("answer_nonempty: empty answer with no clarification")
 
     return failures
 
@@ -502,7 +597,7 @@ def dry_run(cases):
         problems = []
         if expect.get("no_invented_numbers"):
             computed = precompute_numbers(case["query"], rows)
-            if not evidence_numbers(seed, computed):
+            if not evidence_numbers(seed, computed, case.get("query", "")):
                 problems.append("empty evidence pool (no numeric seeds)")
         if expect.get("forecast_computable"):
             try:
@@ -538,6 +633,7 @@ async def live_main(cases, out_dir):
             try:
                 output, computed = await run_case(case)
                 failures = check_case(case, output, computed)
+                clar = output.clarification
                 record = {
                     "id": case["id"],
                     "query": case["query"],
@@ -545,11 +641,24 @@ async def live_main(cases, out_dir):
                     "passed": not failures,
                     "failures": failures,
                     "confidence": output.confidence,
-                    "clarification": bool(output.clarification is not None),
+                    "clarification": bool(clar is not None),
+                    "clarification_question": (
+                        getattr(clar, "question", "") if clar is not None else ""
+                    ),
                     "visual_types": [
                         getattr(v, "visual_type", "") for v in (output.visuals or [])
                     ],
+                    "visuals_detail": [
+                        {
+                            "type": getattr(v, "visual_type", ""),
+                            "title": getattr(v, "title", ""),
+                            "props": getattr(v, "props", None) or {},
+                            "provenance": getattr(v, "provenance", None) or {},
+                        }
+                        for v in (output.visuals or [])
+                    ],
                     "gate": (output.research_state or {}).get("gate", {}),
+                    "answer": output.answer or "",
                     "answer_excerpt": (output.answer or "")[:300],
                 }
             except Exception as exc:  # never let one case kill the night

@@ -217,8 +217,12 @@ def _prose_claims_grounded(
 
 
 _VISUAL_NUMBER_RE = re.compile(
-    r"([$€₹£])?\s?(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand|%|percent)?"
+    r"([$€₹£])?\s?(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand|%|percent)?(?![A-Za-z])"
 )
+# NOTE: the trailing (?![A-Za-z]) is load-bearing, not cosmetic. Without it a
+# scale letter matches the initial of the following word ("120, Mar 2024"
+# parses as 120M) and invents phantom magnitudes in the evidence pool. A
+# genuine suffix ("$520M", "50%") is always followed by a non-letter.
 _VISUAL_SCALE = {
     "k": 1e3, "K": 1e3, "thousand": 1e3,
     "M": 1e6, "million": 1e6,
@@ -835,9 +839,27 @@ def build_validated_evidence_state(
     excluded_entities = list(
         gate.get("excluded_entities", []) or completeness.get("excluded_entities", []) or []
     )
-    if not excluded_entities and entities:
+    if not excluded_entities and len(entities) > 1:
+        # Multi-entity derivation fallback: requested but unvalidated names
+        # are exclusions (the partial-comparison disclosure concept). Gated
+        # to comparison-shaped plans -- see the single-entity filter below.
         _val = {str(e).strip().lower() for e in validated_entities}
         excluded_entities = [e for e in entities if str(e).strip().lower() not in _val]
+    if len(entities) <= 1 and excluded_entities:
+        # Single-entity asks have no exclusion concept (a subject with no
+        # structured cells is unvalidated, not dropped from a comparison).
+        # A completeness "no structured cells" entry for the subject itself
+        # must not masquerade as an exclusion -- downstream that strips the
+        # subject's visuals and entity-specific follow-ups (seen live: an
+        # Amazon answer losing "Compare Amazon to ..."). Non-subject
+        # entries (defensive; single-entity plans rarely produce them) stay.
+        _requested = {str(e).strip().lower() for e in entities}
+        excluded_entities = [
+            e for e in excluded_entities
+            if str(
+                (e.get("entity") if isinstance(e, dict) else e) or ""
+            ).strip().lower() not in _requested
+        ]
     sufficient = bool(gate.get("comparison_stats")) or bool(
         len(validated_entities) >= 2 and len(validated_metrics) >= 1
     )
@@ -932,6 +954,11 @@ def apply_narration_contract(
     computed_numbers: Optional[dict] = None,
     gate: Optional[Dict[str, Any]] = None,
     thinking: Optional[list] = None,
+    snippets: Optional[list] = None,
+    rows: Optional[Sequence] = None,
+    price_history: Optional[list] = None,
+    financial_history: Optional[list] = None,
+    market_data: Optional[list] = None,
 ) -> PipelineOutput:
     """Code-enforced narration + final validation + followup grounding.
 
@@ -958,9 +985,9 @@ def apply_narration_contract(
     gate = gate or {}
     try:
         pool = _evidence_numbers(
-            snippets=None, rows=None,
-            price_history=None, financial_history=None,
-            market_data=None, computed_numbers=computed_numbers,
+            snippets=snippets, rows=rows,
+            price_history=price_history, financial_history=financial_history,
+            market_data=market_data, computed_numbers=computed_numbers,
         )
         # Winners from the single validated source.
         stats = (computed_numbers.get("comparison_stats", {}) or {})
