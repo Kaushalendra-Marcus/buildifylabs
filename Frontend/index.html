@@ -2,9 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" type="image/png" href="/logo.png" />
-    <link rel="apple-touch-icon" href="/logo.png" />
+    <!-- Tab/bookmark icons: versioned hrefs bust Chrome's aggressive
+         favicon cache on every deploy (a stale "no icon" entry otherwise
+         pins the default globe). SVG first (crisp at any size), small PNG
+         fallback for renderers without SVG-icon support; the 1.6MB brand
+         logo is deliberately NOT an icon candidate. -->
+    <link rel="icon" type="image/svg+xml" sizes="any" href="/favicon.svg?v=2" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=2" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=2" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0a0a0b" />
     <title>BuildifyLabs — Ask Your Business Data Anything</title>
