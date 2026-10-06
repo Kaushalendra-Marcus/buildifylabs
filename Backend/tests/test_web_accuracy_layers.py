@@ -881,3 +881,113 @@ class TestRecommendedTable:
         assert table.props["values"][0][0] == "The Hundred-Page Machine Learning Book"
         assert "[1]" in table.props["values"][0][1]
         assert "[2]" in table.props["values"][1][1]
+
+
+class TestSnippetRecoveryPass:
+    """Live incident: 'what is revenue of amazon in last year' (live_web)
+    planned ["fundamentals"] only, Yahoo 429'd, zero snippets were fetched
+    -> honest-but-avoidable 'no reliable web evidence'. A fundamentals-only
+    plan must fall back to a bounded snippet pass on total failure, and a
+    totally empty result must never be cached."""
+
+    QUERY = "what is revenue of amazon in last year"
+
+    async def _fake_rewrite(self, query, prior_clarification=None,
+                            company_name=None, prior_query=None):
+        return {"queries": [query], "entities": ["Amazon"],
+                "time_sensitive": False}
+
+    def test_fundamentals_outage_falls_back_to_snippets(self, monkeypatch):
+        cache_mod._reset_cache_state()
+
+        async def fake_resolve(client, entity):
+            return "AMZN"
+
+        async def fake_fundamentals(client, entity, symbol):
+            return None  # Yahoo 429
+
+        async def fake_snippets(client, query_item, settings, time_sensitive):
+            return [("Amazon revenue was $638 billion in 2024.",
+                     "https://example.com/a", "Tavily", None, 0.9)]
+
+        monkeypatch.setattr(web_search_mod, "rewrite_search_queries",
+                            self._fake_rewrite)
+        monkeypatch.setattr(web_search_mod, "_resolve_symbol", fake_resolve)
+        monkeypatch.setattr(web_search_mod, "_fetch_fundamentals",
+                            fake_fundamentals)
+        monkeypatch.setattr(web_search_mod, "_snippets_for_query",
+                            fake_snippets)
+
+        result = asyncio.run(
+            web_search_mod.search_web(self.QUERY, planned_tools=["fundamentals"])
+        )
+        assert len(result.context) >= 1
+        assert any("638" in text for text in result.context)
+        assert any("falls back to web-snippet" in note
+                   for note in result.research_notes)
+
+    def test_happy_path_runs_no_recovery(self, monkeypatch):
+        cache_mod._reset_cache_state()
+        calls = {"n": 0}
+
+        async def fake_resolve(client, entity):
+            return "AMZN"
+
+        async def fake_fundamentals(client, entity, symbol):
+            return (
+                "AMZN fundamentals",
+                {"entity": entity, "symbol": symbol, "market_cap": 2.5e12,
+                 "total_revenue": 6.38e11},
+                {"title": entity, "url": "", "provider": "Yahoo Finance"},
+            )
+
+        async def fake_snippets(client, query_item, settings, time_sensitive):
+            calls["n"] += 1
+            return []
+
+        monkeypatch.setattr(web_search_mod, "rewrite_search_queries",
+                            self._fake_rewrite)
+        monkeypatch.setattr(web_search_mod, "_resolve_symbol", fake_resolve)
+        monkeypatch.setattr(web_search_mod, "_fetch_fundamentals",
+                            fake_fundamentals)
+        monkeypatch.setattr(web_search_mod, "_snippets_for_query",
+                            fake_snippets)
+
+        result = asyncio.run(
+            web_search_mod.search_web(self.QUERY, planned_tools=["fundamentals"])
+        )
+        assert len(result.fundamentals) == 1
+        assert calls["n"] == 0
+        assert not any("falls back to web-snippet" in note
+                       for note in result.research_notes)
+
+    def test_empty_result_is_not_cached(self, monkeypatch):
+        cache_mod._reset_cache_state()
+        stores = {"n": 0}
+
+        async def fake_resolve(client, entity):
+            return "AMZN"
+
+        async def fake_fundamentals(client, entity, symbol):
+            return None
+
+        async def fake_snippets(client, query_item, settings, time_sensitive):
+            return []
+
+        async def fake_store(*args, **kwargs):
+            stores["n"] += 1
+
+        monkeypatch.setattr(web_search_mod, "rewrite_search_queries",
+                            self._fake_rewrite)
+        monkeypatch.setattr(web_search_mod, "_resolve_symbol", fake_resolve)
+        monkeypatch.setattr(web_search_mod, "_fetch_fundamentals",
+                            fake_fundamentals)
+        monkeypatch.setattr(web_search_mod, "_snippets_for_query",
+                            fake_snippets)
+        monkeypatch.setattr(cache_mod, "set_cached_result", fake_store)
+
+        result = asyncio.run(
+            web_search_mod.search_web(self.QUERY, planned_tools=["fundamentals"])
+        )
+        assert result.context == [] and result.fundamentals == []
+        assert stores["n"] == 0

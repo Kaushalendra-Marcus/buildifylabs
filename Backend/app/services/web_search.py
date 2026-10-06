@@ -2442,6 +2442,85 @@ async def search_web(
                             "Second-pass web research completed annual "
                             "financials for all required companies."
                         )
+            # Total-failure recovery: the planned dispatch ran only
+            # structured adapters (e.g. a fundamentals-only plan) and every
+            # one of them came back empty (seen live: Yahoo 429 with zero
+            # snippets fetched, so a public revenue figure answered
+            # nothing). Snippets are the resilient general path, so fetch
+            # them as a bounded fallback -- only on total failure, never
+            # on the happy path (no extra provider cost when structured
+            # evidence works; no refetch when snippets already ran).
+            if (
+                not wants_snippets
+                and not merged_texts
+                and not market_texts
+                and not fundamentals_texts
+                and not macro_texts
+                and not price_history_texts
+                and not financial_history_texts
+                and not knowledge_texts
+            ):
+                _recovery_queries = [
+                    item for item in search_queries if str(item or "").strip()
+                ]
+                if _recovery_queries:
+                    logger.info(
+                        "Snippet recovery pass: planned adapters returned "
+                        "no evidence; fetching snippets as fallback."
+                    )
+                    try:
+                        _recovery_lists = await asyncio.gather(
+                            *(
+                                _snippets_for_query(
+                                    client, item, settings, time_sensitive
+                                )
+                                for item in _recovery_queries
+                            ),
+                            return_exceptions=True,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Snippet recovery fan-out failed: %s", exc
+                        )
+                        _recovery_lists = []
+                    for _result in _recovery_lists:
+                        if isinstance(_result, Exception):
+                            logger.warning(
+                                "Snippet recovery failed: %s", _result
+                            )
+                            continue
+                        for _raw in _result or []:
+                            _text, _url, _provider, _pub, _score = (
+                                _coerce_triple(_raw)
+                            )
+                            _key = " ".join(_text.lower().split())
+                            if not _key or _key in seen_texts:
+                                continue
+                            if _url and _url in seen_urls:
+                                continue
+                            seen_texts.add(_key)
+                            if _url:
+                                seen_urls.add(_url)
+                            merged_texts.append(_text)
+                            _entry: dict[str, Any] = {
+                                "title": _source_title(_text),
+                                "url": _url,
+                                "provider": _provider,
+                            }
+                            if _pub:
+                                _entry["published_date"] = _pub
+                            if _score is not None:
+                                try:
+                                    _entry["score"] = float(_score)
+                                except (TypeError, ValueError):
+                                    pass
+                            merged_sources.append(_entry)
+                    if merged_texts:
+                        research_notes.append(
+                            "Planned evidence providers returned nothing, "
+                            "so this answer falls back to web-snippet "
+                            "evidence."
+                        )
             # Whole-pool budgeting: structured evidence (small, high-signal:
             # market/fundamentals/macro/history/Wikipedia) is deduped as
             # (text, source) PAIRS so context[i] <-> sources[i] stays aligned,
@@ -2494,23 +2573,36 @@ async def search_web(
                 macro_note,
             )
             if cache_key:
-                try:
-                    await set_cached_result(
-                        cache_key,
-                        {
-                            "context": result.context,
-                            "sources": result.sources,
-                            "market_data": result.market_data,
-                            "fundamentals": result.fundamentals,
-                            "macro_data": result.macro_data,
-                            "price_history": result.price_history,
-                            "financial_history": result.financial_history,
-                            "research_notes": result.research_notes,
-                            "macro_note": result.macro_note,
-                        },
+                # Never cache a totally empty result: one provider outage
+                # would otherwise poison the key for the full TTL and every
+                # repeat query would fail without even trying.
+                _has_evidence = bool(
+                    budget_texts or budget_sources or market_data
+                    or fundamentals or macro_data or price_history
+                    or financial_history
+                )
+                if not _has_evidence:
+                    logger.info(
+                        "Web-search result empty; skipping cache store."
                     )
-                except Exception as exc:
-                    logger.warning("Web-search cache store failed: %s", exc)
+                else:
+                    try:
+                        await set_cached_result(
+                            cache_key,
+                            {
+                                "context": result.context,
+                                "sources": result.sources,
+                                "market_data": result.market_data,
+                                "fundamentals": result.fundamentals,
+                                "macro_data": result.macro_data,
+                                "price_history": result.price_history,
+                                "financial_history": result.financial_history,
+                                "research_notes": result.research_notes,
+                                "macro_note": result.macro_note,
+                            },
+                        )
+                    except Exception as exc:
+                        logger.warning("Web-search cache store failed: %s", exc)
             return result
     except Exception as exc:
         logger.warning("Live web search failed: %s", exc)
