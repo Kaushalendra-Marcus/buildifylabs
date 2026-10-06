@@ -16,3 +16,5 @@ build/
 
 # misc
 .DS_Store
+
+/screenshots

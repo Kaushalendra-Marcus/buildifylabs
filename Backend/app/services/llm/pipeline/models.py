@@ -64,6 +64,56 @@ class WebSource(BaseModel):
     score: Optional[float] = None
 
 
+def coerce_web_sources(sources: Optional[list] = None) -> list:
+    """Coerce retrieval dicts into validated WebSource objects (fail-closed contract).
+
+    Retrieval adapters (Tavily/DDG/Yahoo/docs) produce plain dicts; assigning
+    them directly to PipelineOutput.web_sources bypasses validation and
+    surfaces as Pydantic serializer warnings downstream. Coercion fills
+    transport defaults (retrieved_at=now, url="") and drops only entries with
+    no usable title/provider, so the API contract stays List[WebSource].
+    Never raises: on any failure returns the input list unchanged.
+    """
+    from datetime import datetime, timezone
+
+    if not sources:
+        return []
+    coerced: list = []
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        for item in sources:
+            try:
+                if isinstance(item, WebSource):
+                    coerced.append(item)
+                    continue
+                if not isinstance(item, dict):
+                    continue
+                title = str(item.get("title", "") or "").strip()
+                provider = str(item.get("provider", "") or "").strip()
+                if not title and not provider:
+                    continue
+                payload = {
+                    "title": title or "Untitled source",
+                    "url": str(item.get("url", "") or ""),
+                    "provider": provider or "unknown",
+                    "retrieved_at": str(item.get("retrieved_at", "") or now),
+                    "published_date": item.get("published_date"),
+                    "score": item.get("score"),
+                }
+                try:
+                    score = payload["score"]
+                    if score is not None:
+                        payload["score"] = float(score)
+                except (TypeError, ValueError):
+                    payload["score"] = None
+                coerced.append(WebSource(**payload))
+            except Exception:
+                continue
+        return coerced
+    except Exception:
+        return list(sources or [])
+
+
 class VisualPlanItem(BaseModel):
     """One visual the decision step wants, described generically: which of
     the 7 real visual types and which available field/series it should be
@@ -107,8 +157,13 @@ class Decision(BaseModel):
 
 def default_decision() -> Decision:
     """Fail-open verdict: answer with whatever evidence exists. Used whenever
-    the judge call itself fails so a judge outage never blocks an answer."""
-    return Decision(decision="answer")
+    the judge call itself fails so a judge outage never blocks an answer.
+
+    The `missing` note records the fail-open explicitly so downstream
+    thinking/trace can disclose it instead of silently presenting a
+    best-effort answer as fully judged.
+    """
+    return Decision(decision="answer", missing="judge unavailable; answering best-effort")
 
 
 class PipelineOutput(BaseModel):
@@ -153,5 +208,6 @@ __all__ = [
     "VisualOutput",
     "VisualPlanItem",
     "WebSource",
+    "coerce_web_sources",
     "default_decision",
 ]

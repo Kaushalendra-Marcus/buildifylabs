@@ -4,6 +4,13 @@
  * Sources are DERIVED from fields the backend actually returns today — never
  * invented (see `./evidence`). Numbered 1-based so `AnswerProse` `[n]`
  * citations have a landing target (`#source-n`). Amber accent only.
+ *
+ * Citation/provenance mapping: prose citations are 1-based card numbers
+ * (`[n]` → `#source-n`), while backend visual provenance uses 0-based
+ * evidence ids (`web:<i>` / `doc:<i>` = index into `web_sources`,
+ * `rows` = your-data receipt, `computed:forecast` = deterministic
+ * projection). Each card carries its provenance id as `data-provenance-id`
+ * so the two schemes resolve to the same card without renumbering either.
  */
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Database, FileText, Globe } from 'lucide-react';
@@ -18,6 +25,16 @@ export function DataSources({ output }: { output: PipelineOutput }) {
   const yourDataCount = sources.filter((s) => s.kind === 'your-data').length;
   const yourDocumentsCount = sources.filter((s) => s.kind === 'your-documents').length;
   const liveWebCount = sources.length - yourDataCount - yourDocumentsCount;
+  // `deriveSources` emits the your-data receipt first (when present), then
+  // `web_sources` in order — so a web/doc card's 0-based provenance index is
+  // its card position minus the leading receipt offset.
+  const receiptOffset = yourDataCount > 0 ? 1 : 0;
+
+  function provenanceIdFor(source: (typeof sources)[number], index: number): string {
+    if (source.kind === 'your-data') return 'rows';
+    const webIndex = index - receiptOffset;
+    return source.kind === 'your-documents' ? `doc:${webIndex}` : `web:${webIndex}`;
+  }
 
   return (
     <div className="evidence-block">
@@ -60,6 +77,7 @@ export function DataSources({ output }: { output: PipelineOutput }) {
               key={`${source.kind}-${index}`}
               id={`source-${index + 1}`}
               className="source-card"
+              data-provenance-id={provenanceIdFor(source, index)}
             >
               <span className="source-card__number" aria-hidden="true">
                 {index + 1}

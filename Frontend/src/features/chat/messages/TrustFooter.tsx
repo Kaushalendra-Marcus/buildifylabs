@@ -21,6 +21,11 @@ interface TrustFooterProps {
   /** Pin-to-reports affordance (ReportsPage). Absent = chat outside pin scope. */
   pinned?: boolean;
   onPin?: () => void;
+  /** Scope-downgrade disclosure (specs/07 kill-switch): true when the backend
+   *  served a live-web request from your own data only
+   *  (`research_state.scope_downgraded`). Rendered as an honest inline notice —
+   *  never a silent scope switch. */
+  scopeDowngraded?: boolean;
 }
 
 function isBoundedConfidence(value: number): boolean {
@@ -73,6 +78,7 @@ export function TrustFooter({
   answeredAt,
   pinned = false,
   onPin,
+  scopeDowngraded = false,
 }: TrustFooterProps) {
   const [queryOpen, setQueryOpen] = useState(false);
   const [flagState, setFlagState] = useState<'idle' | 'flagging' | 'flagged' | 'error'>(
@@ -136,6 +142,17 @@ export function TrustFooter({
               {confidenceBand(confidence)} · {Math.round(confidence * 100)}%
             </span>
           </div>
+        </>
+      )}
+
+      {scopeDowngraded && (
+        <>
+          <span className="trust-footer__sep" aria-hidden="true">
+            ·
+          </span>
+          <span className="trust-footer__scope-note" role="note">
+            Live web unavailable, answered from your data.
+          </span>
         </>
       )}
 

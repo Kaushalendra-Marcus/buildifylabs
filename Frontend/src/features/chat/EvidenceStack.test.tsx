@@ -105,6 +105,48 @@ describe('Evidence stack — sources, citations, process', () => {
     expect(screen.getByText('running..')).toBeInTheDocument()
   })
 
+  it('exposes provenance ids on source cards matching backend evidence indices', async () => {
+    const user = userEvent.setup()
+    useChatStore.getState().addAssistantMessage(makeOutput())
+    render(<MessageStream />)
+
+    await user.click(screen.getByRole('button', { name: /2 sources/ }))
+    // your-data receipt traces to `rows`; the first web source to `web:0`
+    // (0-based backend provenance vs 1-based `#source-n` citations).
+    expect(document.getElementById('source-1')).toHaveAttribute(
+      'data-provenance-id',
+      'rows',
+    )
+    expect(document.getElementById('source-2')).toHaveAttribute(
+      'data-provenance-id',
+      'web:0',
+    )
+  })
+
+  it('shows the scope-downgrade notice when live web was unavailable', () => {
+    useChatStore.getState().addAssistantMessage(
+      makeOutput({
+        research_state: {
+          scope_requested: 'live_web',
+          scope_effective: 'own_data',
+          scope_downgraded: true,
+        },
+      }),
+    )
+    render(<MessageStream />)
+
+    expect(screen.getByRole('note')).toHaveTextContent(
+      'Live web unavailable, answered from your data.',
+    )
+  })
+
+  it('hides the scope-downgrade notice when scope was not downgraded', () => {
+    useChatStore.getState().addAssistantMessage(makeOutput())
+    render(<MessageStream />)
+
+    expect(screen.queryByRole('note')).not.toBeInTheDocument()
+  })
+
   it("labels your_documents sources as your documents, not live web", async () => {
     const user = userEvent.setup()
     useChatStore.getState().addAssistantMessage(

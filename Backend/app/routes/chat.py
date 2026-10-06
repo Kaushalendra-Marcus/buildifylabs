@@ -59,6 +59,7 @@ from app.services.llm.langchain_pipeline import (
     ClarificationRequest,
     PipelineOutput,
     _same_question as _is_repeat_clarification,
+    coerce_web_sources,
     fallback_output,
     plan_tools,
     run_pipeline,
@@ -87,29 +88,52 @@ EXTERNAL_CONTEXT_CLARIFICATION_QUESTION = "Want me to also check live sources fo
 
 
 def _thread_id_for(request) -> str:
-    """Minimum scoped identifier for thread isolation (P0#20)."""
+    """Scoped identifier for thread isolation (P0#20).
+
+    Returns the stripped client thread id, or "" when the client sent none.
+    A missing id NEVER falls back to a shared "default" bucket: sharing one
+    bucket across conversations leaks prior-turn context between unrelated
+    threads. The frontend always sends thread_id (activeConversationId); a
+    missing value is treated by _load_prior_context as an explicit
+    latest-thread-only fallback, never as cross-thread history.
+    """
     try:
         thread = getattr(request, "thread_id", None) or getattr(
             request, "conversation_id", None
         )
-        thread = str(thread or "default").strip() or "default"
+        thread = str(thread or "").strip()
     except Exception:
-        thread = "default"
+        thread = ""
     return thread[:120]
 
 
 async def _load_prior_context(
     db: AsyncSession, user_id: UUID, thread_id: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[Dict[str, Any]], Optional[Dict[str, Any]], str]:
-    """Recover the previous turn from the user's latest QueryLogs row.
+    """Recover the previous turn from the user's QueryLogs history.
 
     Returns (prior_clarification_question, prior_data_digest,
     prior_research_state, prior_query). All Nones/"" when there is no usable
     history. Fully defensive: a corrupt or foreign log row degrades to no
     context, never an error.
+
+    Thread isolation: an explicit thread_id matches ONLY rows carrying that
+    same thread (no shared "default" bucket across conversations). When the
+    client sent no thread id, scope is limited to the single latest usable
+    turn (latest thread only) as an explicit fallback — logged, never a
+    silent cross-thread scan.
+
+    MIGRATION SUGGESTION (perf, not behavior): thread_id currently lives
+    inside the QueryLogs.response JSON (research_state.thread_id), so this
+    lookup scans recent rows in Python. Once traffic warrants it, promote it
+    to a real column and index it, e.g.:
+        ALTER TABLE query_logs ADD COLUMN thread_id TEXT;
+        CREATE INDEX ix_query_logs_user_thread
+            ON query_logs (user_id, thread_id);
+    See alembic/versions/c3code0000_query_logs_thread_index.py.
     """
     try:
-        wanted = str(thread_id or "default").strip() or "default"
+        wanted = str(thread_id or "").strip()
         result = await db.execute(
             select(QueryLogs)
             .where(QueryLogs.user_id == user_id)
@@ -117,29 +141,56 @@ async def _load_prior_context(
             .limit(10)
         )
         logs = list(result.scalars().all())
-        log = None
-        response = None
-        for candidate in logs:
+
+        def _usable_payload(candidate) -> Optional[Dict[str, Any]]:
             if candidate is None or not candidate.response:
-                continue
+                return None
             try:
                 payload = json.loads(candidate.response)
             except (ValueError, TypeError):
-                continue
-            if not isinstance(payload, dict):
-                continue
-            state = payload.get("research_state")
-            row_thread = (
-                str((state or {}).get("thread_id", "") or "").strip()
-                if isinstance(state, dict)
-                else ""
-            ) or "default"
-            if row_thread == wanted:
-                log = candidate
-                response = payload
+                return None
+            return payload if isinstance(payload, dict) else None
+
+        def _row_thread(payload: Dict[str, Any]) -> str:
+            try:
+                state = payload.get("research_state")
+                if isinstance(state, dict):
+                    return str(state.get("thread_id", "") or "").strip()
+            except Exception:
+                pass
+            return ""
+
+        log = None
+        response = None
+        if not wanted:
+            # Explicit fallback: no thread id from the client. Use at most
+            # the single latest usable turn (whatever thread it belongs to)
+            # so a missing id can never pull stale context from an unrelated
+            # conversation's history.
+            for candidate in logs:
+                payload = _usable_payload(candidate)
+                if payload is None:
+                    continue
+                log, response = candidate, payload
+                logger.info(
+                    "Prior-context fallback: no thread_id, using latest "
+                    "thread %r only.",
+                    _row_thread(payload),
+                )
                 break
-        if log is None or response is None:
-            return None, None, None, ""
+            if log is None or response is None:
+                return None, None, None, ""
+        else:
+            for candidate in logs:
+                payload = _usable_payload(candidate)
+                if payload is None:
+                    continue
+                if _row_thread(payload) == wanted:
+                    log = candidate
+                    response = payload
+                    break
+            if log is None or response is None:
+                return None, None, None, ""
 
         prior_clarification = None
         clarification = response.get("clarification")
@@ -235,6 +286,16 @@ async def chat_stream(
     prose chunks as the narration generates them, then exactly one
     `{"result": <PipelineOutput JSON>}`. Quota runs in the dependency, so a
     429 arrives as a regular JSON error before any event (never mid-stream).
+
+    AsyncSession safety: the request-scoped `db` session is owned EXCLUSIVELY
+    by the background `run()` task — `event_stream()` never touches it (it
+    only drains the queue), so the session is never used concurrently from
+    two tasks (no MissingGreenlet from cross-task sharing). Inside
+    _answer_request the DB-touching evidence branches run sequentially for
+    the same reason; only DB-free work (live-web search, LLM calls) overlaps.
+    If this ever needs true concurrent DB access, give each branch its own
+    session via the sessionmaker (e.g. `async with session_maker() as ...`)
+    instead of sharing one AsyncSession across tasks.
     """
     queue: asyncio.Queue = asyncio.Queue()
 
@@ -546,11 +607,22 @@ async def _answer_request(
 
     await emit("evidence")
     try:
-        exec_result, search_result, doc_result = await asyncio.gather(
-            _execute_branch() if table_name is not None else asyncio.sleep(0, result=[]),
-            _search_branch(),
-            _document_branch(),
-        )
+        # Session safety: AsyncSession forbids concurrent operations on one
+        # session object. _execute_branch and _document_branch both touch
+        # `db`, so they MUST NOT run concurrently via a single gather —
+        # that is the MissingGreenlet / "already executing" failure mode.
+        # _search_branch is DB-free (LLM planning + HTTP retrieval over
+        # captured strings), so it may safely overlap ONE db branch at a
+        # time. Sequence: (exec + search concurrently), then documents.
+        if table_name is not None:
+            exec_result, search_result = await asyncio.gather(
+                _execute_branch(),
+                _search_branch(),
+            )
+        else:
+            exec_result = []
+            search_result = await _search_branch()
+        doc_result = await _document_branch()
         document_context, document_sources = doc_result
     except Exception as branch_exc:
         # Consistent failure contract (P1#27): branch failures outside the
@@ -571,7 +643,13 @@ async def _answer_request(
             _rs = dict(output.research_state or {})
         except Exception:
             _rs = {}
-        _rs.update({"canonical_query": plan_query, "thread_id": thread_id})
+        _rs.update({
+            "canonical_query": plan_query,
+            "thread_id": thread_id,
+            "scope_requested": request.source_scope,
+            "scope_effective": effective_scope,
+            "scope_downgraded": bool(request.source_scope != effective_scope),
+        })
         output.research_state = _rs
         return await _log_and_return(
             db, user_id, plan_query, output, time.monotonic() - started
@@ -590,7 +668,13 @@ async def _answer_request(
             _rs0 = dict(output.research_state or {})
         except Exception:
             _rs0 = {}
-        _rs0.update({"canonical_query": plan_query, "thread_id": thread_id})
+        _rs0.update({
+            "canonical_query": plan_query,
+            "thread_id": thread_id,
+            "scope_requested": request.source_scope,
+            "scope_effective": effective_scope,
+            "scope_downgraded": bool(request.source_scope != effective_scope),
+        })
         output.research_state = _rs0
         return await _log_and_return(
             db, user_id, plan_query, output, time.monotonic() - started
@@ -622,6 +706,37 @@ async def _answer_request(
                         forecast = compute_forecast(rows, date_col, value_col)
                         if forecast is not None:
                             computed = {**computed, "forecast": forecast}
+                        else:
+                            # Deterministic dead-end, recorded structurally:
+                            # too few parseable history points for a trend.
+                            # The pipeline forces confidence 0 + an explicit
+                            # missing-data sentence from this (never LLM
+                            # invention).
+                            computed = {
+                                **computed,
+                                "forecast_unavailable": {
+                                    "reason": "insufficient_history",
+                                    "detail": (
+                                        "Not enough dated history in your "
+                                        "data to project a trend."
+                                    ),
+                                },
+                            }
+                    else:
+                        # Ambiguous value axis (no single numeric column, or
+                        # no date axis): ask-don't-guess — record the miss
+                        # instead of picking a column to forecast.
+                        computed = {
+                            **computed,
+                            "forecast_unavailable": {
+                                "reason": "ambiguous_columns",
+                                "detail": (
+                                    "Your data has no single "
+                                    "date-plus-value series I can "
+                                    "unambiguously project."
+                                ),
+                            },
+                        }
             except Exception as exc:
                 logger.warning(f"Forecast computation skipped: {exc}")
         news_context = None
@@ -681,14 +796,32 @@ async def _answer_request(
         # Reserved sub-budget for documents, then remaining budget for web:
         # your own uploaded document is inherently more trustworthy than a
         # generic web result and must never be crowded out by a
-        # coincidentally-well-scored web snippet.
-        from app.services.llm.context_budget import fit_pairs_to_budget
+        # coincidentally-well-scored web snippet. Both pools are ranked
+        # best-first BEFORE the budget cut so the budget keeps the
+        # best-ranked pairs, never merely the first-arrived ones.
+        from app.services.llm.context_budget import (
+            fit_pairs_to_budget,
+            rank_snippet_pairs,
+        )
 
         _settings = get_settings()
+        try:
+            document_context, document_sources = rank_snippet_pairs(
+                document_context or [], document_sources or [], plan_query
+            )
+        except Exception:
+            pass
         _doc_budget = min(_settings.MAX_DOCUMENT_CONTEXT_CHARS, _settings.MAX_EVIDENCE_CONTEXT_CHARS)
         document_context, document_sources, _ = fit_pairs_to_budget(
             document_context, document_sources, _doc_budget
         )
+        try:
+            news_context, web_sources = rank_snippet_pairs(
+                news_context or [], web_sources or [], plan_query
+            )
+        except Exception:
+            news_context = news_context or []
+            web_sources = web_sources or []
         _remaining_budget = max(
             0, _settings.MAX_EVIDENCE_CONTEXT_CHARS - sum(len(t) for t in document_context)
         )
@@ -731,7 +864,13 @@ async def _answer_request(
         if cleaned_sql:
             output.sql_query = cleaned_sql
         output.data_preview = rows[:DATA_PREVIEW_MAX_ROWS] if rows else []
-        output.web_sources = web_sources
+        # Contract: retrieval dicts -> validated WebSource objects so the
+        # API response matches PipelineOutput (no serializer warnings) and
+        # the frontend sources section always has title/url/provider.
+        try:
+            output.web_sources = coerce_web_sources(web_sources)
+        except Exception:
+            pass
         try:
             _rsf = dict(output.research_state or {})
         except Exception:
@@ -740,8 +879,27 @@ async def _answer_request(
             "canonical_query": plan_query,
             "thread_id": thread_id,
             "total_rows": len(rows or []),
+            # Kill-switch disclosure: when live_web was requested but served
+            # from own_data, record both so the answer is traceable.
+            "scope_requested": request.source_scope,
+            "scope_effective": effective_scope,
+            "scope_downgraded": bool(request.source_scope != effective_scope),
         })
         output.research_state = _rsf
+        # Scope-downgrade thinking disclosure: the TrustFooter notice
+        # ("Live web unavailable, answered from your data") is driven by
+        # research_state.scope_downgraded; record the same fact in thinking
+        # so the trace shows its work instead of silently switching scope.
+        try:
+            if (
+                request.source_scope in ("live_web", "both")
+                and effective_scope == "own_data"
+            ):
+                output.thinking = list(output.thinking or []) + [
+                    "Scope downgraded: live web unavailable, answered from your data."
+                ]
+        except Exception:
+            pass
 
     # QueryLogs preserve the canonical query (P0#1); DB-logging failure must
     # not turn a valid response into an unrelated 500 where avoidable.
@@ -768,6 +926,11 @@ async def flag_answer(
 
     Own-only: another user's log id is indistinguishable from a missing one
     (404), so flagging can't probe or touch another user's data.
+
+    Feedback-loop note: QueryLogs carries a suggested (unmigrated, never
+    written) `flagged_reason` column for a future free-text reason alongside
+    this boolean. Wiring it needs an Alembic migration first — until then
+    this endpoint intentionally persists only `flagged=True`.
     """
     result = await db.execute(
         update(QueryLogs)

@@ -819,6 +819,115 @@ class TestConversationContinuity:
         assert "Previous question in this conversation" in sql_prompts[1]
         assert "What was revenue by region?" in sql_prompts[1]
 
+    def test_cross_thread_isolation_no_leakage(
+        self, client, seed, monkeypatch
+    ):
+        """A follow-up in thread-b must NOT see thread-a's prior question.
+
+        Thread isolation (P0#20): there is no shared "default" bucket — each
+        thread's prior context is scoped to its own thread_id only.
+        """
+        sql_prompts = []
+
+        async def sql_fake(prompt, system_prompt, temperature=0.3, max_tokens=512, **kwargs):
+            sql_prompts.append(prompt)
+            return {"content": HAPPY_SQL, "source": "groq", "usage": None}
+
+        monkeypatch.setattr("app.routes.chat.generate_response", sql_fake)
+        monkeypatch.setattr(
+            "app.services.llm.langchain_pipeline.generate_response",
+            _pipeline_fake(PIPELINE_JSON),
+        )
+        first = client.post(
+            "/chat",
+            json={
+                "query": "What was revenue by region?",
+                "source_scope": "own_data",
+                "thread_id": "thread-a",
+            },
+        )
+        assert first.status_code == 200
+        second = client.post(
+            "/chat",
+            json={
+                "query": "what about last month",
+                "source_scope": "own_data",
+                "thread_id": "thread-b",
+            },
+        )
+        assert second.status_code == 200
+        assert len(sql_prompts) == 2
+        assert "Previous question in this conversation" not in sql_prompts[1]
+        assert "What was revenue by region?" not in sql_prompts[1]
+
+    def test_missing_thread_id_falls_back_to_latest_thread_only(
+        self, client, seed, monkeypatch
+    ):
+        """No thread_id: the explicit fallback reuses at most the SINGLE
+        latest turn (latest thread only) — never a scan across every past
+        conversation's history."""
+        sql_prompts = []
+
+        async def sql_fake(prompt, system_prompt, temperature=0.3, max_tokens=512, **kwargs):
+            sql_prompts.append(prompt)
+            return {"content": HAPPY_SQL, "source": "groq", "usage": None}
+
+        monkeypatch.setattr("app.routes.chat.generate_response", sql_fake)
+        monkeypatch.setattr(
+            "app.services.llm.langchain_pipeline.generate_response",
+            _pipeline_fake(PIPELINE_JSON),
+        )
+        first_resp = client.post(
+            "/chat",
+            json={
+                "query": "What was revenue by region?",
+                "source_scope": "own_data",
+                "thread_id": "thread-a",
+            },
+        )
+        assert first_resp.status_code == 200
+        second_resp = client.post(
+            "/chat",
+            json={
+                "query": "How is profit trending?",
+                "source_scope": "own_data",
+                "thread_id": "thread-b",
+            },
+        )
+        assert second_resp.status_code == 200
+        # Pin distinct timestamps: SQLite's CURRENT_TIMESTAMP has only
+        # second precision, so back-to-back test posts would tie on
+        # created_at and "latest" would be ambiguous.
+        from datetime import datetime as _dt
+
+        async def _stamp_order():
+            async with seed() as s:
+                for body, ts in (
+                    (first_resp.json(), _dt(2024, 1, 1)),
+                    (second_resp.json(), _dt(2024, 2, 1)),
+                ):
+                    row = (
+                        await s.execute(
+                            select(QueryLogs).where(
+                                QueryLogs.id == uuid.UUID(body["query_log_id"])
+                            )
+                        )
+                    ).scalar_one()
+                    row.created_at = ts
+                await s.commit()
+
+        asyncio.run(_stamp_order())
+        resp = client.post(
+            "/chat",
+            json={"query": "what about last month", "source_scope": "own_data"},
+        )
+        assert resp.status_code == 200
+        assert len(sql_prompts) == 3
+        # Latest thread only: thread-b's turn is the fallback context;
+        # thread-a's older turn must not leak in alongside it.
+        assert "How is profit trending?" in sql_prompts[2]
+        assert "What was revenue by region?" not in sql_prompts[2]
+
 
 class TestForecasting:
     """Part D (specs/11 §3.2): a forecast-phrased question over the user's

@@ -34,6 +34,9 @@ export function AssistantAnswer({
   conversationId?: string;
 }) {
   const sourceCount = deriveSources(output).length;
+  // Scope-downgrade disclosure: the backend records the kill-switch fallback
+  // in research_state — surface it in the trust footer, never silently.
+  const scopeDowngraded = output.research_state?.scope_downgraded === true;
   const pinReport = useReportsStore((s) => s.pinReport);
   const reports = useReportsStore((s) => s.reports);
   const [justPinned, setJustPinned] = useState(false);
@@ -64,6 +67,7 @@ export function AssistantAnswer({
         dataPreview={output.data_preview}
         confidence={output.confidence}
         answeredAt={answeredAt}
+        scopeDowngraded={scopeDowngraded}
         pinned={pinned}
         onPin={() => {
           pinReport(output, conversationId);

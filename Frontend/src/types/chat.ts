@@ -13,6 +13,10 @@ export interface VisualOutput {
   /** Shape depends on visual_type — see src/lib/schemas/visuals.ts. */
   props: VisualProps;
   title: string;
+  /** Visual provenance contract (backend first-class stage): intent,
+   *  entities, metric, timeframe, source/computation IDs. Optional so
+   *  older cached answers still validate; new answers always carry it. */
+  provenance?: Record<string, unknown> | null;
 }
 
 /** Alternate response mode (specs/10 §2 "ask, don't guess") — non-null on a
@@ -28,6 +32,10 @@ export interface WebSource {
   url: string;
   provider: string;
   retrieved_at: string;
+  /** Recency signal (YYYY-MM-DD) and provider relevance, when present.
+   *  Optional so older cached rows still validate; mirrors backend WebSource. */
+  published_date?: string | null;
+  score?: number | null;
 }
 
 /** POST /chat returns this directly. */
@@ -48,6 +56,16 @@ export interface PipelineOutput {
   query_log_id: string | null; // UUID — drives "show the query" + flagging
   thinking?: string[]; // machine-written pipeline steps (additive, may be absent)
   followups?: string[]; // tap-to-ask next questions (additive, may be absent)
+  /** Compact structured research state (backend first-class stage).
+   *  `scope_downgraded` drives the TrustFooter honesty notice; the rest is
+   *  opaque to the UI. Optional so older cached answers still validate. */
+  research_state?: {
+    scope_requested?: SourceScope;
+    scope_effective?: SourceScope;
+    scope_downgraded?: boolean;
+    thread_id?: string;
+    [key: string]: unknown;
+  } | null;
 }
 
 export interface ChatRequest {

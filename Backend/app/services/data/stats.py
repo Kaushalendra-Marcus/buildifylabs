@@ -598,6 +598,46 @@ def infer_forecast_columns(rows: list[dict]) -> tuple:
     return date_cols[0], numeric[0]
 
 
+def _parse_forecast_date(value) -> Optional["pd.Timestamp"]:
+    """Parse one forecast date axis value to a comparable timestamp.
+
+    Handles datetime/date objects (Postgres driver), ISO strings
+    ("2024-01-01", "2024-01-01T00:00:00"), and common human formats
+    ("01/15/2024", "2024/01/15", "Jan 05, 2024", "15 Jan 2024", "Jan 2024").
+    Returns None when the value carries no parseable date — the caller drops
+    such points (never mis-orders them) so an unparseable label can never
+    silently corrupt the trend order.
+    """
+    try:
+        from datetime import date as _date
+        from datetime import datetime as _datetime
+
+        if isinstance(value, _datetime):
+            parsed = pd.to_datetime(value, errors="coerce", utc=True)
+            return None if pd.isna(parsed) else parsed
+        if isinstance(value, _date):
+            parsed = pd.to_datetime(value, errors="coerce", utc=True)
+            return None if pd.isna(parsed) else parsed
+        text = str(value or "").strip()
+        if not text:
+            return None
+        # Explicit common formats first (deterministic, no guessing), then
+        # the pandas/dateutil fallback for ISO + everything else parseable.
+        for fmt in (
+            "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S",
+            "%Y/%m/%d", "%m/%d/%Y", "%d/%m/%Y",
+            "%b %d, %Y", "%d %b %Y", "%b %Y", "%Y-%m",
+        ):
+            try:
+                return pd.to_datetime(_datetime.strptime(text, fmt), utc=True)
+            except (ValueError, OverflowError):
+                continue
+        parsed = pd.to_datetime(text, errors="coerce", utc=True)
+        return None if pd.isna(parsed) else parsed
+    except Exception:
+        return None
+
+
 def compute_forecast(rows: list[dict], date_col: str, value_col: str, periods_ahead: int = 1) -> Optional[dict]:
     """Linear-regression extrapolation over (date_col, value_col) pairs from
     already-fetched rows. Returns None (not a guess) when there isn't enough
@@ -620,7 +660,19 @@ def compute_forecast(rows: list[dict], date_col: str, value_col: str, periods_ah
     series = [(d, v) for d, v in series if isinstance(v, (int, float))]
     if len(series) < 4:
         return None
-    series.sort(key=lambda pair: str(pair[0]))
+    # Chronological order by ACTUAL date (never str(date): "2024-10-01"
+    # sorts before "2024-2-01" lexicographically). Unparseable labels are
+    # dropped, never mis-ordered into the trend.
+    dated = []
+    for label, value in series:
+        parsed = _parse_forecast_date(label)
+        if parsed is None:
+            continue
+        dated.append((parsed, label, float(value)))
+    if len(dated) < 4:
+        return None
+    dated.sort(key=lambda triple: triple[0])
+    series = [(label, value) for _, label, value in dated]
     values = np.array([float(v) for _, v in series])
     x = np.arange(len(values))
     slope, intercept = np.polyfit(x, values, 1)
