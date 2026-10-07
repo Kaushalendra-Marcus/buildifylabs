@@ -123,6 +123,15 @@ _WHO_WHAT_RE = re.compile(
 # them back in. Tool names match the TOOL_CATALOG keys in langchain_pipeline.
 HISTORY_TOOLS = ("market_history", "financial_history")
 SNAPSHOT_TOOLS = ("market", "fundamentals")
+# Prior-year phrasing ("last year", "previous year", YoY): the question
+# wants a dated annual actual, which only financial_history carries --
+# fundamentals is a current snapshot with no dates. Seen live: "revenue of
+# Microsoft in last year" planned fundamentals-only, Yahoo failed, and the
+# request died with zero evidence.
+_PRIOR_YEAR_RE = re.compile(
+    r"\b(last|previous|past)\s+year\b|\byoy\b|\byear[\s-]?over[\s-]?year\b",
+    re.IGNORECASE,
+)
 _TOOL_CATALOG_KEYS = frozenset({
     "snippets", "market", "fundamentals", "market_history",
     "financial_history", "wikipedia", "macro", "extract",
@@ -144,6 +153,10 @@ def required_tools_for_query(
     - Historical revenue/profitability intent -> financial_history.
     - Non-historical stock intent -> market; scale/valuation intent ->
       fundamentals.
+    - Single-entity financial questions ALWAYS add snippets (resilient path;
+      a fundamentals-only plan dies with zero evidence on one Yahoo outage)
+      and prior-year phrasing ("last year", YoY) routes to financial_history
+      (dated annuals) instead of the dateless fundamentals snapshot.
     - Named multi-entity historical comparisons ALWAYS need market_history +
       financial_history + fundamentals (current scale context) + snippets
       (the explanatory "why"), for EVERY named company.
@@ -189,7 +202,16 @@ def required_tools_for_query(
         elif needs_stock and not has_financial:
             _add("snippets")
         if needs_financial and has_financial:
-            _add("financial_history" if requires_history else "fundamentals")
+            _add(
+                "financial_history"
+                if (requires_history or _PRIOR_YEAR_RE.search(text))
+                else "fundamentals"
+            )
+            # Snippets are the resilient general path: a fundamentals-only
+            # plan is one Yahoo outage away from zero evidence (seen live on
+            # Render DC IPs). Snippets always ride along for single-entity
+            # financial questions, same as the multi-entity rule below.
+            _add("snippets")
         elif needs_financial and not has_financial:
             _add("snippets")
         if entities and not (needs_stock or needs_financial) and not is_comp:

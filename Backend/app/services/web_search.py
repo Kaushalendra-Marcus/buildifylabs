@@ -2031,6 +2031,23 @@ async def search_web(
                     is_historical_request = True
             except Exception as exc:
                 logger.warning("Time-range normalize failed: %s", exc)
+            # Planner-can-add-never-remove (resolve_tool_plan contract): a
+            # valid-but-narrow LLM plan (seen live: ["fundamentals"] for a
+            # revenue question) must not silently drop deterministically
+            # required tools. Union them back in; an empty/invalid plan means
+            # "no opinion" and falls through to the predicates below.
+            if planned is not None:
+                try:
+                    from app.services.data.comparison import (
+                        resolve_tool_plan as _resolve_plan,
+                    )
+
+                    _resolved = _resolve_plan(planned, query_text or raw_text)
+                    planned = _resolved or None
+                except Exception as exc:
+                    logger.warning(
+                        "Tool-plan resolve failed, using raw plan: %s", exc
+                    )
             if planned is not None:
                 wants_market = bool(entities and "market" in planned)
                 wants_fundamentals = bool(entities and "fundamentals" in planned)
@@ -2158,7 +2175,25 @@ async def search_web(
                         )
                     if not jobs:
                         continue
-                    fetched_all = await asyncio.gather(*jobs, return_exceptions=True)
+                    # Bounded per-entity fan-out (seen live: Yahoo crumb
+                    # handshake + 401-retry chaining to ~30s+ on bad
+                    # networks, stalling the whole evidence stage).
+                    # Snippets (planned alongside since the required-tools
+                    # fix) carry the answer when Yahoo is slow; a timeout
+                    # here degrades to empty structured evidence, never a
+                    # hung request.
+                    try:
+                        fetched_all = await asyncio.wait_for(
+                            asyncio.gather(*jobs, return_exceptions=True),
+                            timeout=25,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "Yahoo adapters timed out for %r; continuing "
+                            "with other evidence.",
+                            entity,
+                        )
+                        continue
                     for fetched in fetched_all:
                         if isinstance(fetched, Exception) or fetched is None:
                             continue
@@ -2520,6 +2555,18 @@ async def search_web(
                             "Planned evidence providers returned nothing, "
                             "so this answer falls back to web-snippet "
                             "evidence."
+                        )
+                    else:
+                        # Recovery ran and the snippet providers are dead too
+                        # (no Tavily key + DDG bot-challenge, typical on
+                        # datacenter IPs): say so in the trace instead of a
+                        # silent empty pool, so the honest 0.0 fallback is
+                        # diagnosable from thinking alone.
+                        research_notes.append(
+                            "All evidence providers failed (structured "
+                            "adapters empty; snippet recovery found "
+                            "nothing -- check Tavily key and Yahoo/DDG "
+                            "reachability from this host)."
                         )
             # Whole-pool budgeting: structured evidence (small, high-signal:
             # market/fundamentals/macro/history/Wikipedia) is deduped as

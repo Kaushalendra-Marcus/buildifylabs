@@ -886,24 +886,45 @@ class TestRecommendedTable:
 class TestSnippetRecoveryPass:
     """Live incident: 'what is revenue of amazon in last year' (live_web)
     planned ["fundamentals"] only, Yahoo 429'd, zero snippets were fetched
-    -> honest-but-avoidable 'no reliable web evidence'. A fundamentals-only
-    plan must fall back to a bounded snippet pass on total failure, and a
-    totally empty result must never be cached."""
+    -> honest-but-avoidable 'no reliable web evidence'. Two defenses, tested
+    separately: (1) the resolve_tool_plan union adds deterministically
+    required tools (financial_history + snippets here) to a narrow plan, so
+    the main pass already carries snippet evidence; (2) when NO planned
+    adapter returns anything and snippets were never tried, a bounded
+    snippet recovery pass fires. A totally empty result must never be
+    cached."""
 
     QUERY = "what is revenue of amazon in last year"
+    # Required tools for QUERY after the prior-year fix: financial_history
+    # (dated annuals answer "last year") + snippets (resilient path).
+    # This query needs financial_history mocked out on total-failure paths.
+    RECOVERY_QUERY = "what is the market cap of Amazon"
 
     async def _fake_rewrite(self, query, prior_clarification=None,
                             company_name=None, prior_query=None):
-        return {"queries": [query], "entities": ["Amazon"],
+        from app.services.data.comparison import detect_entities as _detect
+
+        try:
+            entities = [str(e) for e in (_detect(query or "") or [])]
+        except Exception:
+            entities = ["Amazon"]
+        return {"queries": [query], "entities": entities or ["Amazon"],
                 "time_sensitive": False}
 
-    def test_fundamentals_outage_falls_back_to_snippets(self, monkeypatch):
+    def test_narrow_plan_is_unioned_with_required_tools(self, monkeypatch):
+        """A fundamentals-only plan for a prior-year revenue question must
+        not dispatch fundamentals alone: financial_history + snippets ride
+        in the main pass, so a Yahoo outage still leaves snippet evidence
+        with no recovery note needed."""
         cache_mod._reset_cache_state()
 
         async def fake_resolve(client, entity):
             return "AMZN"
 
         async def fake_fundamentals(client, entity, symbol):
+            return None  # Yahoo 429
+
+        async def fake_financial_history(client, entity, symbol, years=3):
             return None  # Yahoo 429
 
         async def fake_snippets(client, query_item, settings, time_sensitive):
@@ -915,6 +936,8 @@ class TestSnippetRecoveryPass:
         monkeypatch.setattr(web_search_mod, "_resolve_symbol", fake_resolve)
         monkeypatch.setattr(web_search_mod, "_fetch_fundamentals",
                             fake_fundamentals)
+        monkeypatch.setattr(web_search_mod, "_fetch_financial_history",
+                            fake_financial_history)
         monkeypatch.setattr(web_search_mod, "_snippets_for_query",
                             fake_snippets)
 
@@ -923,12 +946,48 @@ class TestSnippetRecoveryPass:
         )
         assert len(result.context) >= 1
         assert any("638" in text for text in result.context)
+
+    def test_total_failure_still_recovers_via_snippets(self, monkeypatch):
+        """Market-cap query (required tools have no snippets): when every
+        planned adapter is empty, the bounded recovery pass fetches snippets
+        and records the fallback note."""
+        cache_mod._reset_cache_state()
+
+        async def fake_resolve(client, entity):
+            return "AMZN"
+
+        async def fake_market(client, entity, symbol):
+            return None  # Yahoo 429
+
+        async def fake_fundamentals(client, entity, symbol):
+            return None  # Yahoo 429
+
+        async def fake_snippets(client, query_item, settings, time_sensitive):
+            return [("Amazon market cap was about $2.5 trillion in 2024.",
+                     "https://example.com/a", "Tavily", None, 0.9)]
+
+        monkeypatch.setattr(web_search_mod, "rewrite_search_queries",
+                            self._fake_rewrite)
+        monkeypatch.setattr(web_search_mod, "_resolve_symbol", fake_resolve)
+        monkeypatch.setattr(web_search_mod, "_fetch_market_series",
+                            fake_market)
+        monkeypatch.setattr(web_search_mod, "_fetch_fundamentals",
+                            fake_fundamentals)
+        monkeypatch.setattr(web_search_mod, "_snippets_for_query",
+                            fake_snippets)
+
+        result = asyncio.run(
+            web_search_mod.search_web(
+                self.RECOVERY_QUERY, planned_tools=["fundamentals"]
+            )
+        )
+        assert len(result.context) >= 1
+        assert any("2.5" in text for text in result.context)
         assert any("falls back to web-snippet" in note
                    for note in result.research_notes)
 
     def test_happy_path_runs_no_recovery(self, monkeypatch):
         cache_mod._reset_cache_state()
-        calls = {"n": 0}
 
         async def fake_resolve(client, entity):
             return "AMZN"
@@ -941,8 +1000,10 @@ class TestSnippetRecoveryPass:
                 {"title": entity, "url": "", "provider": "Yahoo Finance"},
             )
 
+        async def fake_financial_history(client, entity, symbol, years=3):
+            return None
+
         async def fake_snippets(client, query_item, settings, time_sensitive):
-            calls["n"] += 1
             return []
 
         monkeypatch.setattr(web_search_mod, "rewrite_search_queries",
@@ -950,6 +1011,8 @@ class TestSnippetRecoveryPass:
         monkeypatch.setattr(web_search_mod, "_resolve_symbol", fake_resolve)
         monkeypatch.setattr(web_search_mod, "_fetch_fundamentals",
                             fake_fundamentals)
+        monkeypatch.setattr(web_search_mod, "_fetch_financial_history",
+                            fake_financial_history)
         monkeypatch.setattr(web_search_mod, "_snippets_for_query",
                             fake_snippets)
 
@@ -957,8 +1020,10 @@ class TestSnippetRecoveryPass:
             web_search_mod.search_web(self.QUERY, planned_tools=["fundamentals"])
         )
         assert len(result.fundamentals) == 1
-        assert calls["n"] == 0
+        # Unioned plan covered the request in the main pass: no recovery note.
         assert not any("falls back to web-snippet" in note
+                       for note in result.research_notes)
+        assert not any("All evidence providers failed" in note
                        for note in result.research_notes)
 
     def test_empty_result_is_not_cached(self, monkeypatch):
@@ -969,6 +1034,9 @@ class TestSnippetRecoveryPass:
             return "AMZN"
 
         async def fake_fundamentals(client, entity, symbol):
+            return None
+
+        async def fake_financial_history(client, entity, symbol, years=3):
             return None
 
         async def fake_snippets(client, query_item, settings, time_sensitive):
@@ -982,6 +1050,8 @@ class TestSnippetRecoveryPass:
         monkeypatch.setattr(web_search_mod, "_resolve_symbol", fake_resolve)
         monkeypatch.setattr(web_search_mod, "_fetch_fundamentals",
                             fake_fundamentals)
+        monkeypatch.setattr(web_search_mod, "_fetch_financial_history",
+                            fake_financial_history)
         monkeypatch.setattr(web_search_mod, "_snippets_for_query",
                             fake_snippets)
         monkeypatch.setattr(cache_mod, "set_cached_result", fake_store)
