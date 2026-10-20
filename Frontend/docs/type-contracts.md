@@ -80,6 +80,7 @@ interface VisualOutput {
                                          // fallback for unrecognized values anyway
   props: Record<string, unknown>;        // shape depends on visual_type — see src/lib/schemas/visuals.ts
   title: string;
+  subtitle?: string | null;              // one-sentence takeaway; UI derives a data-backed fallback
 }
 
 interface ClarificationRequest {         // alternate response mode (specs/10 §2 "ask, don't guess")

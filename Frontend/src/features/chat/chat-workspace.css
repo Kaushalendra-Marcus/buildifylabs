@@ -3,7 +3,9 @@
  * badge, account menu, "new chat". Chat history rail (0 / 280px, collapsed by
  * default <768px, overlay on narrow viewports). Message stream (the only place
  * visuals render — F3 fills). Composer (fixed to the bottom of the stream
- * column — F5 fills). NO resizable panel, NO fullscreen affordance. Tokens
+ * column — F5 fills). NO resizable workspace panel; a finished answer can
+ * open in a read-only presentation overlay (see messages/presentation.css).
+ * Tokens
  * only (F0 design tokens); never hardcode colors/sizes here. */
 
 .chat-workspace {
@@ -113,16 +115,17 @@ a.chat-header__brand:hover .chat-header__brand-name {
   font: inherit;
   font-size: var(--font-size-caption);
   font-weight: 600;
-  color: var(--surface-card);
+  color: var(--on-accent);
   background: var(--accent);
   border: none;
   border-radius: 8px;
   padding: 8px 12px;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 
 .chat-header__new-chat:hover {
-  filter: brightness(1.06);
+  background: var(--accent-hover);
 }
 
 /* Quota chip (F2 shell; the resets-countdown label is F5's job) */
@@ -391,16 +394,17 @@ a.chat-header__brand:hover .chat-header__brand-name {
   font: inherit;
   font-size: var(--font-size-caption);
   font-weight: 600;
-  color: #1c1917;
+  color: var(--on-accent);
   background: var(--accent);
   border: none;
   border-radius: 8px;
   padding: 9px 16px;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 
 .account-dialog__primary:hover:not(:disabled) {
-  filter: brightness(1.06);
+  background: var(--accent-hover);
 }
 
 .account-dialog__primary:disabled {
@@ -536,7 +540,11 @@ a.chat-header__brand:hover .chat-header__brand-name {
 /* Focus mode (BOTH sidebars hidden): give the stream + composer max space
  * with a wider, calmer column — the whole point of the hide toggles. */
 .chat-workspace--focus .message-stream__list {
-  max-width: 960px;
+  max-width: 1080px;
+}
+
+.chat-workspace--focus .composer__form {
+  max-width: 1080px;
 }
 
 .chat-workspace__focus-hint {
@@ -644,60 +652,11 @@ a.chat-header__brand:hover .chat-header__brand-name {
   flex: none;
 }
 
-/* ---------- Intelligence theme (workspace scope) ----------
- * The /app workspace wears the dark amber "intelligence" look shared
- * with the landing page — but only in dark mode. In light mode the
- * workspace inherits the root light tokens (blue accent) so every
- * hairline, fill, and chart stays legible: all literal white-alpha
- * colors below are theme tokens (`--border-*`, `--fill-*`, `--on-accent`)
- * with ink-based light values (see `src/index.css`). The two selectors
- * below mirror the root mechanism: explicit `data-theme="dark"`, or no
- * stored choice + a dark OS. No purple anywhere by design.
+/* The workspace inherits the root design tokens (warm neutral surfaces,
+ * amber/ember accent) in both themes. Hairlines and fills below use the
+ * shared `--border-*` / `--fill-*` / `--on-accent` tokens so light and dark
+ * stay consistent with the landing page and the rest of the app.
  * `--font-mono` is theme-independent and lives on the base rule above. */
-
-:root[data-theme='dark'] .chat-workspace {
-  --surface-page: #0a0a0b;
-  --surface-card: #131312;
-  --surface-raised: #1c1b18;
-  --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --elevation-raised: 0 8px 28px rgba(0, 0, 0, 0.55);
-
-  --text-primary: #fafaf9;
-  --text-secondary: #d6d3d1;
-  --text-muted: #8f8a83;
-
-  --accent: #ffbf48;
-  --success: #4ade80;
-  --danger: #f87171;
-  --warning: #f59e0b;
-
-  --on-accent: #14100a;
-
-  color-scheme: dark;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) .chat-workspace {
-    --surface-page: #0a0a0b;
-    --surface-card: #131312;
-    --surface-raised: #1c1b18;
-    --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.5);
-    --elevation-raised: 0 8px 28px rgba(0, 0, 0, 0.55);
-
-    --text-primary: #fafaf9;
-    --text-secondary: #d6d3d1;
-    --text-muted: #8f8a83;
-
-    --accent: #ffbf48;
-    --success: #4ade80;
-    --danger: #f87171;
-    --warning: #f59e0b;
-
-    --on-accent: #14100a;
-
-    color-scheme: dark;
-  }
-}
 
 /* Logo tile — the fox mark (public/logo.png, square face on black). The
  * face fills the frame, so the tile shows it direct with no crop math. */
@@ -729,7 +688,7 @@ a.chat-header__brand:hover .chat-header__brand-name {
   height: 60px;
   padding: 0 20px;
   gap: 14px;
-  background: var(--surface-page);
+  background: var(--surface-card);
   border-bottom: 1px solid var(--border-subtle);
   box-shadow: none;
 }
@@ -834,7 +793,7 @@ a.chat-header__brand:hover .chat-header__brand-name {
 /* ---------- History rail (intelligence) ---------- */
 
 .history-rail {
-  background: var(--surface-page);
+  background: var(--surface-card);
   border-right-color: var(--border-subtle);
 }
 
@@ -917,7 +876,7 @@ a.chat-header__brand:hover .chat-header__brand-name {
   font-weight: 600;
 }
 
-/* ---------- Slim dark scrollbars ---------- */
+/* ---------- Slim themed scrollbars ---------- */
 
 .history-rail__body::-webkit-scrollbar,
 .message-stream::-webkit-scrollbar {
@@ -926,7 +885,7 @@ a.chat-header__brand:hover .chat-header__brand-name {
 
 .history-rail__body::-webkit-scrollbar-thumb,
 .message-stream::-webkit-scrollbar-thumb {
-  background: #2b2a26;
+  background: color-mix(in srgb, var(--text-muted) 40%, transparent);
   border-radius: 999px;
   border: 2px solid var(--surface-page);
 }

@@ -18,7 +18,7 @@
   font-size: var(--font-size-xs);
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .visual-metric__value {
@@ -54,16 +54,34 @@
 }
 
 .visual-metric__change--flat {
-  color: var(--text-muted);
-  background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
 }
 
 /* ---------- GraphCard (graph) — Recharts, sized parent + fixed chart height ---------- */
 
 .visual-graph {
   width: 100%;
-  height: 220px;
-  margin-top: 6px;
+  height: auto;
+  margin-top: 0;
+}
+
+/* Presentation gets a larger canvas (GraphCard sets the Recharts height). */
+.visual-graph--presentation {
+  min-height: 0;
+}
+
+.visual-graph__note {
+  margin: 8px 0 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+/* Recharts' default legend text is dim and theme-unaware; keep it readable
+ * in both light and dark. */
+.visual-graph .recharts-legend-item-text {
+  color: var(--text-secondary) !important;
 }
 
 /* Donut: relative anchor for the center total + custom percent legend. */
@@ -100,7 +118,7 @@
   font-size: var(--font-size-xs);
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .visual-donut__legend {
@@ -183,7 +201,7 @@
   z-index: 1;
   background: color-mix(in srgb, var(--accent) 7%, var(--surface-card));
   backdrop-filter: blur(6px);
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-weight: 700;
   font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
   font-size: var(--font-size-xs);
@@ -281,7 +299,7 @@
   margin: 0;
   padding: 12px 4px;
   font-size: var(--font-size-caption);
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 /* ---------- Timeline rail (Date/Event) — vertical line + date chip ---------- */
@@ -412,7 +430,7 @@
 .visual-comparison__baseline {
   margin: 0;
   font-size: var(--font-size-caption);
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .visual-comparison__groups {

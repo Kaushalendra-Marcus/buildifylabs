@@ -9,7 +9,9 @@
  *   - Message stream (the only place visuals render — F3 fills it)
  *   - Composer fixed to the bottom of the stream column (F5 fills it)
  *
- * Constraint honour begins here: NO resizable panel, NO fullscreen affordance.
+ * Constraint honour begins here: NO resizable workspace panel. A finished
+ * answer can open in a read-only presentation overlay (PresentationDeck), but
+ * there is no in-place fullscreen or resizable chat panel.
  */
 import { useCallback, useEffect, useState } from 'react';
 import { useMediaQuery } from '../../hooks/useMediaQuery';

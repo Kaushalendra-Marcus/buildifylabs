@@ -109,6 +109,10 @@ STRICT RULES:
     components above (graph with chart_type bar, table, comparison, metric),
     with values taken ONLY from the supplied evidence sections. Prose states
     the takeaway in words; the components carry the numbers.
+- INSIGHT SUBTITLE: every visual MUST include a `subtitle` - one short sentence
+    that states the takeaway a reader should see (e.g. "Revenue grew 6.4% YoY,
+    led by Services."). Do not describe the axes, repeat the title, or invent a
+    reason; the subtitle must be grounded in the same evidence as the visual.
 - CITATION RULE: Web Search Results are numbered ([1], [2], ...). Every factual
     claim taken from them MUST carry its source number inline, e.g. "raised $50M
     in 2024 [2]". Cite the exact snippet each fact came from; never cite a number
@@ -158,7 +162,7 @@ Return this exact JSON:
 {
   "answer": "...",
   "visuals": [
-    {"visual_type": "metric", "props": {}, "title": "..."}
+    {"visual_type": "metric", "props": {}, "title": "...", "subtitle": "..."}
   ],
   "insights": ["..."],
   "summary": "...",

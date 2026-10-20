@@ -1,5 +1,5 @@
 /* Overview dashboard — KPI cards + getting-started + recent insights.
- * Tokens only, amber accent. */
+ * Tokens only; accent stays the BuildifyLabs amber/ember brand. */
 
 .overview {
   max-width: 1080px;
@@ -16,10 +16,17 @@
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  background: var(--surface-card);
-  border: 1px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
-  border-radius: 16px;
-  padding: 22px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 7%, transparent),
+      transparent 52%
+    ),
+    var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  box-shadow: var(--elevation-card);
+  padding: 24px;
 }
 
 .overview__welcome {
@@ -58,12 +65,17 @@
   font: inherit;
   font-size: var(--font-size-caption);
   font-weight: 700;
-  color: var(--surface-card);
+  color: var(--on-accent);
   background: var(--accent);
   border: none;
   border-radius: 8px;
   padding: 8px 14px;
   cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.overview__welcome-dismiss:hover {
+  background: var(--accent-hover);
 }
 
 .overview__eyebrow {
@@ -72,13 +84,14 @@
   font-size: var(--font-size-xs);
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .overview__title {
   margin: 0;
-  font-size: 28px;
+  font-size: 30px;
   line-height: 1.2;
+  letter-spacing: -0.02em;
 }
 
 .overview__sub {
@@ -101,10 +114,16 @@
   text-decoration: none;
   font-weight: 700;
   font-size: var(--font-size-body);
-  color: var(--surface-card);
+  color: var(--on-accent);
   background: var(--accent);
   border-radius: 10px;
   padding: 10px 16px;
+  box-shadow: var(--elevation-card);
+  transition: background 0.15s ease;
+}
+
+.overview__primary:hover {
+  background: var(--accent-hover);
 }
 
 .overview__ghost {
@@ -115,7 +134,7 @@
   font-weight: 600;
   font-size: var(--font-size-body);
   color: var(--text-secondary);
-  border: 1px solid color-mix(in srgb, var(--text-muted) 40%, transparent);
+  border: 1px solid var(--border-default);
   border-radius: 10px;
   padding: 10px 16px;
 }
@@ -128,34 +147,53 @@
 .overview__kpis {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px;
+  gap: 14px;
 }
 
 .overview__card {
+  position: relative;
+  overflow: hidden;
   background: var(--surface-card);
-  border: 1px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
-  border-radius: 14px;
-  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  box-shadow: var(--elevation-card);
+  padding: 18px;
+}
+
+.overview__card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--accent),
+    color-mix(in srgb, var(--accent) 18%, transparent)
+  );
 }
 
 .overview__card-label {
   margin: 0;
   font-size: var(--font-size-caption);
-  color: var(--text-muted);
+  color: var(--text-secondary);
   font-weight: 600;
 }
 
 .overview__card-value {
   margin: 6px 0 2px;
-  font-size: 30px;
+  font-size: 34px;
+  line-height: 1.1;
   font-weight: 800;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
 
 .overview__card-unit {
   font-size: var(--font-size-caption);
   font-weight: 500;
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .overview__card-note {
@@ -167,7 +205,7 @@
 .overview__grid {
   display: grid;
   grid-template-columns: 1.1fr 1fr;
-  gap: 12px;
+  gap: 14px;
 }
 
 @media (max-width: 900px) {
@@ -178,14 +216,16 @@
 
 .overview__panel {
   background: var(--surface-card);
-  border: 1px solid color-mix(in srgb, var(--text-muted) 30%, transparent);
-  border-radius: 14px;
-  padding: 18px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  box-shadow: var(--elevation-card);
+  padding: 20px;
 }
 
 .overview__panel-title {
-  margin: 0 0 12px;
+  margin: 0 0 14px;
   font-size: var(--font-size-body);
+  letter-spacing: -0.01em;
 }
 
 .overview__panel-subtitle {
@@ -225,8 +265,8 @@
   border-radius: 50%;
   font-size: 12px;
   font-weight: 700;
-  border: 1px solid color-mix(in srgb, var(--text-muted) 45%, transparent);
-  color: var(--text-muted);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
 }
 
 .overview__checklist li[data-done='true'] span[aria-hidden='true'] {
@@ -252,7 +292,7 @@
 
 .overview__hint {
   font-size: var(--font-size-caption);
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .overview__quick-asks {
@@ -269,7 +309,7 @@
   font-size: var(--font-size-caption);
   color: var(--text-secondary);
   background: transparent;
-  border: 1px solid color-mix(in srgb, var(--text-muted) 40%, transparent);
+  border: 1px solid var(--border-default);
   border-radius: 999px;
   padding: 7px 12px;
   cursor: pointer;
@@ -283,7 +323,7 @@
 .overview__empty,
 .overview__last {
   font-size: var(--font-size-caption);
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .overview__recent {
@@ -296,7 +336,7 @@
 }
 
 .overview__recent-item {
-  border-top: 1px solid color-mix(in srgb, var(--text-muted) 25%, transparent);
+  border-top: 1px solid var(--border-subtle);
   padding-top: 12px;
 }
 
@@ -314,5 +354,5 @@
 .overview__recent-meta {
   margin: 0 0 6px;
   font-size: var(--font-size-caption);
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }

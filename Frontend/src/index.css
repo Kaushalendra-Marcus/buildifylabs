@@ -7,43 +7,53 @@
  * placeholders pending Figma reconciliation (specs/14 §7 note) — change the
  * values here, never the role names.
  *
- * Roles to resolve (specs/14 §7): surface-page|card|raised, text-primary|
- * secondary|muted, accent, success|danger|warning, and a type scale with
- * nothing below 12px.
+ * Palette: warm neutral surfaces with ONE brand accent — amber/ember
+ * (#b45309 / #9a3412 on light, #ffbf48 / #be4a1d on dark). This is the
+ * same palette used by the landing page and the product loaders; every
+ * feature inherits it from here instead of re-declaring its own theme.
+ *
+ * Roles (specs/14 §7): surface-page|card|raised, text-primary|secondary|
+ * muted, accent, success|danger|warning, and a type scale with nothing
+ * below 12px.
  */
 :root {
-  /* Surfaces — three elevation steps */
-  --surface-page: #f7f7f5;
+  /* Surfaces — three elevation steps (warm paper, white cards) */
+  --surface-page: #fafaf9;
   --surface-card: #ffffff;
   --surface-raised: #ffffff;
   --elevation-card:
-    0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 3px rgba(16, 24, 40, 0.1);
+    0 1px 2px rgba(28, 25, 23, 0.04), 0 1px 3px rgba(28, 25, 23, 0.06);
   --elevation-raised:
-    0 4px 8px rgba(16, 24, 40, 0.08), 0 8px 24px rgba(16, 24, 40, 0.12);
+    0 2px 8px rgba(28, 25, 23, 0.05), 0 12px 32px rgba(28, 25, 23, 0.1);
 
   /* Text — body / supporting / captions */
   --text-primary: #1c1917;
   --text-secondary: #57534e;
-  --text-muted: #a8a29e;
+  --text-muted: #78716c;
 
-  /* Semantic colors */
-  --accent: #2563eb;
-  --success: #16a34a;
+  /* Brand + semantic colors */
+  --accent: #b45309;
+  --accent-hover: #92400e;
+  --accent-strong: #9a3412;
+  --accent-soft: rgba(180, 83, 9, 0.1);
+  --accent-border: rgba(180, 83, 9, 0.28);
+  --success: #15803d;
   --danger: #dc2626;
-  --warning: #d97706;
+  --warning: #a16207;
 
   /* Hairlines + washes — ink alphas on light (dark theme overrides below).
    * Tiers absorb the legacy near-identical literals (.09 → subtle, .10 →
    * default, .14 → strong); deltas are sub-perceptual by design. */
-  --border-subtle: rgba(28, 25, 23, 0.1);
-  --border-default: rgba(28, 25, 23, 0.16);
-  --border-strong: rgba(28, 25, 23, 0.26);
+  --border-subtle: rgba(28, 25, 23, 0.08);
+  --border-default: rgba(28, 25, 23, 0.14);
+  --border-strong: rgba(28, 25, 23, 0.22);
   --fill-hover: rgba(28, 25, 23, 0.05);
   --fill-active: rgba(28, 25, 23, 0.09);
   --overlay-backdrop: rgba(28, 25, 23, 0.45);
 
-  /* Text on an accent fill (dark-on-amber vs white-on-blue). */
+  /* Text on an accent fill (white-on-amber vs ink-on-amber). */
   --on-accent: #ffffff;
+  --focus-ring: color-mix(in srgb, var(--accent) 35%, transparent);
 
   /* Pie/donut ramp — light-background-readable warm ramp. */
   --chart-pie-1: #b45309;
@@ -75,31 +85,37 @@
 }
 
 /* Dark theme — explicit choice (`<html data-theme="dark">`, set by the
- * theme store + index.html FOUC guard). Same roles, dark values. */
+ * theme store + index.html FOUC guard). Same roles, dark values; matches
+ * the landing page's near-black + amber panels. */
 :root[data-theme='dark'] {
-  --surface-page: #121212;
-  --surface-card: #1c1c1c;
-  --surface-raised: #262626;
-  --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --elevation-raised: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --surface-page: #0a0a0b;
+  --surface-card: #131312;
+  --surface-raised: #1c1b18;
+  --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --elevation-raised: 0 8px 28px rgba(0, 0, 0, 0.55);
 
-  --text-primary: #f5f5f4;
+  --text-primary: #fafaf9;
   --text-secondary: #d6d3d1;
   --text-muted: #a8a29e;
 
-  --accent: #60a5fa;
+  --accent: #ffbf48;
+  --accent-hover: #ffd166;
+  --accent-strong: #be4a1d;
+  --accent-soft: rgba(255, 191, 72, 0.12);
+  --accent-border: rgba(255, 191, 72, 0.3);
   --success: #4ade80;
   --danger: #f87171;
   --warning: #fbbf24;
 
   --border-subtle: rgba(255, 255, 255, 0.08);
   --border-default: rgba(255, 255, 255, 0.12);
-  --border-strong: rgba(255, 255, 255, 0.16);
-  --fill-hover: rgba(255, 255, 255, 0.08);
-  --fill-active: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --fill-hover: rgba(255, 255, 255, 0.07);
+  --fill-active: rgba(255, 255, 255, 0.11);
   --overlay-backdrop: rgba(0, 0, 0, 0.6);
 
-  --on-accent: #ffffff;
+  --on-accent: #14100a;
+  --focus-ring: color-mix(in srgb, var(--accent) 35%, transparent);
 
   --chart-pie-1: #ffbf48;
   --chart-pie-2: #c96a24;
@@ -115,29 +131,34 @@
  * values as above (plain CSS has no shared-block mechanism). */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
-    --surface-page: #121212;
-    --surface-card: #1c1c1c;
-    --surface-raised: #262626;
-    --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --elevation-raised: 0 4px 12px rgba(0, 0, 0, 0.5);
+    --surface-page: #0a0a0b;
+    --surface-card: #131312;
+    --surface-raised: #1c1b18;
+    --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --elevation-raised: 0 8px 28px rgba(0, 0, 0, 0.55);
 
-    --text-primary: #f5f5f4;
+    --text-primary: #fafaf9;
     --text-secondary: #d6d3d1;
     --text-muted: #a8a29e;
 
-    --accent: #60a5fa;
+    --accent: #ffbf48;
+    --accent-hover: #ffd166;
+    --accent-strong: #be4a1d;
+    --accent-soft: rgba(255, 191, 72, 0.12);
+    --accent-border: rgba(255, 191, 72, 0.3);
     --success: #4ade80;
     --danger: #f87171;
     --warning: #fbbf24;
 
     --border-subtle: rgba(255, 255, 255, 0.08);
     --border-default: rgba(255, 255, 255, 0.12);
-    --border-strong: rgba(255, 255, 255, 0.16);
-    --fill-hover: rgba(255, 255, 255, 0.08);
-    --fill-active: rgba(255, 255, 255, 0.12);
+    --border-strong: rgba(255, 255, 255, 0.18);
+    --fill-hover: rgba(255, 255, 255, 0.07);
+    --fill-active: rgba(255, 255, 255, 0.11);
     --overlay-backdrop: rgba(0, 0, 0, 0.6);
 
-    --on-accent: #ffffff;
+    --on-accent: #14100a;
+    --focus-ring: color-mix(in srgb, var(--accent) 35%, transparent);
 
     --chart-pie-1: #ffbf48;
     --chart-pie-2: #c96a24;

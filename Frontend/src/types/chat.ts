@@ -13,6 +13,10 @@ export interface VisualOutput {
   /** Shape depends on visual_type — see src/lib/schemas/visuals.ts. */
   props: VisualProps;
   title: string;
+  /** One-sentence takeaway shown directly under the title (InsightDeck rule:
+   *  every chart explains its insight, not just its axes). Optional so older
+   *  cached answers still render; the UI derives a data-backed fallback. */
+  subtitle?: string | null;
   /** Visual provenance contract (backend first-class stage): intent,
    *  entities, metric, timeframe, source/computation IDs. Optional so
    *  older cached answers still validate; new answers always carry it. */

@@ -4,9 +4,9 @@
 
 .bl-boxloader {
   --bl-box-duration: 3s;
-  --bl-box-primary: rgba(255, 191, 72, 1);
-  --bl-box-primary-light: #e89b2e;
-  --bl-box-primary-rgba: rgba(255, 191, 72, 0);
+  --bl-box-primary: var(--accent);
+  --bl-box-primary-light: var(--accent-strong);
+  --bl-box-primary-rgba: transparent;
   --bl-box-mask: var(--surface-card);
   width: 200px;
   height: 320px;

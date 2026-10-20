@@ -1,51 +1,6 @@
 /* Auth screens (F1) — shared styles for the auth layout and every auth form.
- * The auth surface follows the workspace intelligence look in dark mode
- * (amber accent — never blue/purple); in light mode it inherits the root
- * light tokens. Never hardcode colors/sizes beyond these token overrides. */
-
-:root[data-theme='dark'] .auth-page {
-  --surface-page: #0a0a0b;
-  --surface-card: #131312;
-  --surface-raised: #1c1b18;
-  --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --elevation-raised: 0 8px 28px rgba(0, 0, 0, 0.55);
-
-  --text-primary: #fafaf9;
-  --text-secondary: #d6d3d1;
-  --text-muted: #8f8a83;
-
-  --accent: #ffbf48;
-  --success: #4ade80;
-  --danger: #f87171;
-  --warning: #f59e0b;
-
-  --on-accent: #14100a;
-
-  color-scheme: dark;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) .auth-page {
-    --surface-page: #0a0a0b;
-    --surface-card: #131312;
-    --surface-raised: #1c1b18;
-    --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.5);
-    --elevation-raised: 0 8px 28px rgba(0, 0, 0, 0.55);
-
-    --text-primary: #fafaf9;
-    --text-secondary: #d6d3d1;
-    --text-muted: #8f8a83;
-
-    --accent: #ffbf48;
-    --success: #4ade80;
-    --danger: #f87171;
-    --warning: #f59e0b;
-
-    --on-accent: #14100a;
-
-    color-scheme: dark;
-  }
-}
+ * Palette and theme come from the root design tokens (warm neutral surfaces,
+ * amber/ember accent); this file only owns the split layout and form chrome. */
 
 .auth-page {
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
@@ -103,7 +58,7 @@
   min-height: 100%;
   overflow: hidden;
   border-right: 1px solid var(--border-subtle);
-  background: #0c1622;
+  background: var(--surface-raised);
 }
 
 .auth-art__image {
@@ -280,7 +235,7 @@
 .auth-field__input:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 /* Password field with show/hide ("eye") toggle. The wrap keeps the input
@@ -341,16 +296,17 @@
   font: inherit;
   font-size: var(--font-size-body);
   font-weight: 700;
-  color: #1c1917;
+  color: var(--on-accent);
   background: var(--accent);
   border: none;
   border-radius: 8px;
   padding: 11px 12px;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 
 .auth-form__submit:hover {
-  filter: brightness(1.06);
+  background: var(--accent-hover);
 }
 
 .auth-form__submit:disabled {

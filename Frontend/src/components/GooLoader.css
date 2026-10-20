@@ -4,11 +4,11 @@
  * omitted: it would push this amber pair through purple (see GooLoader.tsx).
  * Colors are the platform amber/ember pair — no purple anywhere. */
 .goo-loader {
-  --color-one: #ffbf48;
-  --color-two: #be4a1d;
-  --color-three: #ffbf4780;
-  --color-four: #bf4a1d80;
-  --color-five: #ffbf4740;
+  --color-one: var(--accent);
+  --color-two: var(--accent-strong);
+  --color-three: color-mix(in srgb, var(--accent) 50%, transparent);
+  --color-four: color-mix(in srgb, var(--accent-strong) 50%, transparent);
+  --color-five: color-mix(in srgb, var(--accent) 25%, transparent);
   --time-animation: 2s;
   --size: var(--goo-size, 1); /* You can change the size */
   position: relative;

@@ -14,8 +14,9 @@ forgot- / reset-password, wired to the live backend with route guards (`src/App.
 `/app`, guarded). **F2 Chat Workspace shell is in** — the `/app` surface is now the real shell
 (`src/features/chat/`, specs/14 §3): 56px header (logo, quota chip, plan badge, account menu, new
 chat), 0/280px chat-history rail (collapsed by default <768px, **overlay** on narrow viewports),
-message stream, and a composer pinned to the foot of the stream column — no resizable panel, no
-fullscreen affordance. **F3 message stream components are in** — the `MessageStream` region now
+message stream, and a composer pinned to the foot of the stream column — no resizable panel. A
+finished answer can open in a read-only presentation overlay, but the chat workspace itself has no
+in-place fullscreen mode. **F3 message stream components are in** — the `MessageStream` region now
 renders the four `specs/14` §4 message types from the Zustand `chat-store` (`src/features/chat/`):
 user bubble (file chip above), assistant normal answer (prose → `repeat(auto-fit, minmax(240px,
 1fr))` visual cards grid with graph/table spanning 2 cols → hedged "Possible factors" insights strip

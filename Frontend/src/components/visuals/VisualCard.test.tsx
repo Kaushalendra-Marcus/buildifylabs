@@ -107,6 +107,28 @@ describe('VisualCard — type→component lookup (F4)', () => {
     ).toHaveStyle({ background: '#ffbf48' })
   })
 
+  it('folds pie categories beyond five into one Other slice', () => {
+    render(
+      <VisualCard
+        visual={{
+          visual_type: 'graph',
+          title: 'Long tail',
+          props: {
+            chart_type: 'pie',
+            labels: ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+            datasets: [{ name: 'Share', values: [1, 2, 3, 4, 5, 6, 7] }],
+          },
+        }}
+      />,
+    )
+
+    expect(document.querySelectorAll('.visual-donut__legend li')).toHaveLength(5)
+    expect(screen.getByText('Other (3 categories)')).toBeInTheDocument()
+    expect(
+      document.querySelectorAll('.visual-donut__legend li i'),
+    ).toHaveLength(5)
+  })
+
   it('renders a GraphCard for graph across line, bar, pie and area', () => {
     const chartTypes = ['line', 'bar', 'pie', 'area'] as const
     for (const chart_type of chartTypes) {
@@ -124,7 +146,7 @@ describe('VisualCard — type→component lookup (F4)', () => {
         />,
       )
       expect(
-        screen.getByRole('img', { name: `${chart_type} chart` }),
+        screen.getByRole('img', { name: `Trend — ${chart_type} chart` }),
       ).toBeInTheDocument()
       unmount()
     }

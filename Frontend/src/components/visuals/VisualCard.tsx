@@ -30,14 +30,22 @@ import './visuals.css';
 
 interface VisualCardProps {
   visual: VisualOutput;
+  /** Enlarged chart canvas for the read-only presentation deck. */
+  presentation?: boolean;
 }
 
-export function VisualCard({ visual }: VisualCardProps) {
+export function VisualCard({ visual, presentation = false }: VisualCardProps) {
   switch (visual.visual_type) {
     case 'metric':
       return <MetricCard props={visual.props as MetricProps} />;
     case 'graph':
-      return <GraphCard props={visual.props as GraphProps} />;
+      return (
+        <GraphCard
+          props={visual.props as GraphProps}
+          title={visual.title}
+          presentation={presentation}
+        />
+      );
     case 'table':
       return <BusinessSummaryTable props={visual.props as TableProps} />;
     case 'comparison':

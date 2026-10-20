@@ -25,6 +25,11 @@ class VisualOutput(BaseModel):
     # source of truth) for the authoritative per-type prop schema.
     props: Dict
     title: str
+    # One-sentence takeaway shown under the title (specs/14 §4.2, InsightDeck
+    # rule: a chart must explain its insight, not just its axes). Optional so
+    # older cached payloads and deterministic builders still validate; the
+    # frontend derives a data-backed fallback when absent.
+    subtitle: Optional[str] = Field(default=None)
     # Visual provenance contract (first-class pipeline stage): every visual
     # carries requested intent, entities, metric, units, timeframe,
     # frequency, evidence/source IDs, underlying data points, and

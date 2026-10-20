@@ -1,0 +1,514 @@
+/* Presentation mode — read-only full-screen answer visuals.
+ * Uses the BuildifyLabs tokens (no new palette). The app shell is hidden by
+ * the fixed overlay; only the presentation bar, slide, navigation, and exit
+ * affordance remain. */
+
+.presentation {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--text-primary);
+  background:
+    radial-gradient(
+      circle at 12% -10%,
+      color-mix(in srgb, var(--accent) 10%, transparent),
+      transparent 42%
+    ),
+    radial-gradient(
+      circle at 92% 108%,
+      color-mix(in srgb, var(--chart-pie-3, var(--warning)) 8%, transparent),
+      transparent 38%
+    ),
+    var(--surface-page);
+  animation: presentation-in 0.18s ease-out both;
+}
+
+@keyframes presentation-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ---------- Slim floating bar (brand + exit, not app chrome) ---------- */
+
+.presentation__bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 28px 22px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--surface-page) 94%, transparent),
+    transparent
+  );
+  pointer-events: none;
+}
+
+.presentation__bar > * {
+  pointer-events: auto;
+}
+
+.presentation__identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.presentation__logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #000;
+}
+
+.presentation__brand {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  line-height: 1.25;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.presentation__deck-title {
+  margin: 2px 0 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.25;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 48vw;
+}
+
+.presentation__controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.presentation__counter {
+  margin: 0;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+.presentation__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  color: var(--text-secondary);
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  box-shadow: var(--elevation-card);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.presentation__close:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background: var(--surface-raised);
+}
+
+.presentation__close:focus-visible,
+.presentation__nav:focus-visible,
+.presentation__dot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- Stage ---------- */
+
+.presentation__stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 88px 96px 76px;
+}
+
+.presentation__slide {
+  width: min(1180px, 100%);
+  max-height: calc(100dvh - 170px);
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 38px 44px 40px;
+  overflow: auto;
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 24px;
+  box-shadow: var(--elevation-raised);
+  animation: presentation-slide-in 0.22s ease-out both;
+}
+
+@keyframes presentation-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.995);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.presentation__slide-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.presentation__kicker {
+  margin: 0;
+  font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  font-size: var(--font-size-xs);
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.presentation__title {
+  margin: 0;
+  font-size: clamp(26px, 2.8vw, 38px);
+  line-height: 1.16;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+  color: var(--text-primary);
+}
+
+.presentation__subtitle {
+  margin: 0;
+  max-width: 78ch;
+  font-size: clamp(14px, 1.25vw, 17px);
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.presentation__visual {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Presentation sizing: charts get the canvas, not the chrome. */
+.presentation__visual .visual-graph {
+  margin-top: 0;
+}
+
+.presentation__visual .visual-metric {
+  min-height: 280px;
+  gap: 8px;
+}
+
+.presentation__visual .visual-metric__label {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+.presentation__visual .visual-metric__value {
+  font-size: clamp(56px, 8vw, 104px);
+  line-height: 1;
+}
+
+.presentation__visual .visual-metric__change {
+  font-size: 14px;
+  padding: 5px 12px;
+}
+
+.presentation__visual .visual-comparison {
+  gap: 12px;
+}
+
+.presentation__visual .visual-comparison__value {
+  font-size: clamp(34px, 4vw, 48px);
+}
+
+.presentation__visual .visual-comparison__group {
+  grid-template-columns: 140px 1fr 60px;
+  font-size: 14px;
+}
+
+.presentation__visual .visual-comparison__group-track {
+  height: 10px;
+}
+
+.presentation__visual .visual-timeline__event,
+.presentation__visual .visual-insight__text {
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+.presentation__visual .visual-table-wrap {
+  max-height: 52vh;
+}
+
+.presentation__visual .visual-table {
+  font-size: 14px;
+}
+
+.presentation__visual .visual-donut__legend {
+  gap: 10px 24px;
+  margin-top: 16px;
+}
+
+.presentation__visual .visual-donut__legend li {
+  font-size: 14px;
+}
+
+.presentation__visual .visual-donut__total {
+  font-size: 40px;
+}
+
+.presentation__visual .visual-donut__caption {
+  font-size: 12px;
+}
+
+.presentation__visual .visual-graph__note {
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ---------- Navigation ---------- */
+
+.presentation__nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  color: var(--text-secondary);
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  box-shadow: var(--elevation-card);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.presentation__nav:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.presentation__nav:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+.presentation__nav--prev {
+  left: 26px;
+}
+
+.presentation__nav--next {
+  right: 26px;
+}
+
+/* ---------- Footer / dots ---------- */
+
+.presentation__footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 18px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.presentation__footer > * {
+  pointer-events: auto;
+}
+
+.presentation__dots {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  max-width: min(720px, 80vw);
+}
+
+.presentation__dot {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  background: color-mix(in srgb, var(--text-muted) 45%, transparent);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    width 0.18s ease,
+    background 0.18s ease;
+}
+
+.presentation__dot--active {
+  width: 22px;
+  background: var(--accent);
+}
+
+.presentation__hint {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+
+.presentation__live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 900px) {
+  .presentation__stage {
+    padding: 78px 20px 92px;
+  }
+
+  .presentation__slide {
+    max-height: calc(100dvh - 180px);
+    padding: 24px 22px 26px;
+    border-radius: 18px;
+  }
+
+  .presentation__slide-head {
+    padding-bottom: 14px;
+  }
+
+  .presentation__nav {
+    top: auto;
+    bottom: 54px;
+    transform: none;
+    width: 40px;
+    height: 40px;
+  }
+
+  .presentation__nav--prev {
+    left: 20px;
+  }
+
+  .presentation__nav--next {
+    right: 20px;
+  }
+
+  .presentation__deck-title {
+    max-width: 36vw;
+  }
+
+  .presentation__visual .visual-comparison__group {
+    grid-template-columns: 92px 1fr 48px;
+    font-size: 12px;
+  }
+}
+
+@media (max-height: 700px) {
+  .presentation__stage {
+    padding-top: 76px;
+    padding-bottom: 64px;
+  }
+
+  .presentation__slide {
+    gap: 14px;
+    padding-top: 24px;
+    padding-bottom: 24px;
+  }
+
+  .presentation__title {
+    font-size: clamp(22px, 2.4vw, 30px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .presentation,
+  .presentation__slide {
+    animation: none;
+  }
+
+  .presentation__dot,
+  .presentation__nav {
+    transition: none;
+  }
+}
+
+@media print {
+  .presentation {
+    position: static;
+    overflow: visible;
+    background: #fff;
+    color: #000;
+  }
+
+  .presentation__bar,
+  .presentation__nav,
+  .presentation__footer,
+  .presentation__live {
+    display: none;
+  }
+
+  .presentation__stage {
+    display: block;
+    padding: 0;
+  }
+
+  .presentation__slide {
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    break-after: page;
+  }
+}

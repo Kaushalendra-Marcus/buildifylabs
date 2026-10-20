@@ -3,15 +3,23 @@
  * reports-store (filled by "Pin to reports" in the chat trust footer) and
  * renders each pinned answer with the same VisualCard lookup the chat uses.
  */
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Pin } from 'lucide-react';
+import { Pin, Play } from 'lucide-react';
+import type { VisualOutput } from '../../types/chat';
 import { VisualCard } from '../../components/visuals/VisualCard';
+import { visualSubtitle } from '../../components/visuals/visual-meta';
+import { PresentationDeck } from '../chat/messages/PresentationDeck';
 import { useReportsStore } from './reports-store';
 import './reports.css';
 
 export function ReportsPage() {
   const reports = useReportsStore((s) => s.reports);
   const unpinReport = useReportsStore((s) => s.unpinReport);
+  const [presenting, setPresenting] = useState<{
+    title: string;
+    visuals: VisualOutput[];
+  } | null>(null);
 
   return (
     <div className="reports-page" role="main" aria-label="Pinned reports">
@@ -42,14 +50,33 @@ export function ReportsPage() {
                   <Pin size={14} aria-hidden="true" />
                   {report.title}
                 </p>
-                <button
-                  type="button"
-                  className="reports-page__unpin"
-                  onClick={() => unpinReport(report.id)}
-                  aria-label={`Unpin ${report.title}`}
-                >
-                  Unpin
-                </button>
+                <div className="reports-page__card-actions">
+                  {report.output.visuals.length > 0 && (
+                    <button
+                      type="button"
+                      className="reports-page__present"
+                      onClick={() =>
+                        setPresenting({
+                          title: report.title,
+                          visuals: report.output.visuals,
+                        })
+                      }
+                      aria-haspopup="dialog"
+                      aria-label={`Present ${report.title}`}
+                    >
+                      <Play size={12} aria-hidden="true" fill="currentColor" />
+                      Present
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="reports-page__unpin"
+                    onClick={() => unpinReport(report.id)}
+                    aria-label={`Unpin ${report.title}`}
+                  >
+                    Unpin
+                  </button>
+                </div>
               </div>
               <p className="reports-page__answer">
                 {report.answer.slice(0, 220)}
@@ -57,16 +84,28 @@ export function ReportsPage() {
               </p>
               {report.output.visuals.length > 0 && (
                 <div className="reports-page__visuals">
-                  {report.output.visuals.map((visual, index) => (
-                    <div
-                      key={`${visual.visual_type}-${index}`}
-                      className="reports-page__visual"
-                      data-visual-type={visual.visual_type}
-                    >
-                      <p className="reports-page__visual-title">{visual.title}</p>
-                      <VisualCard visual={visual} />
-                    </div>
-                  ))}
+                  {report.output.visuals.map((visual, index) => {
+                    const subtitle = visualSubtitle(visual);
+                    return (
+                      <figure
+                        key={`${visual.visual_type}-${index}`}
+                        className="reports-page__visual"
+                        data-visual-type={visual.visual_type}
+                      >
+                        <figcaption className="reports-page__visual-caption">
+                          <p className="reports-page__visual-title">
+                            {visual.title}
+                          </p>
+                          {subtitle && (
+                            <p className="reports-page__visual-subtitle">
+                              {subtitle}
+                            </p>
+                          )}
+                        </figcaption>
+                        <VisualCard visual={visual} />
+                      </figure>
+                    );
+                  })}
                 </div>
               )}
               <p className="reports-page__meta">
@@ -78,6 +117,14 @@ export function ReportsPage() {
             </li>
           ))}
         </ul>
+      )}
+
+      {presenting && (
+        <PresentationDeck
+          visuals={presenting.visuals}
+          deckTitle={presenting.title}
+          onClose={() => setPresenting(null)}
+        />
       )}
     </div>
   );

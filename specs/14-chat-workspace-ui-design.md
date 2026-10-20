@@ -91,7 +91,11 @@ turn:
    insight, alert, status}` (`06` FR3). Grid: `repeat(auto-fit, minmax(240px, 1fr))`; `graph` and
    `table` span two columns. (This sizing rule is the one thing worth keeping from the prior-art
    project — it's a real, already-solved layout problem, independent of the panel it used to live
-   in.)
+   in.) Every chart card shows its `title` plus a one-sentence insight `subtitle` (server-authored
+   when present, otherwise a data-backed calculation over the plotted series) and uses **no more
+   than five categorical colours**; a pie with a longer tail folds the remainder into one `Other`
+   slice. A `Present` control opens the answer's visuals in a read-only, full-screen
+   `PresentationDeck` that removes the app shell and enlarges the chart canvas.
 3. **Insights strip** (collapsed by default, expandable) — `insights[]`, `root_causes[]`,
    `recommendations[]`. Root causes and recommendations use hedged copy by construction (a "Possible
    factors" label, not "Why this happened") per `10` §2's causal-language requirement — a content
@@ -196,9 +200,10 @@ defines the roles that need values, not the values themselves.
 - **Confidence display is blocked on the backend schema bound** (`06` §3 / edge case 4) — build the
   meter component now, but gate its visibility on "is this value in a sane range," not on the
   field's mere presence.
-- **No fullscreen or resizable-panel affordance at all** (§3). That complexity existed in the
-  prior-art project to compensate for a separated layout; it has no reason to exist once cards
-  render inline with their question.
+- **No resizable workspace panel** (§3). That complexity existed in the prior-art project to
+  compensate for a separated layout; it has no reason to exist once cards render inline with their
+  question. A read-only `PresentationDeck` overlay is allowed because it presents a finished answer
+  and never resizes or rearranges the chat workspace itself.
 
 ## 9. Open questions (not blocking a first build)
 
