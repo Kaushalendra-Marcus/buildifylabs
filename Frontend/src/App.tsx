@@ -16,6 +16,7 @@
  * `useTokenRefresh` re-establishes a session from the stored 7-day refresh
  * token on app load (in-memory access token, F0 decision).
  */
+import { Analytics } from '@vercel/analytics/react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
 import { AuthLayout } from './features/auth/AuthLayout';
@@ -36,16 +37,26 @@ import { useTokenRefresh } from './hooks/useTokenRefresh';
 import { initAnalytics, trackPageview } from './lib/analytics';
 import { applyTheme, useThemeStore } from './lib/theme-store';
 
-/** SPA page views for analytics (no-op unless VITE_GA_MEASUREMENT_ID is set). */
+/**
+ * SPA page views for analytics. GA4 is a no-op unless
+ * VITE_GA_MEASUREMENT_ID is set; Vercel Web Analytics is served by Vercel
+ * (no-op in local dev) once enabled for the project.
+ */
 function RouteTracker() {
   const location = useLocation();
+  const path = location.pathname + location.search;
   useEffect(() => {
     initAnalytics();
   }, []);
   useEffect(() => {
-    trackPageview(location.pathname + location.search);
-  }, [location]);
-  return null;
+    trackPageview(path);
+  }, [path]);
+  return (
+    <>
+      {/* `route` needs `path` too, otherwise v2 silently skips pageviews. */}
+      <Analytics route={location.pathname} path={path} />
+    </>
+  );
 }
 
 function AppRoutes() {
