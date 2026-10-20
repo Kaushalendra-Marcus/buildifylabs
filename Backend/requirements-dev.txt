@@ -1,0 +1,6 @@
+# Test/lint-only dependencies. Runtime deps stay in requirements.txt so the
+# production image does not ship pytest.
+-r requirements.txt
+
+pytest
+pytest-asyncio

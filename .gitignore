@@ -1,6 +1,8 @@
 # env
 .env
 .env.*
+# Templates are meant to be committed; real values are not.
+!.env.example
 
 # python
 __pycache__/
