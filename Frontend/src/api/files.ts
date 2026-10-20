@@ -8,7 +8,12 @@ import type { FilePreview, FileResponse } from '../types';
 export function uploadFile(file: File): Promise<FileResponse> {
   const form = new FormData();
   form.append('file', file);
-  return http.post<FileResponse>('/files/upload', form, { isFormData: true });
+  // Upload + parse can legitimately exceed the default 30s for a 10 MB file
+  // on a slow connection; keep the generic timeout for ordinary JSON calls.
+  return http.post<FileResponse>('/files/upload', form, {
+    isFormData: true,
+    timeoutMs: 120_000,
+  });
 }
 
 export function listFiles(): Promise<FileResponse[]> {

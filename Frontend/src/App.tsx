@@ -19,6 +19,7 @@
 import { Analytics } from '@vercel/analytics/react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthLayout } from './features/auth/AuthLayout';
 import { ForgotPasswordScreen } from './features/auth/ForgotPasswordScreen';
 import { ResetPasswordScreen } from './features/auth/ResetPasswordScreen';
@@ -96,7 +97,9 @@ export default function App() {
   return (
     <BrowserRouter>
       <RouteTracker />
-      <AppRoutes />
+      <ErrorBoundary>
+        <AppRoutes />
+      </ErrorBoundary>
     </BrowserRouter>
   );
 }

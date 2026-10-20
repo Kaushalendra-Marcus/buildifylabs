@@ -15,6 +15,14 @@ import type { ApiErrorBody, QuotaErrorBody } from '../types';
 const API_BASE_URL: string =
   import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
 
+/**
+ * Unary requests must not hang forever: without a timeout a stalled backend
+ * leaves buttons spinning and the user with no way to retry. Streaming
+ * (`sendQuery`) deliberately has no such cap because an answer can take
+ * minutes; only the connection setup is bounded by the browser.
+ */
+const REQUEST_TIMEOUT_MS = 30_000;
+
 /** Base URL + bearer headers, shared by the JSON client and the SSE reader. */
 export function apiUrl(path: string): string {
   return `${API_BASE_URL}${path}`;
@@ -57,6 +65,8 @@ interface RequestOptions {
   body?: unknown;
   /** Send the body as FormData (multipart uploads) instead of JSON. */
   isFormData?: boolean;
+  /** Per-request override for slow operations such as file uploads. */
+  timeoutMs?: number;
 }
 
 async function request<T>(
@@ -74,11 +84,28 @@ async function request<T>(
     body = JSON.stringify(options.body);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method,
-    headers,
-    body,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    options.timeoutMs ?? REQUEST_TIMEOUT_MS,
+  );
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      method,
+      headers,
+      body,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error('The request timed out. Please try again.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     let errorBody: unknown = null;
