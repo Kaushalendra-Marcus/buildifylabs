@@ -129,6 +129,54 @@ class TestStrictSchemaTransport:
         assert captured.get("response_format", {}).get("type") != "json_schema"
 
 
+class TestReasoningModelBudgets:
+    def test_reasoning_model_gets_headroom_and_low_effort(self, monkeypatch):
+        captured = _install(monkeypatch, model="openai/gpt-oss-120b")
+        out = asyncio.run(
+            groq_mod.generate_response(
+                prompt="Return JSON.",
+                system_prompt="Return JSON.",
+                model="openai/gpt-oss-120b",
+                max_tokens=300,
+            )
+        )
+        assert out["content"] == "{}"
+        assert captured["max_tokens"] == groq_mod._REASONING_MIN_TOKENS
+        assert captured["reasoning_effort"] == "low"
+
+    def test_non_reasoning_model_keeps_requested_budget(self, monkeypatch):
+        captured = _install(monkeypatch, model="llama-3.3-70b-versatile")
+        out = asyncio.run(
+            groq_mod.generate_response(
+                prompt="Return JSON.",
+                system_prompt="Return JSON.",
+                model="llama-3.3-70b-versatile",
+                max_tokens=300,
+            )
+        )
+        assert out["content"] == "{}"
+        assert captured["max_tokens"] == 300
+        assert "reasoning_effort" not in captured
+
+    def test_empty_reasoning_completion_rescued_with_larger_budget(
+        self, monkeypatch
+    ):
+        captured = _install(
+            monkeypatch, model="openai/gpt-oss-120b", replies=["", "{}"]
+        )
+        out = asyncio.run(
+            groq_mod.generate_response(
+                prompt="Return JSON.",
+                system_prompt="Return JSON.",
+                model="openai/gpt-oss-120b",
+                max_tokens=300,
+            )
+        )
+        assert out["content"] == "{}"
+        assert captured["max_tokens"] == groq_mod._REASONING_RESCUE_TOKENS
+        assert captured["reasoning_effort"] == "low"
+
+
 class TestToStrictSchema:
     def test_forces_additional_properties_and_required(self):
         from pydantic import BaseModel, Field

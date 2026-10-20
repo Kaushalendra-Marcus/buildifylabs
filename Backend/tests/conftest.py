@@ -26,6 +26,11 @@ _REQUIRED_ENV = {
     "GROQ_API_KEY": "test-groq-key",
     "GROQ_MODEL": "test-model",
     "HF_API_KEY": "test-hf-key",
+    # Never let the test suite reach a paid search provider just because a
+    # developer's Backend/.env contains a real key. Individual tests that
+    # exercise a provider monkeypatch the adapter and set the key explicitly.
+    "WEB_SEARCH_API_KEY": "",
+    "FIRECRAWL_API_KEY": "",
 }
 for _key, _value in _REQUIRED_ENV.items():
     os.environ.setdefault(_key, _value)

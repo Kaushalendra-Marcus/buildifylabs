@@ -34,3 +34,6 @@ pgvector
 # Live-web evidence cache (specs/07 FR5): Redis when REDIS_URL is set,
 # transparent in-memory fallback otherwise. Optional at runtime (lazy import).
 redis
+# Firecrawl managed search/extraction SDK (live-web evidence).
+# Pin the v2 client surface used by app/services/web_search.py.
+firecrawl-py==4.53.2

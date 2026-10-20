@@ -88,6 +88,18 @@ class TestFitPairsToBudget:
         assert kept_texts == texts[:3]
         assert dropped == 2
 
+    def test_oversized_item_is_skipped_so_later_small_items_fit(self):
+        texts = ["a" * 100, "b" * 10, "c" * 10]
+        sources = [{"title": str(i)} for i in range(3)]
+        # First item costs 120 (> 60) and is skipped; the two 30-char items
+        # then fit exactly, preserving corroborating sources after a big page.
+        kept_texts, kept_sources, dropped = fit_pairs_to_budget(
+            texts, sources, 60
+        )
+        assert kept_texts == texts[1:]
+        assert kept_sources == sources[1:]
+        assert dropped == 1
+
     def test_zero_budget_drops_everything_without_error(self):
         texts = ["a", "b"]
         sources = [{"title": "a"}, {"title": "b"}]
@@ -123,7 +135,7 @@ class TestSearchWebBudgetIntegration:
                     (
                         f"fuel prices market result {i} " + ("x" * 2000),
                         f"https://example.com/{i}",
-                        "DuckDuckGo",
+                        "Firecrawl",
                         None,
                         None,
                     )
@@ -183,7 +195,7 @@ class TestSearchWebBudgetIntegration:
                 (
                     f"Acme stock price snippet {i} " + ("s" * 2000),
                     f"https://example.com/acme/{i}",
-                    "DuckDuckGo",
+                    "Firecrawl",
                     None,
                     None,
                 )
@@ -227,7 +239,7 @@ class TestSearchWebBudgetIntegration:
                 (
                     f"Book list result {i} with some excerpt text",
                     f"https://example.com/books/{i}",
-                    "DuckDuckGo",
+                    "Firecrawl",
                     None,
                     None,
                 )

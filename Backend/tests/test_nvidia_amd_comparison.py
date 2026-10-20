@@ -334,15 +334,11 @@ class TestToolRouting:
             calls.append(("SNAPSHOT-market", entity))
             raise AssertionError("1-month series must not run for a 3-year ask")
 
-        async def fake_ddg(client, query_item, settings):
-            return []
-
         monkeypatch.setattr(web_search_mod, "rewrite_search_queries", fake_rewrite)
         monkeypatch.setattr(web_search_mod, "_resolve_symbol", fake_resolve)
         monkeypatch.setattr(web_search_mod, "_fetch_market_history", fake_history)
         monkeypatch.setattr(web_search_mod, "_fetch_financial_history", fake_financial)
         monkeypatch.setattr(web_search_mod, "_fetch_market_series", boom_market)
-        monkeypatch.setattr(web_search_mod, "_ddg_search", fake_ddg)
         monkeypatch.setattr(web_search_mod.get_settings(), "WEB_SEARCH_API_KEY", None)
         monkeypatch.setattr(web_search_mod.get_settings(), "FRED_API_KEY", None)
 

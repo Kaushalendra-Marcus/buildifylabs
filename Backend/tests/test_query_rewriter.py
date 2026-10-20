@@ -10,7 +10,7 @@ import app.services.llm.query_rewriter as rewriter_mod
 import app.services.web_search as web_search_mod
 from app.services.llm.query_rewriter import rewrite_search_queries
 from app.services.llm.query_rewriter import wants_external_context
-from app.services.web_search import _DuckDuckGoParser, _dedupe_texts, search_web
+from app.services.web_search import _dedupe_texts, search_web
 
 
 def _rewrite_fake(content=None, exc=None):
@@ -101,31 +101,6 @@ class TestFanOutMerge:
             "Other",
         ]
 
-    def test_parser_merges_title_with_snippet_and_keeps_url(self):
-        html = (
-            '<div class="result">'
-            '<a class="result-link" href="https://a.example/x">Acme raises</a>'
-            '<a class="result__snippet" href="https://a.example/x">Acme raised $5M</a>'
-            "</div>"
-            '<div class="result">'
-            '<a class="result-link" href="https://b.example/y">Globex launches</a>'
-            "</div>"
-        )
-        parser = _DuckDuckGoParser()
-        parser.feed(html)
-        parser.close()
-        assert parser.pairs == [
-            ("Acme raises — Acme raised $5M", "https://a.example/x"),
-            ("Globex launches", "https://b.example/y"),
-        ]
-
-    def test_parser_snippet_without_url_stays_provider_only(self):
-        html = '<div class="result__snippet">Bare snippet text</div>'
-        parser = _DuckDuckGoParser()
-        parser.feed(html)
-        parser.close()
-        assert parser.pairs == [("Bare snippet text", "")]
-
     def test_framed_queries_all_run_and_merge(self, monkeypatch):
         import json
 
@@ -137,16 +112,19 @@ class TestFanOutMerge:
             ),
         )
 
-        async def fake_ddg(client, query_item, settings):
+        async def fake_firecrawl(client, query_item, settings, time_sensitive=False):
             return [
-                (f"result for {query_item}", f"https://{query_item.replace(' ', '-')}.example", "DuckDuckGo"),
-                ("shared result", "", "DuckDuckGo"),
+                (f"result for {query_item}", f"https://{query_item.replace(' ', '-')}.example", "Firecrawl"),
+                ("shared result", "", "Firecrawl"),
             ]
 
-        monkeypatch.setattr(web_search_mod, "_ddg_search", fake_ddg)
-        # Force the DDG path (no Tavily key in test env).
+        monkeypatch.setattr(web_search_mod, "_firecrawl_search", fake_firecrawl)
+        # Force the Firecrawl path (no Tavily key in test env).
         monkeypatch.setattr(
             web_search_mod.get_settings(), "WEB_SEARCH_API_KEY", None
+        )
+        monkeypatch.setattr(
+            web_search_mod.get_settings(), "FIRECRAWL_API_KEY", "test-key"
         )
 
         result = asyncio.run(search_web("messy raw question?"))
@@ -161,7 +139,7 @@ class TestFanOutMerge:
         assert result.sources[1] == {
             "title": "shared result",
             "url": "",
-            "provider": "DuckDuckGo",
+            "provider": "Firecrawl",
         }
 
 

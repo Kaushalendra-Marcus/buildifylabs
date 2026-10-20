@@ -107,14 +107,10 @@ class TestPlannedDispatch:
 
         return fake
 
-    async def _no_snippets(self, client, query_item, settings):
-        return []
-
     def _base_monkeypatch(self, monkeypatch, queries, entities):
         monkeypatch.setattr(
             web_search_mod, "rewrite_search_queries", self._rewrite_fake(queries, entities)
         )
-        monkeypatch.setattr(web_search_mod, "_ddg_search", self._no_snippets)
         monkeypatch.setattr(web_search_mod.get_settings(), "WEB_SEARCH_API_KEY", None)
         monkeypatch.setattr(web_search_mod.get_settings(), "FRED_API_KEY", None)
 
@@ -214,10 +210,13 @@ class TestPlannedDispatch:
             web_search_mod, "_resolve_symbol", lambda client, entity: asyncio.sleep(0, result="TSLA")
         )
 
-        async def boom_ddg(client, query_item, settings):
+        async def boom_firecrawl(client, query_item, settings, time_sensitive=False):
             raise AssertionError("snippet providers must not run without 'snippets'")
 
-        monkeypatch.setattr(web_search_mod, "_ddg_search", boom_ddg)
+        monkeypatch.setattr(web_search_mod, "_firecrawl_search", boom_firecrawl)
+        monkeypatch.setattr(
+            web_search_mod.get_settings(), "FIRECRAWL_API_KEY", "test-key"
+        )
 
         async def fake_market(client, entity, symbol):
             return (

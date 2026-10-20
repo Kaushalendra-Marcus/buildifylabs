@@ -402,13 +402,13 @@ class TestGracefulFallbacks:
                         {
                             "title": "Acme funding",
                             "url": "https://a.example",
-                            "provider": "DuckDuckGo",
+                            "provider": "Firecrawl",
                             "retrieved_at": "x",
                         },
                         {
                             "title": "Globex launch",
                             "url": "https://b.example",
-                            "provider": "DuckDuckGo",
+                            "provider": "Firecrawl",
                             "retrieved_at": "x",
                         },
                     ],

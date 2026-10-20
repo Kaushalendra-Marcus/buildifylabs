@@ -107,6 +107,13 @@ class TestWikipedia:
         assert "(Wikipedia summary.)" in text
         assert source["provider"] == "Wikipedia"
         assert source["url"] == "https://en.wikipedia.org/wiki/Acme_Corp"
+        # Multi-word entities must be a real path segment ("_" or "%20"),
+        # never a query-string "+" (Wikimedia returns 404 for that).
+        called_url = client.calls[0][1]
+        assert "Acme_Corp" in called_url
+        assert "Acme+Corp" not in called_url
+        # Wikimedia's policy requires contact info in the UA.
+        assert "buildifylabs.in" in client.calls[0][2]["headers"]["User-Agent"]
 
     def test_disambiguation_is_skipped(self):
         async def wiki(url, kwargs):
@@ -310,14 +317,10 @@ class TestSearchWebMerge:
 
         return fake
 
-    async def _no_snippets(self, client, query_item, settings):
-        return []
-
     def test_wiki_text_lands_in_context_and_sources(self, monkeypatch):
         monkeypatch.setattr(
             web_search_mod, "rewrite_search_queries", self._rewrite_fake(["q1"], ["Acme"])
         )
-        monkeypatch.setattr(web_search_mod, "_ddg_search", self._no_snippets)
         monkeypatch.setattr(
             web_search_mod.get_settings(), "WEB_SEARCH_API_KEY", None
         )
@@ -346,8 +349,6 @@ class TestSearchWebMerge:
             "rewrite_search_queries",
             self._rewrite_fake(["read the article"], []),
         )
-        monkeypatch.setattr(web_search_mod, "_ddg_search", self._no_snippets)
-
         async def fake_tavily(client, query_item, settings, time_sensitive=False):
             return []
 

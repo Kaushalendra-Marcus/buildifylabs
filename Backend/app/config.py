@@ -83,6 +83,13 @@ class Settings(BaseSettings):
         return self.GROQ_STRONG_MODEL or self.GROQ_MODEL
 
     WEB_SEARCH_API_KEY: Optional[str] = Field(None)
+    # Firecrawl API key for managed web search/extraction (empty -> adapter
+    # disabled).
+    FIRECRAWL_API_KEY: Optional[str] = Field(None)
+    # Firecrawl returns full markdown per result (more useful than a one-line
+    # snippet, but also more credits/latency), so keep its fan-out tighter than
+    # Tavily's.
+    FIRECRAWL_MAX_RESULTS: int = 3
     WEB_SEARCH_MAX_RESULTS: int = 5
     # Live-web cache TTL (specs/07 FR5: ~6h so repeat external questions
     # share evidence instead of re-scraping at full latency/cost).

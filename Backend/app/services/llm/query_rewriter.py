@@ -74,10 +74,9 @@ def wants_external_context(text: str) -> bool:
 
 # Clarification-merge scaffolding ("original [clarification answer: X - Y -
 # Z]") is meant for the LLM prompt, not a search engine. Sent verbatim, its
-# brackets/colons make it read as bot/scraper traffic -- observed directly:
-# DuckDuckGo returning an HTTP 202 challenge page (no results) for exactly
-# this shape of query. Every fallback path below (rewrite failure, malformed
-# payload) must clean this before using raw text as a search query.
+# brackets/colons read as bot/scraper traffic and pollute result matching, so
+# every fallback path below (rewrite failure, malformed payload) must clean
+# this before using raw text as a search query.
 _CLARIFICATION_WRAPPER_RE = re.compile(
     r"\[clarification answer:\s*(.*?)\]\s*$", re.IGNORECASE | re.DOTALL
 )

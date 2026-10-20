@@ -72,7 +72,7 @@ class WebSource(BaseModel):
 def coerce_web_sources(sources: Optional[list] = None) -> list:
     """Coerce retrieval dicts into validated WebSource objects (fail-closed contract).
 
-    Retrieval adapters (Tavily/DDG/Yahoo/docs) produce plain dicts; assigning
+    Retrieval adapters (Tavily/Firecrawl/Yahoo/docs) produce plain dicts; assigning
     them directly to PipelineOutput.web_sources bypasses validation and
     surfaces as Pydantic serializer warnings downstream. Coercion fills
     transport defaults (retrieved_at=now, url="") and drops only entries with

@@ -2,7 +2,7 @@
 
 The chat message is first reframed into clean search queries (LLM, generic -
 see `app.services.llm.query_rewriter`), then fanned out: each query runs
-against snippet providers concurrently (Tavily + DuckDuckGo, merged for
+against snippet providers concurrently (Tavily + Firecrawl, merged for
 independent corroboration), community discussion is covered by a
 site-restricted variant when the rewriter emits one, and structured adapters
 resolve named entities (Yahoo market series + fundamentals, Wikipedia
@@ -11,17 +11,14 @@ in the query is read in full via Tavily Extract (one URL max). Results merge
 with per-URL/per-text dedupe. Never raises to /chat.
 """
 import asyncio
-import html
 import logging
-import random
 import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from html.parser import HTMLParser
 from json import JSONDecodeError
 from typing import Any, Optional, Union
-from urllib.parse import quote_plus
+from urllib.parse import quote, quote_plus
 
 import httpx
 
@@ -160,6 +157,15 @@ FRED_SERIES_MAP: list[tuple[re.Pattern, str, str]] = [
 ]
 
 _HEADERS = {"User-Agent": "BuildifyLabs/1.0"}
+
+# Wikimedia's REST API rejects a bare product token without contact info
+# (HTTP 403 "Please respect our robot policy"). The URL in the UA is the
+# contact channel required by their policy; other adapters keep the plain
+# token so this does not change Yahoo/FRED behaviour.
+_WIKI_HEADERS = {
+    "User-Agent": "BuildifyLabs/1.0 (https://buildifylabs.in)",
+    "Accept": "application/json",
+}
 
 # Wikipedia grounding budget: same per-request cap as market entities (cheap,
 # free, concurrent - one summary fetch per entity).
@@ -402,79 +408,6 @@ class WebSearchResult:
     # series were wanted but unfetched (no key / unmapped topic / US-only
     # coverage). Narrator prompt context, never evidence.
     macro_note: str = ""
-
-
-class _DuckDuckGoParser(HTMLParser):
-    """Collects (text, url) pairs, merging each result's title with the
-    snippet that follows it ("title — snippet") so every snippet carries its
-    page URL. Pairs keep context[i] <-> sources[i] aligned 1:1 downstream."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.pairs: list[tuple[str, str]] = []
-        self._capture = False
-        self._buffer: list[str] = []
-        self._kind = ""
-        self._capture_tag = ""
-        self._source_url = ""
-        # NOTE: named _pending_pair (not _pending) — HTMLParser itself uses
-        # _pending internally (a list) in close(), so shadowing it breaks
-        # super().close() on Python 3.12+ with
-        # "AttributeError: 'tuple' object has no attribute 'clear'".
-        self._pending_pair: Optional[tuple[str, str]] = None
-
-    def _flush_pending(self) -> None:
-        if self._pending_pair is not None:
-            self.pairs.append(self._pending_pair)
-            self._pending_pair = None
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
-        classes = dict(attrs).get("class", "") or ""
-        if tag == "a" and "result-link" in classes:
-            self._capture = True
-            self._buffer = []
-            self._kind = "title"
-            self._capture_tag = tag
-            self._source_url = dict(attrs).get("href", "") or ""
-        elif "result__snippet" in classes:
-            self._capture = True
-            self._buffer = []
-            self._kind = "snippet"
-            self._capture_tag = tag
-            # Snippets are often bare divs; fall back to the block's title URL.
-            self._source_url = dict(attrs).get("href", "") or (
-                self._pending_pair[1] if self._pending_pair else ""
-            )
-
-    def handle_data(self, data: str) -> None:
-        if self._capture:
-            self._buffer.append(data)
-
-    def handle_endtag(self, tag: str) -> None:
-        if self._capture and tag == self._capture_tag:
-            text = " ".join("".join(self._buffer).split())
-            if text:
-                text = html.unescape(text)
-                if self._kind == "title":
-                    self._flush_pending()
-                    self._pending_pair = (text, self._source_url)
-                else:
-                    if self._pending_pair is not None:
-                        title, url = self._pending_pair
-                        self._pending_pair = None
-                        self.pairs.append(
-                            (f"{title} — {text}", self._source_url or url)
-                        )
-                    else:
-                        self.pairs.append((text, self._source_url))
-            self._capture = False
-            self._kind = ""
-            self._capture_tag = ""
-            self._source_url = ""
-
-    def close(self) -> None:
-        super().close()
-        self._flush_pending()
 
 
 def _dedupe_texts(items: list[str]) -> list[str]:
@@ -1152,10 +1085,13 @@ async def _fetch_wikipedia(
     summary API. Free, structured, no key. Disambiguation pages are skipped
     (return None) rather than guessed. Never raises."""
     try:
+        # REST summary paths treat "+" as a literal plus (404), unlike query
+        # strings. Percent-encode spaces/underscores so multi-word entities
+        # ("Artificial intelligence") resolve.
+        wiki_path = quote(entity.strip().replace(" ", "_"), safe="")
         response = await client.get(
-            f"https://en.wikipedia.org/api/rest_v1/page/summary/"
-            f"{quote_plus(entity)}",
-            headers={**_HEADERS, "Accept": "application/json"},
+            f"https://en.wikipedia.org/api/rest_v1/page/summary/{wiki_path}",
+            headers=_WIKI_HEADERS,
         )
         if response.status_code == 404:
             return None
@@ -1172,7 +1108,7 @@ async def _fetch_wikipedia(
             (payload.get("content_urls") or {})
             .get("desktop", {})
             .get("page", "")
-        ) or f"https://en.wikipedia.org/wiki/{quote_plus(entity)}"
+        ) or f"https://en.wikipedia.org/wiki/{wiki_path}"
         trimmed = extract[:WIKI_SUMMARY_MAX_CHARS]
         text = f"{title}: {trimmed} (Wikipedia summary.)"
         source = {
@@ -1359,67 +1295,146 @@ async def _tavily_search(
     return triples
 
 
-# DDG's HTML endpoint bot-checks on UA + request pattern. A plain
-# "BuildifyLabs/1.0" UA (used for our JSON API calls elsewhere) is an easy
-# bot signal; a realistic browser UA/Accept-Language cuts the 202 rate
-# noticeably without doing anything deceptive beyond what any browser sends.
-_DDG_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-}
+# Firecrawl returns full-page markdown when scrape_options are supplied. Cap
+# each result before the shared context budget trims the pool; a 70k-char page
+# would otherwise crowd every other source out of the prompt.
+FIRECRAWL_SNIPPET_MAX_CHARS = 4000
 
-# One-off 202 challenge pages are common and often transient (rate-limit
-# window, not a durable block), so a couple of short, jittered retries
-# recover a real result far more often than failing straight to zero
-# evidence. Bounded small so a stuck block still fails fast overall.
-_DDG_MAX_ATTEMPTS = 3
-_DDG_RETRY_BASE_SECONDS = 0.5
+# One async client per API key. Firecrawl search owns its transport, so the
+# shared httpx client passed to provider adapters is intentionally unused.
+_firecrawl_client: Any = None
+_firecrawl_client_key: Optional[str] = None
 
 
-async def _ddg_search(
-    client: httpx.AsyncClient, query_item: str, settings
-) -> list[tuple]:
-    """Returns (text, url, provider, published_date, score) tuples from merged
-    title/snippet pairs. DDG carries no dates/scores (None, None)."""
-    last_status: Optional[int] = None
-    for attempt in range(_DDG_MAX_ATTEMPTS):
-        response = await client.get(
-            f"https://html.duckduckgo.com/html/?q={quote_plus(query_item)}",
-            headers=_DDG_HEADERS,
+def _get_firecrawl_client(settings):
+    """Lazily create the Firecrawl client so key-less deployments and tests
+    never import or initialise the optional SDK."""
+    global _firecrawl_client, _firecrawl_client_key
+    key = getattr(settings, "FIRECRAWL_API_KEY", None)
+    if not key:
+        return None
+    if _firecrawl_client is None or _firecrawl_client_key != key:
+        from firecrawl.v2.client_async import AsyncFirecrawlClient
+
+        # Search+scrape regularly exceeds httpx's 5s default. Bound it so a
+        # stalled Firecrawl call cannot hold the whole evidence stage open.
+        _firecrawl_client = AsyncFirecrawlClient(
+            api_key=key, timeout=25, max_retries=2
         )
-        # DDG answers bot-suspect traffic with 202 + a JS challenge page.
-        # raise_for_status() passes on 202, and the parser would feed on
-        # challenge HTML and return zero pairs — a silent empty-evidence
-        # failure (seen live: "202 Accepted" in logs, no snippets,
-        # honest-but-wrong "could not locate" downstream). Treat any non-200
-        # as a provider failure so the merge path logs it and the other
-        # provider carries the request.
-        if response.status_code == 200:
-            response.raise_for_status()
-            parser = _DuckDuckGoParser()
-            parser.feed(response.text)
-            parser.close()
-            return [
-                (text, url, "DuckDuckGo", None, None)
-                for text, url in parser.pairs[: settings.WEB_SEARCH_MAX_RESULTS]
-            ]
-        last_status = response.status_code
-        if attempt < _DDG_MAX_ATTEMPTS - 1:
-            delay = _DDG_RETRY_BASE_SECONDS * (2 ** attempt)
-            delay += random.uniform(0, _DDG_RETRY_BASE_SECONDS)
-            logger.info(
-                "DuckDuckGo returned HTTP %s for %r (attempt %d/%d); retrying in %.2fs.",
-                last_status, query_item, attempt + 1, _DDG_MAX_ATTEMPTS, delay,
-            )
-            await asyncio.sleep(delay)
-    raise RuntimeError(
-        f"DuckDuckGo returned HTTP {last_status} after {_DDG_MAX_ATTEMPTS} attempts "
-        f"(expected 200; challenge/captcha pages carry no results)."
+        _firecrawl_client_key = key
+    return _firecrawl_client
+
+
+def _firecrawl_item_to_triple(
+    item: Any, fallback_position: Optional[int] = None
+) -> Optional[tuple]:
+    """Map a Firecrawl SearchResultWeb/SearchResultNews/Document to the
+    provider tuple consumed by the merge pipeline."""
+    meta = getattr(item, "metadata", None)
+    title = (
+        getattr(item, "title", None)
+        or getattr(meta, "title", None)
+        or ""
     )
+    text = (
+        getattr(item, "markdown", None)
+        or getattr(item, "snippet", None)
+        or getattr(item, "description", None)
+        or getattr(meta, "description", None)
+    )
+    if not text:
+        return None
+    url = (
+        getattr(item, "url", None)
+        or getattr(meta, "source_url", None)
+        or getattr(meta, "url", None)
+        or ""
+    )
+    published = _normalize_published_date(
+        getattr(item, "date", None)
+        or getattr(meta, "published_time", None)
+        or getattr(meta, "dc_date", None)
+        or getattr(meta, "modified_time", None)
+    )
+    # Scraped Document results do not carry a rank, so fall back to the
+    # search-result order for a comparable relevance signal.
+    position = getattr(item, "position", None) or fallback_position
+    score = None
+    if isinstance(position, int) and position > 0:
+        # Firecrawl's position is 1-based rank, not a 0..1 relevance score.
+        # Convert it so context_budget's provider-score term stays comparable
+        # with Tavily's scores.
+        score = max(0.1, 1.0 - (position - 1) * 0.1)
+    text = str(text).strip()
+    if not text:
+        return None
+    if title:
+        text = f"{title}: {text}"
+    return (
+        text[:FIRECRAWL_SNIPPET_MAX_CHARS],
+        str(url),
+        "Firecrawl",
+        published,
+        score,
+    )
+
+
+async def _firecrawl_search(
+    client: httpx.AsyncClient,
+    query_item: str,
+    settings,
+    time_sensitive: bool = False,
+) -> list[tuple]:
+    """Returns (text, url, provider, published_date, score) tuples from
+    Firecrawl's managed search API.
+
+    Unlike the old DuckDuckGo HTML scrape this cannot be silently replaced by
+    a bot-challenge page: Firecrawl handles search plus markdown extraction,
+    and any API/transport failure propagates to `_snippets_for_query`, which
+    logs it and lets Tavily carry the request. Markdown is requested so the
+    model gets real page content (not just a one-line description), then
+    capped before the shared context budget runs.
+    """
+    if not getattr(settings, "FIRECRAWL_API_KEY", None):
+        return []
+    try:
+        firecrawl = _get_firecrawl_client(settings)
+        from firecrawl.v2.types import ScrapeOptions
+    except Exception as exc:
+        logger.warning("Firecrawl unavailable: %s", exc)
+        return []
+    if firecrawl is None:
+        return []
+
+    result_limit = min(
+        settings.WEB_SEARCH_MAX_RESULTS,
+        getattr(settings, "FIRECRAWL_MAX_RESULTS", 3),
+    )
+    sources = ["news"] if time_sensitive else ["web"]
+    data = await firecrawl.search(
+        query_item,
+        limit=result_limit,
+        sources=sources,
+        scrape_options=ScrapeOptions(
+            formats=["markdown"],
+            only_main_content=True,
+        ),
+    )
+    warning = getattr(data, "warning", None)
+    if warning:
+        logger.warning("Firecrawl search warning for %r: %s", query_item, warning)
+
+    items = (
+        getattr(data, "news", None)
+        if time_sensitive
+        else getattr(data, "web", None)
+    ) or []
+    triples: list[tuple] = []
+    for index, item in enumerate(items, start=1):
+        triple = _firecrawl_item_to_triple(item, fallback_position=index)
+        if triple is not None:
+            triples.append(triple)
+    return triples[:result_limit]
 
 
 def _coerce_triple(triple: tuple) -> tuple[str, str, str, Optional[str], Any]:
@@ -1832,13 +1847,15 @@ async def _snippets_for_query(
 ) -> list[tuple]:
     """Run snippet providers concurrently and merge (independent corroboration).
 
-    Tavily (when keyed) + DuckDuckGo always both run; either may fail without
-    taking the other down. This is what unlocks provider_count >= 2 downstream.
+    Tavily (when keyed) + Firecrawl (when keyed) run together; either may fail
+    without taking the other down. This is what unlocks provider_count >= 2
+    downstream.
     """
     tasks = []
     if settings.WEB_SEARCH_API_KEY:
         tasks.append(_tavily_search(client, query_item, settings, time_sensitive))
-    tasks.append(_ddg_search(client, query_item, settings))
+    if getattr(settings, "FIRECRAWL_API_KEY", None):
+        tasks.append(_firecrawl_search(client, query_item, settings, time_sensitive))
     results = await asyncio.gather(*tasks, return_exceptions=True)
     merged: list[tuple] = []
     for result in results:
@@ -2558,15 +2575,15 @@ async def search_web(
                         )
                     else:
                         # Recovery ran and the snippet providers are dead too
-                        # (no Tavily key + DDG bot-challenge, typical on
-                        # datacenter IPs): say so in the trace instead of a
-                        # silent empty pool, so the honest 0.0 fallback is
-                        # diagnosable from thinking alone.
+                        # (missing/invalid Tavily or Firecrawl key, or both
+                        # APIs unreachable from this host): say so in the trace
+                        # instead of a silent empty pool, so the honest 0.0
+                        # fallback is diagnosable from thinking alone.
                         research_notes.append(
                             "All evidence providers failed (structured "
                             "adapters empty; snippet recovery found "
-                            "nothing -- check Tavily key and Yahoo/DDG "
-                            "reachability from this host)."
+                            "nothing -- check Tavily/Firecrawl keys and "
+                            "Yahoo reachability from this host)."
                         )
             # Whole-pool budgeting: structured evidence (small, high-signal:
             # market/fundamentals/macro/history/Wikipedia) is deduped as

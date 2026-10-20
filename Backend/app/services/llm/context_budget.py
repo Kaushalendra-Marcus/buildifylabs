@@ -35,9 +35,9 @@ def _term_overlap_score(text: str, query_terms: set[str]) -> float:
 
 
 def _recency_score(published_date: Optional[str]) -> float:
-    """0..1, newer = higher. Missing date (e.g. every DuckDuckGo result)
+    """0..1, newer = higher. Missing date (e.g. a Firecrawl web result)
     gets a NEUTRAL 0.4, never a penalty -- a dated-but-stale Tavily hit
-    must not automatically outrank an undated-but-relevant DDG hit."""
+    must not automatically outrank an undated-but-relevant snippet."""
     if not published_date:
         return 0.4
     try:
@@ -98,7 +98,10 @@ def fit_pairs_to_budget(
     """Greedily keep (text, source) pairs in the given order while the
     running character total stays under max_chars. Assumes the caller has
     already ranked best-first (rank_snippet_pairs) -- this function does
-    not re-rank, it only decides where to stop. Returns
+    not re-rank, it only decides what fits. An item that would overflow the
+    budget is skipped rather than ending the pass, so one oversized
+    high-ranked page (e.g. Firecrawl markdown) cannot crowd every smaller
+    corroborating source out of the prompt. Returns
     (kept_texts, kept_sources, dropped_count). Never raises.
     """
     try:
@@ -110,7 +113,7 @@ def fit_pairs_to_budget(
         for text, source in zip(texts, sources):
             cost = len(text or "") + 20  # small per-item overhead
             if used + cost > max_chars:
-                break
+                continue
             kept_texts.append(text)
             kept_sources.append(source)
             used += cost

@@ -753,10 +753,11 @@ class TestAdversarial:
 
         monkeypatch.setattr(web_search_mod, "rewrite_search_queries", fake_rewrite)
         monkeypatch.setattr(web_search_mod, "_tavily_search", boom)
-        monkeypatch.setattr(web_search_mod, "_ddg_search", boom)
+        monkeypatch.setattr(web_search_mod, "_firecrawl_search", boom)
         monkeypatch.setattr(web_search_mod, "_resolve_symbol", boom)
         monkeypatch.setattr(web_search_mod, "_fetch_wikipedia", boom)
         monkeypatch.setattr(web_search_mod.get_settings(), "WEB_SEARCH_API_KEY", "k")
+        monkeypatch.setattr(web_search_mod.get_settings(), "FIRECRAWL_API_KEY", "k")
         monkeypatch.setattr(web_search_mod.get_settings(), "FRED_API_KEY", None)
         result = asyncio.run(web_search_mod.search_web("Tesla news"))
         assert result.context == [] and result.market_data == []

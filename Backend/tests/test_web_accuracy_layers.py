@@ -1,7 +1,7 @@
 """Accuracy layers for live-web answers (items 1-7).
 
 All provider I/O is faked at the helper seam - no HTTP here. Covers:
-- concurrent Tavily+DDG merge (both run, either may fail alone)
+- concurrent Tavily+Firecrawl merge (both run, either may fail alone)
 - recency: published_date carried into sources + date-tagged prompt
 - time-sensitive flag (LLM + regex backstop)
 - fundamentals + FRED structured adapters (best-effort, never raise)
@@ -195,8 +195,8 @@ class TestConcurrentProvidersAndCache:
                 ("tavily result", "https://t.example", "Tavily", "2024-11-02", 0.9)
             ]
 
-        async def fake_ddg(client, query_item, settings):
-            return [("ddg result", "https://d.example", "DuckDuckGo", None, None)]
+        async def fake_firecrawl(client, query_item, settings, time_sensitive=False):
+            return [("firecrawl result", "https://d.example", "Firecrawl", None, None)]
 
         async def fake_rewrite(query, prior_clarification=None, company_name=None, prior_query=None):
             return {
@@ -206,17 +206,20 @@ class TestConcurrentProvidersAndCache:
             }
 
         monkeypatch.setattr(web_search_mod, "_tavily_search", fake_tavily)
-        monkeypatch.setattr(web_search_mod, "_ddg_search", fake_ddg)
+        monkeypatch.setattr(web_search_mod, "_firecrawl_search", fake_firecrawl)
         monkeypatch.setattr(
             web_search_mod, "rewrite_search_queries", fake_rewrite
         )
         monkeypatch.setattr(
             web_search_mod.get_settings(), "WEB_SEARCH_API_KEY", "test-key"
         )
+        monkeypatch.setattr(
+            web_search_mod.get_settings(), "FIRECRAWL_API_KEY", "test-key"
+        )
 
         result = asyncio.run(web_search_mod.search_web("latest tesla news"))
         providers = {source["provider"] for source in result.sources}
-        assert providers == {"Tavily", "DuckDuckGo"}
+        assert providers == {"Tavily", "Firecrawl"}
         assert any(
             source.get("published_date") == "2024-11-02"
             for source in result.sources
@@ -230,24 +233,27 @@ class TestConcurrentProvidersAndCache:
             calls["n"] += 1
             return [("tavily result", "https://t.example", "Tavily", None, None)]
 
-        async def fake_ddg(client, query_item, settings):
+        async def fake_firecrawl(client, query_item, settings, time_sensitive=False):
             calls["n"] += 1
-            return [("ddg result", "https://d.example", "DuckDuckGo", None, None)]
+            return [("firecrawl result", "https://d.example", "Firecrawl", None, None)]
 
         async def fake_rewrite(query, prior_clarification=None, company_name=None, prior_query=None):
             return {"queries": ["same question"], "entities": [], "time_sensitive": False}
 
         monkeypatch.setattr(web_search_mod, "_tavily_search", fake_tavily)
-        monkeypatch.setattr(web_search_mod, "_ddg_search", fake_ddg)
+        monkeypatch.setattr(web_search_mod, "_firecrawl_search", fake_firecrawl)
         monkeypatch.setattr(web_search_mod, "rewrite_search_queries", fake_rewrite)
         monkeypatch.setattr(
             web_search_mod.get_settings(), "WEB_SEARCH_API_KEY", "test-key"
+        )
+        monkeypatch.setattr(
+            web_search_mod.get_settings(), "FIRECRAWL_API_KEY", "test-key"
         )
 
         first = asyncio.run(web_search_mod.search_web("same question"))
         second = asyncio.run(web_search_mod.search_web("same question"))
         assert first.context == second.context
-        assert calls["n"] == 2  # one Tavily + one DDG on the first call only
+        assert calls["n"] == 2  # one Tavily + one Firecrawl on the first call only
 
 
 class TestStrongModelRouting:
@@ -455,13 +461,9 @@ class TestEntityFallback:
                 {"title": entity, "url": "", "provider": "Yahoo Finance"},
             )
 
-        async def fake_ddg(client, query_item, settings):
-            return []
-
         monkeypatch.setattr(web_search_mod, "rewrite_search_queries", fake_rewrite)
         monkeypatch.setattr(web_search_mod, "_resolve_symbol", fake_resolve)
         monkeypatch.setattr(web_search_mod, "_fetch_market_series", fake_series)
-        monkeypatch.setattr(web_search_mod, "_ddg_search", fake_ddg)
 
         result = asyncio.run(
             web_search_mod.search_web(
@@ -472,33 +474,6 @@ class TestEntityFallback:
             "TSLA",
             "RELIANCE.NS",
         }
-
-
-class TestDdgChallenge:
-    """Live incident: DDG answered 202 + challenge page; parser fed on it and
-    returned zero pairs - silent empty evidence."""
-
-    def test_non_200_raises_provider_failure(self, monkeypatch):
-        from types import SimpleNamespace
-
-        async def fake_get(url, headers=None):
-            return SimpleNamespace(
-                status_code=202,
-                text="<html>challenge</html>",
-                raise_for_status=lambda: None,
-            )
-
-        client = SimpleNamespace(get=fake_get)
-        try:
-            asyncio.run(
-                web_search_mod._ddg_search(
-                    client, "q", SimpleNamespace(WEB_SEARCH_MAX_RESULTS=5)
-                )
-            )
-        except RuntimeError as exc:
-            assert "202" in str(exc)
-        else:
-            raise AssertionError("DDG 202 must raise, not parse challenge HTML")
 
 
 class TestCountFigures:
@@ -789,9 +764,6 @@ class TestRecommendationEvidence:
                 ("Other excerpt here", "https://t.example/b", "Tavily", None, 0.8),
             ]
 
-        async def fake_ddg(client, query_item, settings):
-            return []
-
         async def fake_rewrite(query, prior_clarification=None, company_name=None, prior_query=None):
             return {"queries": ["best books query"], "entities": [], "time_sensitive": False}
 
@@ -805,7 +777,6 @@ class TestRecommendationEvidence:
             )
 
         monkeypatch.setattr(web_search_mod, "_tavily_search", fake_tavily)
-        monkeypatch.setattr(web_search_mod, "_ddg_search", fake_ddg)
         monkeypatch.setattr(web_search_mod, "rewrite_search_queries", fake_rewrite)
         monkeypatch.setattr(web_search_mod, "_tavily_extract", fake_extract)
         monkeypatch.setattr(
@@ -826,9 +797,6 @@ class TestRecommendationEvidence:
         async def fake_tavily(client, query_item, settings, time_sensitive=False):
             return [("plain excerpt", "https://t.example/a", "Tavily", None, 0.9)]
 
-        async def fake_ddg(client, query_item, settings):
-            return []
-
         async def fake_rewrite(query, prior_clarification=None, company_name=None, prior_query=None):
             return {"queries": ["revenue question"], "entities": [], "time_sensitive": False}
 
@@ -836,7 +804,6 @@ class TestRecommendationEvidence:
             raise AssertionError("extract must not fire here")
 
         monkeypatch.setattr(web_search_mod, "_tavily_search", fake_tavily)
-        monkeypatch.setattr(web_search_mod, "_ddg_search", fake_ddg)
         monkeypatch.setattr(web_search_mod, "rewrite_search_queries", fake_rewrite)
         monkeypatch.setattr(web_search_mod, "_tavily_extract", fake_extract)
         monkeypatch.setattr(

@@ -20,8 +20,11 @@ from app.config import get_settings
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-HF_API_URL = f"https://api-inference.huggingface.co/models/{settings.HF_MODEL}"
-HF_HEADERS = {"Authorization": f"Bearer {settings.HF_API_KEY}"}
+# HuggingFace retired api-inference.huggingface.co; the current serverless
+# inference surface is the OpenAI-compatible router. The old endpoint no longer
+# resolves from Render (DNS failure) and turned the last-resort fallback into a
+# 30s dead end.
+HF_API_URL = "https://router.huggingface.co/v1/chat/completions"
 
 _clients: dict[str, AsyncGroq] = {}
 _key_cycle: Optional[itertools.cycle] = None
@@ -118,24 +121,33 @@ def _next_client() -> tuple[AsyncGroq, str]:
 
 async def hf_fallback(prompt: str, system_prompt: str) -> dict:
     logger.warning("Groq failed - switching to HuggingFace fallback")
-    full_prompt = f"{system_prompt}\n\nUser: {prompt}\nAssistant:"
+    if not settings.HF_API_KEY:
+        raise RuntimeError("All LLM services failed: no HuggingFace key configured")
     try:
-        async with httpx.AsyncClient(timeout=30) as http:
+        async with httpx.AsyncClient(timeout=15) as http:
             response = await http.post(
                 HF_API_URL,
-                headers=HF_HEADERS,
+                headers={"Authorization": f"Bearer {settings.HF_API_KEY}"},
                 json={
-                    "inputs": full_prompt,
-                    "parameters": {"max_new_tokens": 512},
+                    "model": settings.HF_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "max_tokens": 512,
+                    "temperature": 0.3,
                 },
             )
             response.raise_for_status()
             data = response.json()
-            content = data[0].get("generated_text", "").replace(full_prompt, "").strip()
+            content = data["choices"][0]["message"]["content"] or ""
+            content = content.strip()
+            if not content:
+                raise RuntimeError("HuggingFace returned an empty completion")
             return {"content": content, "usage": None, "source": "huggingface"}
     except Exception as e:
         logger.error(f"HuggingFace fallback also failed: {e}")
-        raise RuntimeError("All LLM services failed")
+        raise RuntimeError("All LLM services failed") from e
 
 
 def _classify_key_error(exc: Exception) -> str:
@@ -163,6 +175,92 @@ def _error_detail(exc: Exception) -> str:
         except Exception:
             pass
     return f"status={status or 'unknown'} detail={detail[:400]}"
+
+
+# Groq's current production lineup is reasoning-heavy (openai/gpt-oss-*,
+# qwen3, deepseek-r1). Reasoning tokens count against max_tokens, so a small
+# structured call can return HTTP 200 with `content=None` after spending the
+# whole budget thinking. Keep small calls above that cliff, ask gpt-oss for
+# low effort on them, and rescue an empty completion once with more headroom
+# before rotating keys. This is model-capability logic, not a prompt fix.
+_REASONING_MODEL_MARKERS = ("gpt-oss", "qwen3", "deepseek-r1")
+_REASONING_MIN_TOKENS = 1024
+_REASONING_RESCUE_TOKENS = 2048
+
+
+def _is_reasoning_model(model: str) -> bool:
+    name = (model or "").lower()
+    return any(marker in name for marker in _REASONING_MODEL_MARKERS)
+
+
+def _reasoning_effort(model: str, max_tokens: int) -> Optional[str]:
+    """Groq accepts reasoning_effort for gpt-oss models. Low effort is enough
+    for routing/rewrite/compression JSON; larger prose calls keep the default
+    medium effort."""
+    if "gpt-oss" not in (model or "").lower():
+        return None
+    return "low" if max_tokens <= _REASONING_MIN_TOKENS else "medium"
+
+
+def _effective_max_tokens(model: str, max_tokens: int) -> int:
+    if _is_reasoning_model(model):
+        return max(max_tokens, _REASONING_MIN_TOKENS)
+    return max_tokens
+
+
+async def _rescue_empty_reasoning_completion(
+    client: AsyncGroq,
+    *,
+    model: str,
+    messages: list[dict],
+    temperature: float,
+    max_tokens: int,
+    extra: dict,
+    response,
+) -> tuple[Optional[str], object]:
+    """One larger-budget retry when a reasoning model returns no visible text.
+
+    Returns (content, response). On failure content is None and the original
+    response is returned so the caller's normal key-rotation path continues.
+    """
+    if not _is_reasoning_model(model):
+        return None, response
+    finish_reason = None
+    try:
+        finish_reason = response.choices[0].finish_reason
+    except (AttributeError, IndexError):
+        pass
+    rescue_tokens = max(max_tokens * 2, _REASONING_RESCUE_TOKENS)
+    logger.warning(
+        "Groq returned empty content (model=%s, finish_reason=%s, "
+        "max_tokens=%d); retrying with max_tokens=%d and low reasoning effort.",
+        model,
+        finish_reason,
+        max_tokens,
+        rescue_tokens,
+    )
+    kwargs = dict(
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=rescue_tokens,
+        **extra,
+    )
+    if "gpt-oss" in (model or "").lower():
+        kwargs["reasoning_effort"] = "low"
+    try:
+        rescued = await client.chat.completions.create(**kwargs)
+    except Exception as exc:
+        logger.warning(
+            "Groq reasoning rescue failed (model=%s): %s",
+            model,
+            _error_detail(exc),
+        )
+        return None, response
+    content = rescued.choices[0].message.content
+    if content and content.strip():
+        return content, rescued
+    return None, rescued
 
 
 async def generate_response(
@@ -208,6 +306,14 @@ async def generate_response(
     elif use_json_transport:
         extra["response_format"] = {"type": "json_object"}
 
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt},
+    ]
+    effective_max_tokens = _effective_max_tokens(selected_model, max_tokens)
+    effort = _reasoning_effort(selected_model, max_tokens)
+    reasoning_kwargs = {"reasoning_effort": effort} if effort else {}
+
     last_error: Optional[Exception] = None
     for attempt in range(3):
         tried_this_round = 0
@@ -216,15 +322,23 @@ async def generate_response(
             try:
                 response = await client.chat.completions.create(
                     model=selected_model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": prompt},
-                    ],
+                    messages=messages,
                     temperature=temperature,
-                    max_tokens=max_tokens,
+                    max_tokens=effective_max_tokens,
                     **extra,
+                    **reasoning_kwargs,
                 )
                 content = response.choices[0].message.content
+                if not content or not content.strip():
+                    content, response = await _rescue_empty_reasoning_completion(
+                        client,
+                        model=selected_model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=effective_max_tokens,
+                        extra=extra,
+                        response=response,
+                    )
                 if not content or not content.strip():
                     raise RuntimeError("Groq returned an empty completion")
                 usage = response.usage if hasattr(response, "usage") else None
@@ -251,14 +365,22 @@ async def generate_response(
                     try:
                         response = await client.chat.completions.create(
                             model=selected_model,
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": prompt},
-                            ],
+                            messages=messages,
                             temperature=temperature,
-                            max_tokens=max_tokens,
+                            max_tokens=effective_max_tokens,
+                            **reasoning_kwargs,
                         )
                         content = response.choices[0].message.content
+                        if not content or not content.strip():
+                            content, response = await _rescue_empty_reasoning_completion(
+                                client,
+                                model=selected_model,
+                                messages=messages,
+                                temperature=temperature,
+                                max_tokens=effective_max_tokens,
+                                extra={},
+                                response=response,
+                            )
                         if content and content.strip():
                             usage = response.usage if hasattr(response, "usage") else None
                             return {"content": content, "usage": usage, "source": "groq"}
@@ -320,6 +442,10 @@ async def stream_response(
     if not settings.groq_api_keys:
         raise RuntimeError("No Groq keys configured for streaming")
 
+    effective_max_tokens = _effective_max_tokens(selected_model, max_tokens)
+    effort = _reasoning_effort(selected_model, max_tokens)
+    stream_kwargs = {"reasoning_effort": effort} if effort else {}
+
     last_error: Optional[Exception] = None
     for key in _healthy_keys():
         try:
@@ -336,8 +462,9 @@ async def stream_response(
                     {"role": "user", "content": prompt},
                 ],
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_tokens=effective_max_tokens,
                 stream=True,
+                **stream_kwargs,
             )
             yielded_any = False
             async for chunk in stream:
