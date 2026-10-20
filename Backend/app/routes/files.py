@@ -5,6 +5,7 @@ size caps, extension + MIME double-check, 0-byte rejection) and returns 202 with
 FileResponse even when ingestion fails - a row is always created so the status
 transition (`processing -> completed | failed`) is visible and never stuck.
 """
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
@@ -20,6 +21,8 @@ from app.middlewares.file_validator import validate_file_upload
 from app.schemas.file_upload import FilePreview, FileResponse
 from app.services.data import parser, storage
 from app.services.data.executor import get_table_columns, user_data_table_name
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/files", tags=["Files"])
 
@@ -52,13 +55,20 @@ async def upload_file(
     try:
         storage.save_raw_file(user.id, upload_id, file.filename or "", contents)
         table_name = await parser.ingest_file(db, user.id, upload_id, file.filename, contents)
-    except Exception as exc:
+    except Exception:
         # specs/04 edge case 1: never leave the row stuck on "processing".
-        # Roll back whatever ingest did and record the failed status + reason.
+        # Roll back whatever ingest did and record a failed status.
+        # The exception text can contain SQL, absolute paths and driver
+        # internals, so it is logged server-side and never returned to the
+        # browser (the row's `error` field is shown in the UI).
+        logger.exception("File ingest failed for upload %s", upload_id)
         await db.rollback()
         failed = await db.get(FileUpload, upload_id)
         failed.status = "failed"
-        failed.error = str(exc)[:500]
+        failed.error = (
+            "Couldn't process this file. Check that it is a valid CSV, XLSX "
+            "or PDF and try again."
+        )
         await db.commit()
         await db.refresh(failed)
         return failed

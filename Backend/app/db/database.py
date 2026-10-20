@@ -22,8 +22,14 @@ def get_engine():
         echo=settings.SQL_ECHO,
         pool_size=10,
         max_overflow=20,
+        # Neon (and most managed Postgres) closes idle connections server-side.
+        # Without pre-ping the first request after an idle period gets a
+        # "connection is closed" 500; recycling keeps the pool fresh.
+        pool_pre_ping=True,
+        pool_recycle=1800,
+        pool_timeout=30,
         connect_args={
-            "ssl": True,
+            "ssl": settings.DATABASE_SSL,
         },
     )
 

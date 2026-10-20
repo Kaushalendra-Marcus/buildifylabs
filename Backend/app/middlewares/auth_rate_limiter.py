@@ -20,6 +20,15 @@ _buckets: dict[str, list[float]] = {}
 
 
 def _client_ip(request: Request) -> str:
+    # Behind App Runner / Vercel / nginx every request arrives from the proxy,
+    # so request.client.host is the same for everyone and per-IP limits stop
+    # working. Only trust the forwarded chain when explicitly configured;
+    # otherwise the header is attacker-controlled.
+    if settings.TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            # First entry is the original client; later entries are proxies.
+            return forwarded.split(",")[0].strip()[:64] or "unknown"
     return request.client.host if request.client else "unknown"
 
 
@@ -56,3 +65,17 @@ async def login_rate_limit(request: Request) -> None:
 
 async def verify_email_rate_limit(request: Request) -> None:
     _check_rate_limit(f"verify:{_client_ip(request)}", settings.VERIFY_EMAIL_RATE_LIMIT)
+
+
+async def guest_rate_limit(request: Request) -> None:
+    """Cap anonymous account creation per IP.
+
+    Each call to /auth/guest can create a new User row with a fresh quota, so
+    without this an attacker can farm unlimited free questions.
+    """
+    _check_rate_limit(f"guest:{_client_ip(request)}", settings.GUEST_RATE_LIMIT)
+
+
+async def contact_rate_limit(request: Request) -> None:
+    """Cap contact-form submissions per IP (the route sends real email)."""
+    _check_rate_limit(f"contact:{_client_ip(request)}", settings.CONTACT_RATE_LIMIT)

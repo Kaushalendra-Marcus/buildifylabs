@@ -7,7 +7,9 @@ from app.config import get_settings
 
 settings = get_settings()
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+# Must match the real credential route (/auth/signin), otherwise Swagger's
+# Authorize dialog posts to a 404 and the docs flow looks broken.
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/signin")
 
 
 def decode_token(token: str):

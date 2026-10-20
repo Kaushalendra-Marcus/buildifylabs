@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from uuid import UUID
 from typing import Optional
 from pydantic import field_validator
@@ -6,11 +6,13 @@ from pydantic import field_validator
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    # bcrypt only uses the first 72 bytes; cap the input so a multi-megabyte
+    # password cannot be used to burn CPU before that truncation happens.
+    password: str = Field(min_length=1, max_length=128)
 
 
 class GoogleAuthRequest(BaseModel):
-    token: str
+    token: str = Field(min_length=1, max_length=8192)
 
 
 class GuestAuthRequest(BaseModel):
@@ -18,7 +20,11 @@ class GuestAuthRequest(BaseModel):
     # `device_fingerprint IS NULL`, which matches every row that has a NULL
     # fingerprint (multiple such rows are legal), crashing the query with
     # MultipleResultsFound.
-    device_id: str
+    #
+    # The id is a bearer credential for the guest account, so bound its size
+    # (unbounded input would be stored and indexed verbatim) and require enough
+    # entropy to make guessing impractical. The frontend sends a UUID v4.
+    device_id: str = Field(min_length=8, max_length=128)
 
 
 class TokenResponse(BaseModel):
@@ -28,7 +34,7 @@ class TokenResponse(BaseModel):
 
 
 class RefreshTokenRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str = Field(min_length=1, max_length=8192)
 
 
 class AuthUserResponse(BaseModel):
@@ -53,8 +59,8 @@ class ForgotPasswordRequest(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
-    token: str
-    new_password: str
+    token: str = Field(min_length=1, max_length=8192)
+    new_password: str = Field(min_length=8, max_length=128)
 
     @field_validator("new_password")
     @classmethod

@@ -21,7 +21,11 @@ from app.services.auth.token_service import (
     create_refresh_token,
     verify_refresh_token,
 )
-from app.middlewares.auth_rate_limiter import login_rate_limit, verify_email_rate_limit
+from app.middlewares.auth_rate_limiter import (
+    guest_rate_limit,
+    login_rate_limit,
+    verify_email_rate_limit,
+)
 from app.schemas.auth import GuestAuthRequest
 from app.schemas.auth import GoogleAuthRequest
 from app.schemas.auth import TokenResponse
@@ -55,7 +59,11 @@ async def signin(data: LoginRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
-@router.post("/guest", response_model=AuthResponse)
+@router.post(
+    "/guest",
+    response_model=AuthResponse,
+    dependencies=[Depends(guest_rate_limit)],
+)
 async def guest(data: GuestAuthRequest, db: AsyncSession = Depends(get_db)):
     return await create_guest_user(db, data.device_id)
 

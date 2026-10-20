@@ -20,6 +20,10 @@ async def send_verification_email(to_email: str, token: str):
         username=settings.SMTP_USER,
         password=settings.SMTP_PASS,
         start_tls=True,
+        # A dead SMTP host must not hold the request open for aiosmtplib's
+        # 60-second default. Signup already degrades gracefully on failure;
+        # contact-form callers get a timely 500 instead of a hung request.
+        timeout=10,
     )
 
 
@@ -41,6 +45,10 @@ async def send_password_reset_email(to_email: str, token: str):
         username=settings.SMTP_USER,
         password=settings.SMTP_PASS,
         start_tls=True,
+        # A dead SMTP host must not hold the request open for aiosmtplib's
+        # 60-second default. Signup already degrades gracefully on failure;
+        # contact-form callers get a timely 500 instead of a hung request.
+        timeout=10,
     )
 
 
@@ -59,4 +67,8 @@ async def send_contact_email(name: str, email: str, message: str):
         username=settings.SMTP_USER,
         password=settings.SMTP_PASS,
         start_tls=True,
+        # A dead SMTP host must not hold the request open for aiosmtplib's
+        # 60-second default. Signup already degrades gracefully on failure;
+        # contact-form callers get a timely 500 instead of a hung request.
+        timeout=10,
     )

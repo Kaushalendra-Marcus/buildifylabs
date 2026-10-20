@@ -37,6 +37,9 @@ class Settings(BaseSettings):
         return v
 
     DATABASE_URL: str = Field(...)
+    # Neon requires TLS; a local Postgres in Docker usually does not. Set
+    # DATABASE_SSL=false for local/dev databases instead of editing code.
+    DATABASE_SSL: bool = True
     SQL_ECHO: bool = False
 
     # These back features that are planned but not wired into any route yet
@@ -157,6 +160,22 @@ class Settings(BaseSettings):
     JWT_SECRET: str = Field(...)
     JWT_ALGORITHM: str = "HS256"
 
+    @field_validator("JWT_ALGORITHM")
+    @classmethod
+    def only_hmac_algorithms(cls, v: str) -> str:
+        # Never allow "none" or an asymmetric algorithm here: every token in
+        # this app is signed and verified with the same shared secret, and an
+        # env typo must fail at boot instead of silently weakening auth.
+        allowed = {"HS256", "HS384", "HS512"}
+        if v not in allowed:
+            raise ValueError(f"JWT_ALGORITHM must be one of {sorted(allowed)}")
+        return v
+
+    # "production" enables production-only response headers (HSTS) and is the
+    # signal for deployment checks. Defaults to development so local runs and
+    # tests need no extra env.
+    ENVIRONMENT: str = "development"
+
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
@@ -187,6 +206,16 @@ class Settings(BaseSettings):
 
     LOGIN_RATE_LIMIT: int = 5
     VERIFY_EMAIL_RATE_LIMIT: int = 3
+    # Unauthenticated account-creating / email-sending endpoints. Without
+    # these, /auth/guest can mint unlimited accounts and /contact can be used
+    # to relay spam through the app's SMTP credentials.
+    GUEST_RATE_LIMIT: int = 10
+    CONTACT_RATE_LIMIT: int = 5
+
+    # Set to true only when the app is behind a trusted reverse proxy / load
+    # balancer that overwrites X-Forwarded-For. Otherwise a client could spoof
+    # the header and dodge per-IP rate limits.
+    TRUST_PROXY_HEADERS: bool = False
 
     # Where uploaded raw files are persisted (Phase B3 storage backend, gap #4):
     # local disk for dev; swap storage.py for an object-store backend in prod.

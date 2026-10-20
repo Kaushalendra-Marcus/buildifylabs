@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import time
+from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 from uuid import UUID
@@ -320,14 +321,32 @@ async def chat_stream(
     task = asyncio.create_task(run())
 
     async def event_stream():
-        while True:
-            item = await queue.get()
-            if item is None:
-                break
-            yield f"data: {json.dumps(item, default=str)}\n\n"
-        await task
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield f"data: {json.dumps(item, default=str)}\n\n"
+        finally:
+            # The client disconnected (or the response was closed early).
+            # Stop the background pipeline instead of paying for an LLM call
+            # and writing a QueryLog for an answer nobody can receive.
+            if not task.done():
+                task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            # Without this, nginx / App Runner buffers SSE frames and the
+            # user sees nothing until the whole answer is ready.
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 class _Sentinel:

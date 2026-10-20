@@ -1,6 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from app.config import get_settings
+from app.db.database import check_db_connection
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
@@ -38,6 +39,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Baseline browser-hardening headers for every response.
+
+    The API only returns JSON/SSE, but these also cover /docs, /redoc and
+    error pages. A CSP is deliberately left to the edge/proxy because the
+    Swagger UI ships inline scripts and would need nonces.
+    """
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
+    )
+    if settings.ENVIRONMENT.lower() == "production":
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
+
 # Quota 429s carry a top-level body of {"detail": ..., "contact_form"?} per the
 # specs/02 §3 contract, so they can't ride the default HTTPException(detail=...)
 # shape; route them through this handler instead (see rate_limiter.py).
@@ -59,5 +82,19 @@ def root():
 
 
 @app.get("/health")
-def health_check():
+async def health_check():
+    """Liveness + DB readiness probe.
+
+    The old check returned 200 without touching the database, so a deploy
+    with a broken DATABASE_URL stayed "healthy" and kept serving 500s. A
+    failed probe now returns 503 so the load balancer can pull the instance.
+    """
+    try:
+        await check_db_connection()
+    except Exception:
+        logger.exception("Health check database probe failed")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unavailable", "version": settings.VERSION},
+        )
     return {"status": "ok", "version": settings.VERSION}
