@@ -136,6 +136,10 @@
   border-top: 1px solid var(--border-subtle);
 }
 
+.app-shell__sidebar-footer > .plan-badge {
+  align-self: flex-start;
+}
+
 .app-shell__expand-fab {
   border-radius: 999px;
   padding: 8px 14px 8px 11px;
@@ -248,6 +252,35 @@
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   filter: blur(6px);
   pointer-events: none;
+}
+
+/* Dark theme: keep the hero deep and the type high-contrast. */
+:root[data-theme='dark'] .overview__hero {
+  background:
+    radial-gradient(520px 280px at 92% -20%, rgba(120, 72, 48, 0.32) 0%, transparent 64%),
+    radial-gradient(620px 340px at 8% -10%, rgba(109, 77, 242, 0.28) 0%, transparent 66%),
+    var(--surface-card);
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--border-subtle));
+  box-shadow: 0 24px 60px -40px rgba(0, 0, 0, 0.8);
+}
+
+:root[data-theme='dark'] .overview__hero::after {
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .overview__hero {
+    background:
+      radial-gradient(520px 280px at 92% -20%, rgba(120, 72, 48, 0.32) 0%, transparent 64%),
+      radial-gradient(620px 340px at 8% -10%, rgba(109, 77, 242, 0.28) 0%, transparent 66%),
+      var(--surface-card);
+    border-color: color-mix(in srgb, var(--accent) 20%, var(--border-subtle));
+    box-shadow: 0 24px 60px -40px rgba(0, 0, 0, 0.8);
+  }
+
+  :root:not([data-theme]) .overview__hero::after {
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+  }
 }
 
 .overview__hero > * {
@@ -487,6 +520,17 @@
   font-size: 34px;
   font-weight: 500;
   letter-spacing: -0.04em;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.activity-page__card-unit {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-muted);
 }
 
 .activity-page__meter {
@@ -1179,12 +1223,20 @@
     display: none;
   }
 
-  .chat-header__new-chat {
-    padding: 8px 13px;
+  /* Nav-collapsed rule in chat-workspace.css re-shows the wordmark; keep the
+     mobile header to one line (logo only) so "New chat" never wraps. */
+  .chat-header .chat-header__brand-text,
+  .app-shell--nav-collapsed .chat-header__brand-text {
+    display: none;
   }
 
-  .chat-header__new-chat span {
-    display: none;
+  .chat-header__new-chat {
+    padding: 8px 13px;
+    white-space: nowrap;
+  }
+
+  .chat-header__new-chat svg {
+    flex: none;
   }
 
   .message-stream__list {
@@ -1229,6 +1281,11 @@
   .composer__row {
     border-radius: 19px;
     padding: 7px 7px 7px 14px;
+  }
+
+  .composer__input {
+    font-size: 14px;
+    padding: 6px 0;
   }
 
   .composer__icon-button {

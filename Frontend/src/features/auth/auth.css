@@ -31,12 +31,26 @@
     var(--surface-page);
 }
 
+:root[data-theme='dark'] .auth-split {
+  border-color: var(--border-subtle);
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.35),
+    0 36px 80px -40px rgba(0, 0, 0, 0.7);
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) .auth-page {
     background:
       radial-gradient(900px 620px at 88% -8%, #2a2147 0%, transparent 62%),
       radial-gradient(760px 520px at -6% 108%, #31221d 0%, transparent 58%),
       var(--surface-page);
+  }
+
+  :root:not([data-theme]) .auth-split {
+    border-color: var(--border-subtle);
+    box-shadow:
+      0 2px 4px rgba(0, 0, 0, 0.35),
+      0 36px 80px -40px rgba(0, 0, 0, 0.7);
   }
 }
 
@@ -494,17 +508,6 @@
   }
 
   .auth-art__caption {
-    inset: auto 16px 14px 16px;
-    padding: 14px 18px;
-    border-radius: 16px;
-  }
-
-  .auth-art__title {
-    margin-bottom: 6px;
-    font-size: 18px;
-  }
-
-  .auth-art__points {
     display: none;
   }
 
