@@ -984,6 +984,18 @@ export function LandingPage() {
 
       {/* ---------- FOOTER ---------- */}
       <footer className="bl-footer">
+        {/* Shared mascot scene (public/login.png) — the same art as the auth
+            screen, shown whole at its natural ratio so nothing is cropped. */}
+        <figure className="bl-footer__scene">
+          <img
+            src="/login.png"
+            alt="The BuildifyLabs fox working on a laptop beside books labelled Graph, Sales, and Statics"
+            width={1536}
+            height={1024}
+            loading="lazy"
+          />
+        </figure>
+
         <div className="bl-footer__grid">
           <div>
             <p className="bl-footer__brand">

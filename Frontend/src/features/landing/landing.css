@@ -2511,12 +2511,30 @@
   padding-bottom: 32px;
 }
 
+/* Closing scene: the shared fox illustration (public/login.png) shown whole,
+ * at its natural 3:2 ratio — no cropping or zooming. `height: auto` is
+ * required because the width/height attributes otherwise pin the height and
+ * stretch the art when only the width is fluid. */
+.bl-footer__scene {
+  margin: 0;
+  border: 1px solid var(--bl-line);
+  border-radius: 24px;
+  overflow: hidden;
+  background: var(--bl-surface-2);
+  box-shadow: var(--bl-shadow-sm);
+}
+
+.bl-footer__scene img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .bl-footer__grid {
   display: grid;
   grid-template-columns: minmax(0, 1.8fr) repeat(3, minmax(0, 1fr));
   gap: 36px;
   padding: 34px 0 44px;
-  border-top: 1px solid var(--bl-line);
 }
 
 .bl-footer__brand {
@@ -2992,6 +3010,8 @@
     margin-top: 46px;
   }
 
+  /* The full illustration stays visible on phones too — height: auto keeps
+     its natural ratio instead of turning it into a letterbox strip. */
   .bl-footer__grid {
     grid-template-columns: 1fr;
     gap: 30px;

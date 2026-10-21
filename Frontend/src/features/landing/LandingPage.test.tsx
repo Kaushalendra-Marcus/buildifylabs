@@ -85,6 +85,18 @@ describe('LandingPage', () => {
     expect(art?.getAttribute('src')).toBe('/logo.png')
   })
 
+  it('closes the page with the mascot scene above the footer links', () => {
+    const { container } = renderLanding()
+    const scene = container.querySelector<HTMLImageElement>('.bl-footer__scene img')
+    expect(scene?.getAttribute('src')).toBe('/login.png')
+    expect(scene?.getAttribute('alt')).toMatch(/fox/i)
+    // The illustration sits before the footer link columns, inside the footer.
+    const footer = container.querySelector('.bl-footer')
+    expect(footer?.firstElementChild?.classList.contains('bl-footer__scene')).toBe(
+      true,
+    )
+  })
+
   it('offers a dark/light switch in the nav that flips the stored theme', async () => {
     const user = userEvent.setup()
     const { container } = renderLanding()
@@ -169,19 +181,20 @@ describe('LandingPage', () => {
 
   it('links the nav to the product sections and auth screens', () => {
     renderLanding()
-    expect(screen.getByRole('link', { name: 'Product' })).toHaveAttribute(
+    const nav = screen.getByRole('navigation', { name: 'Primary' })
+    expect(within(nav).getByRole('link', { name: 'Product' })).toHaveAttribute(
       'href',
       '#product',
     )
-    expect(screen.getByRole('link', { name: 'How it works' })).toHaveAttribute(
+    expect(within(nav).getByRole('link', { name: 'How it works' })).toHaveAttribute(
       'href',
       '#how',
     )
-    expect(screen.getByRole('link', { name: 'Trust' })).toHaveAttribute(
+    expect(within(nav).getByRole('link', { name: 'Trust' })).toHaveAttribute(
       'href',
       '#trust',
     )
-    expect(screen.getAllByRole('link', { name: 'Log in' })[0]).toHaveAttribute(
+    expect(within(nav).getByRole('link', { name: 'Log in' })).toHaveAttribute(
       'href',
       '/signin',
     )
