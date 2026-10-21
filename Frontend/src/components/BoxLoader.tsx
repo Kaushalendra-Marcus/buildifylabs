@@ -1,9 +1,8 @@
 /**
  * BoxLoader — the Uiverse 3D assembling-blocks figure (Admin12121),
  * namespaced to `.bl-boxloader*` (the original's bare `.loader`/`.box`
- * classes would collide with app styles) and re-skinned to the workspace
- * intelligence palette: amber blocks (#ffbf48 → #e89b2e) on the card
- * surface. Pure CSS, no JS.
+ * classes would collide with app styles) and re-skinned to the shared
+ * theme accent palette on the card surface. Pure CSS, no JS.
  */
 import type { CSSProperties } from 'react';
 import './BoxLoader.css';

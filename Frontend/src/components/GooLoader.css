@@ -2,7 +2,7 @@
  * to `.goo-loader`, with prefixed keyframes. Size comes from `--goo-size`
  * (the snippet's `--size`). The `colorize` hue animation is intentionally
  * omitted: it would push this amber pair through purple (see GooLoader.tsx).
- * Colors are the platform amber/ember pair — no purple anywhere. */
+ * Colors come from the shared theme accent pair — no purple anywhere. */
 .goo-loader {
   --color-one: var(--accent);
   --color-two: var(--accent-strong);
