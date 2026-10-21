@@ -10,7 +10,7 @@
 
   [![Frontend](https://img.shields.io/badge/frontend-React%2019%20%2B%20Vite-6d4df2?style=flat-square)](#tech-stack)
   [![Backend](https://img.shields.io/badge/backend-FastAPI%20%2B%20PostgreSQL-0d9488?style=flat-square)](#tech-stack)
-  [![Tests](https://img.shields.io/badge/frontend%20tests-200%20passing-2f8a63?style=flat-square)](#testing--quality)
+  [![Tests](https://img.shields.io/badge/frontend%20tests-200%20passing-2f8a63?style=flat-square)](#testing-and-quality)
   [![CI](https://img.shields.io/badge/CI-lint%20%C2%B7%20test%20%C2%B7%20build-17141f?style=flat-square)](.github/workflows/ci.yml)
 </div>
 
@@ -25,7 +25,7 @@ It is built around one rule: **an answer is only useful if you can check it.**
 Every normal answer includes the query behind it, a confidence signal, the
 sources or rows used, and a way to flag anything that looks wrong.
 
-![BuildifyLabs landing page](screenshots/ui-landing.png)
+![BuildifyLabs landing page](docs/screenshots/ui-landing.png)
 
 ## Table of contents
 
@@ -38,7 +38,7 @@ sources or rows used, and a way to flag anything that looks wrong.
 - [Getting started](#getting-started)
 - [Environment reference](#environment-reference)
 - [API reference](#api-reference)
-- [Testing and quality](#testing--quality)
+- [Testing and quality](#testing-and-quality)
 - [Deployment](#deployment)
 - [Design system](#design-system)
 - [Security and privacy](#security-and-privacy)
@@ -78,7 +78,7 @@ Email/password, Google Identity Services, and guest entry are supported from the
 same split editorial layout. Email verification and password reset complete the
 flow. Guest sessions can ask questions but cannot upload files.
 
-![BuildifyLabs sign-in](screenshots/ui-signin.png)
+![BuildifyLabs sign-in](docs/screenshots/ui-signin.png)
 
 ### Overview
 
@@ -86,7 +86,7 @@ flow. Guest sessions can ask questions but cannot upload files.
 a getting-started checklist, recent insights, and one-click quick asks that
 pre-fill the chat composer.
 
-![BuildifyLabs overview](screenshots/ui-overview.png)
+![BuildifyLabs overview](docs/screenshots/ui-overview.png)
 
 ### Chat workspace
 
@@ -102,7 +102,7 @@ pre-fill the chat composer.
 Both the global navigation and the chat history rail can be hidden
 (`Ctrl/⌘+Shift+B` and `Ctrl/⌘+B`) for a full-width focus mode.
 
-![BuildifyLabs chat answer](screenshots/ui-chat.png)
+![BuildifyLabs chat answer](docs/screenshots/ui-chat.png)
 
 ### Datasets
 
@@ -216,9 +216,9 @@ all of the user's PDFs.
 │ └────────────────────────────────────────────────────────────────┘ │
 └───────────────┬──────────────────────────────┬─────────────────────┘
                 │                              │
-      PostgreSQL (Neon) + pgvector        Groq / HuggingFace
+      PostgreSQL (Neon)                   Groq / HuggingFace
       users · files · query logs          Tavily / Firecrawl / Wikipedia
-      document chunks · embeddings        Yahoo Finance / FRED
+      keyword-retrieved document chunks   Yahoo Finance / FRED
 ```
 
 ### Request lifecycle
@@ -276,8 +276,8 @@ SSE stream, which keeps scripted clients and tests simple.
 | Data | CSV/XLSX parser, defensive canonicalization, SQL executor, PDF parser, per-user storage |
 | AI pipeline | `app/services/llm/pipeline/*` — prompting, routing, SQL generation, grounding, visuals, figures, judge, guarantee, history, run loop |
 | Evidence | Tavily / Firecrawl / Wikipedia / Yahoo Finance / FRED adapters, ranking, context budget, map-reduce summarizer, Redis-or-memory cache |
-| Persistence | Async SQLAlchemy models, Alembic migrations, pgvector document chunks |
-| Database | PostgreSQL via Neon (pgvector extension), Alembic migrations |
+| Persistence | Async SQLAlchemy models, Alembic migrations, per-user dataset tables, keyword-retrieved document chunks |
+| Database | PostgreSQL via Neon, Alembic migrations |
 
 ## Tech stack
 
@@ -286,7 +286,7 @@ SSE stream, which keeps scripted clients and tests simple.
 | Frontend | React 19, TypeScript, Vite 8, React Router 7, Zustand 5, Recharts 3, lucide-react, plain CSS |
 | UI testing | Vitest 4, Testing Library, jsdom, user-event |
 | Backend | FastAPI, Uvicorn, Pydantic v2 / pydantic-settings, async SQLAlchemy 2, asyncpg |
-| Database | PostgreSQL (Neon), Alembic, pgvector |
+| Database | PostgreSQL (Neon), Alembic |
 | AI | Groq (multi-key rotation), HuggingFace fallback, Tavily + Firecrawl web evidence |
 | Auth | Stateless JWT (`python-jose`), bcrypt (`passlib`), Google Identity Services |
 | Email | `aiosmtplib` SMTP for verification, reset, and contact forms |
@@ -334,7 +334,7 @@ buildifylabs/
 │   ├── Dockerfile
 │   └── requirements*.txt
 ├── specs/                       # product + engineering specs
-├── screenshots/                 # UI references and e2e captures
+├── docs/screenshots/            # README product screenshots
 └── .github/workflows/ci.yml
 ```
 
@@ -344,10 +344,10 @@ buildifylabs/
 
 - **Python 3.12+** (CI uses 3.12)
 - **Node 22+** (CI uses 22)
-- **PostgreSQL** with the `vector` extension enabled:
-  ```sql
-  CREATE EXTENSION IF NOT EXISTS vector;
-  ```
+- **PostgreSQL** (Neon works) whose role can create the `vector` extension.
+  The document-migration chain creates it automatically with
+  `CREATE EXTENSION IF NOT EXISTS vector;`; if your provider requires it up
+  front, run that statement once before `alembic upgrade head`.
 - Optional: Redis for shared live-web caching, Groq key(s), Google OAuth client
   ID, SMTP credentials, Firecrawl/Tavily keys
 
@@ -380,9 +380,9 @@ curl http://localhost:8000/health
 of pretending the service is healthy. Interactive API docs are at
 `http://localhost:8000/docs`.
 
-> The repo's `.venv` may point at a newer Python than CI. If `pytest` is missing,
-> install `requirements-dev.txt` into a fresh 3.12 virtualenv; do not assume the
-> system Python has pandas/pypdf/groq installed.
+> If `pytest` is missing, the virtualenv is using the wrong interpreter or has
+> only runtime dependencies. Recreate it with Python 3.12 and install
+> `requirements-dev.txt`.
 
 ### 2. Frontend
 
@@ -658,7 +658,7 @@ Backend and frontend contributor notes live in `Backend/CLAUDE.md` and
 | Symptom | Likely cause / fix |
 |---|---|
 | `/health` returns `503` | Database unreachable or migrations not applied; check `DATABASE_URL`, `DATABASE_SSL`, and run `alembic upgrade head` |
-| `relation "vector" does not exist` | Enable pgvector: `CREATE EXTENSION IF NOT EXISTS vector;` |
+| `extension "vector" is not available` during migration | The database provider does not expose pgvector; enable it in the provider dashboard or use a Postgres instance that supports it |
 | Browser CORS error | `ALLOWED_ORIGIN` must exactly match the frontend origin, including port |
 | Google button missing | `VITE_GOOGLE_CLIENT_ID` is unset; the UI intentionally hides Google sign-in |
 | “Streaming is not supported” | The response was not a readable stream; verify `/chat/stream` is reachable and not buffered by a proxy |
