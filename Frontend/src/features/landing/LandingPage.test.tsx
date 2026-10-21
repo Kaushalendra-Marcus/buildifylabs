@@ -1,50 +1,16 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { useThemeStore } from '../../lib/theme-store'
 import { LandingPage } from './LandingPage'
 
 beforeEach(() => {
   localStorage.clear()
+  sessionStorage.clear()
   useThemeStore.setState({ theme: 'system' })
   document.documentElement.removeAttribute('data-theme')
 })
-
-afterEach(() => {
-  if (hadMatchMedia) {
-    Object.defineProperty(window, 'matchMedia', {
-      writable: true,
-      configurable: true,
-      value: originalMatchMedia,
-    })
-  } else {
-    // @ts-expect-error jsdom has no matchMedia by default — restore that.
-    delete window.matchMedia
-  }
-})
-
-// jsdom ships no matchMedia; the page guards its absence. These tests
-// install one per-test and always restore the absence above.
-let originalMatchMedia: typeof window.matchMedia | undefined;
-let hadMatchMedia = false;
-
-function mockSmallScreen(small: boolean) {
-  if (!hadMatchMedia && typeof window.matchMedia === 'function') {
-    originalMatchMedia = window.matchMedia;
-    hadMatchMedia = true;
-  }
-  Object.defineProperty(window, 'matchMedia', {
-    writable: true,
-    configurable: true,
-    value: vi.fn().mockImplementation((query: string) => ({
-      matches: query === '(max-width: 700px)' ? small : false,
-      media: query,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    })),
-  });
-}
 
 function renderLanding() {
   return render(
@@ -52,6 +18,7 @@ function renderLanding() {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/signup" element={<p>Signup screen</p>} />
+        <Route path="/signin" element={<p>Signin screen</p>} />
       </Routes>
     </MemoryRouter>,
   )
@@ -67,17 +34,21 @@ describe('LandingPage', () => {
     expect(
       screen.getByRole('heading', { name: /not a black box/i }),
     ).toBeInTheDocument()
+    const nav = screen.getByRole('navigation', { name: 'Primary' })
+    expect(within(nav).getByRole('link', { name: /start free/i })).toHaveAttribute(
+      'href',
+      '/signup',
+    )
   })
 
   it('carries a typed question to signup on ask', async () => {
-    sessionStorage.clear()
     const user = userEvent.setup()
     renderLanding()
     await user.type(
       screen.getByRole('textbox', { name: 'Ask a business question' }),
       'Why did revenue drop last week?',
     )
-    await user.click(screen.getByRole('button', { name: /ask/i }))
+    await user.click(screen.getByRole('button', { name: /^ask$/i }))
     expect(sessionStorage.getItem('bl-pending-question')).toBe(
       'Why did revenue drop last week?',
     )
@@ -104,14 +75,14 @@ describe('LandingPage', () => {
     }
   })
 
-  it('reveals scroll sections and shows the fox CTA art', () => {
+  it('reveals scroll sections and shows the brand art in the CTA', () => {
     const { container } = renderLanding()
     // No IntersectionObserver in jsdom — everything reveals immediately.
     for (const el of container.querySelectorAll('.bl-reveal')) {
       expect(el).toHaveClass('is-visible')
     }
-    const art = container.querySelector<HTMLImageElement>('.bl-cta__art img')
-    expect(art?.getAttribute('src')).toBe('/login.png')
+    const art = container.querySelector<HTMLImageElement>('.bl-cta__mascot img')
+    expect(art?.getAttribute('src')).toBe('/logo.png')
   })
 
   it('offers a dark/light switch in the nav that flips the stored theme', async () => {
@@ -124,7 +95,7 @@ describe('LandingPage', () => {
     expect(['light', 'dark']).toContain(useThemeStore.getState().theme)
   })
 
-  it('tabs the hero demo between four different example layouts', async () => {
+  it('tabs the example answers between four different layouts', async () => {
     const user = userEvent.setup()
     renderLanding()
     const tabs = screen.getAllByRole('tab')
@@ -134,104 +105,85 @@ describe('LandingPage', () => {
     // Diagnose-a-drop: metric + bars + data table.
     expect(within(panel).getByText('Why did revenue drop last week?')).toBeInTheDocument()
     expect(within(panel).getByText('WoW')).toBeInTheDocument()
-    expect(panel.querySelector('.bl-mock__table')).not.toBeNull()
+    expect(panel.querySelector('.bl-table')).not.toBeNull()
 
     // Head-to-head comparison: versus cards + share bars, no table.
     await user.click(screen.getByRole('tab', { name: 'Region compare' }))
     expect(within(panel).getByText('Compare sales by region')).toBeInTheDocument()
     expect(within(panel).getByText(/east leads the quarter/i)).toBeInTheDocument()
     expect(within(panel).getByLabelText('Revenue share by region')).toBeInTheDocument()
-    expect(panel.querySelector('.bl-mock__table')).toBeNull()
+    expect(panel.querySelector('.bl-table')).toBeNull()
 
-    // Forecast: full chart with axes, values, and months — no table.
+    // Forecast: full trend chart with months and points, no table.
     await user.click(screen.getByRole('tab', { name: 'Forecast' }))
     expect(within(panel).getByText('Forecast next quarter')).toBeInTheDocument()
     expect(within(panel).getByText(/pace suggests/i)).toBeInTheDocument()
     expect(within(panel).getByText('Possible factors')).toBeInTheDocument()
-    const svg = panel.querySelector('.bl-mock__spark-svg')
+    const svg = panel.querySelector('.bl-spark')
     expect(svg).not.toBeNull()
     const svgText = svg?.textContent ?? ''
-    for (const label of ['$51.3k', '$58.2k', '$66.0k', 'Aug', 'Dec']) {
+    for (const label of ['Aug', 'Oct', 'Jan']) {
       expect(svgText).toContain(label)
     }
-    expect(svg?.querySelectorAll('.bl-mock__spark-dot').length).toBe(5)
-    expect(panel.querySelector('.bl-mock__table')).toBeNull()
+    expect(svg?.querySelectorAll('.bl-spark__point').length).toBe(6)
+    expect(panel.querySelector('.bl-table')).toBeNull()
 
-    // Channel mix: donut + bars + legend, no table.
+    // Channel mix: donut + legend, no table.
     await user.click(screen.getByRole('tab', { name: 'Channel mix' }))
     expect(within(panel).getByText('Where do sales come from?')).toBeInTheDocument()
     expect(within(panel).getByLabelText('Sales by channel')).toBeInTheDocument()
-    expect(panel.querySelector('.bl-mock__donut')).not.toBeNull()
-    expect(panel.querySelector('.bl-mock__table')).toBeNull()
+    expect(panel.querySelector('.bl-donut')).not.toBeNull()
+    expect(panel.querySelector('.bl-table')).toBeNull()
   })
 
-  it('shows numbers on hover across every demo visual', async () => {
+  it('shows numbers on hover across every example visual', async () => {
     const user = userEvent.setup()
     renderLanding()
     const panel = screen.getByRole('tabpanel')
 
     // Bars carry week + revenue tips.
-    const barTips = [...panel.querySelectorAll('.bl-mock__bar-col[data-tip]')].map((el) =>
+    const barTips = [...panel.querySelectorAll('.bl-bar[data-tip]')].map((el) =>
       el.getAttribute('data-tip'),
     )
     expect(barTips).toContain('W3 · $59.1k')
 
     // Share rows carry region + revenue + share tips.
     await user.click(screen.getByRole('tab', { name: 'Region compare' }))
-    const shareTip = panel.querySelector('.bl-mock__share-row[data-tip]')
+    const shareTip = panel.querySelector('.bl-share__row[data-tip]')
     expect(shareTip?.getAttribute('data-tip')).toMatch(/East · \$51\.3k · 34%/)
 
     // Forecast points carry month + value + regime titles.
     await user.click(screen.getByRole('tab', { name: 'Forecast' }))
-    const pointTitles = [
-      ...panel.querySelectorAll('.bl-mock__point title'),
-    ].map((el) => el.textContent)
+    const pointTitles = [...panel.querySelectorAll('.bl-spark__point title')].map(
+      (el) => el.textContent,
+    )
     expect(pointTitles).toContain('Oct · $58.2k · projected')
 
     // Donut segments carry channel + share + revenue titles.
     await user.click(screen.getByRole('tab', { name: 'Channel mix' }))
-    const segTitles = [
-      ...panel.querySelectorAll('.bl-mock__donut-seg title'),
-    ].map((el) => el.textContent)
+    const segTitles = [...panel.querySelectorAll('.bl-donut__seg title')].map(
+      (el) => el.textContent,
+    )
     expect(segTitles).toContain('Online · 46% · $69.0k')
   })
 
-  it('ignores scroll-driving on small screens where the pin runway is static', async () => {
-    mockSmallScreen(true)
-    const { container } = renderLanding()
-    const pin = container.querySelector('.bl-demo-pin') as HTMLElement
-    vi.spyOn(pin, 'getBoundingClientRect').mockReturnValue({
-      top: -1900,
-      height: window.innerHeight + 2000,
-    } as DOMRect)
-    window.dispatchEvent(new Event('scroll'))
-    // Let any rAF-driven update run — the first tab must stay put.
-    await waitFor(() =>
-      expect(
-        screen.getAllByRole('tab')[0],
-      ).toHaveAttribute('aria-selected', 'true'),
+  it('links the nav to the product sections and auth screens', () => {
+    renderLanding()
+    expect(screen.getByRole('link', { name: 'Product' })).toHaveAttribute(
+      'href',
+      '#product',
     )
-    expect(screen.getByRole('tab', { name: 'Channel mix' })).toHaveAttribute(
-      'aria-selected',
-      'false',
+    expect(screen.getByRole('link', { name: 'How it works' })).toHaveAttribute(
+      'href',
+      '#how',
     )
-    expect(screen.getByText('Tap an example')).toBeInTheDocument()
-  })
-
-  it('scroll-drives the demo tabs on wide screens', async () => {
-    mockSmallScreen(false)
-    const { container } = renderLanding()
-    const pin = container.querySelector('.bl-demo-pin') as HTMLElement
-    vi.spyOn(pin, 'getBoundingClientRect').mockReturnValue({
-      top: -1900,
-      height: window.innerHeight + 2000,
-    } as DOMRect)
-    window.dispatchEvent(new Event('scroll'))
-    await waitFor(() =>
-      expect(screen.getByRole('tab', { name: 'Channel mix' })).toHaveAttribute(
-        'aria-selected',
-        'true',
-      ),
+    expect(screen.getByRole('link', { name: 'Trust' })).toHaveAttribute(
+      'href',
+      '#trust',
+    )
+    expect(screen.getAllByRole('link', { name: 'Log in' })[0]).toHaveAttribute(
+      'href',
+      '/signin',
     )
   })
 })

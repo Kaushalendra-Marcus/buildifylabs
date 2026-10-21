@@ -1,0 +1,23 @@
+{
+  "mcp": {
+    "servers": {
+      "rea": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "rea-agents@latest",
+          "mcp"
+        ]
+      },
+      "firecrawl": {
+        "type": "remote",
+        "url": "https://mcp.firecrawl.dev/v2/mcp",
+        "oauth": false,
+        "headers": {
+          "Authorization": "Bearer fc-6d0ea394d95d423eab0452c6de2be2ce"
+        }
+      }
+    }
+  }
+}

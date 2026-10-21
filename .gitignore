@@ -23,3 +23,5 @@ build/
 
 # nightly eval output (regenerated, never committed)
 Backend/evals/results/
+
+/.opencode
