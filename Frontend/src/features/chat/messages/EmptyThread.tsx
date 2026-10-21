@@ -18,6 +18,20 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useChatStore } from '../chat-store';
 import { UploadPopover } from '../UploadPopover';
 
+/** Starter questions shown in an empty thread. Clicking one only pre-fills
+ *  the composer (the user still presses Send), so no request is fired here. */
+const STARTER_QUESTIONS = [
+  'Why did revenue change last week?',
+  'Compare this quarter with the last one',
+  'Which customers are driving the most growth?',
+] as const;
+
+function fillComposer(question: string) {
+  window.dispatchEvent(
+    new CustomEvent<string>('bl:ask-suggestion', { detail: question }),
+  );
+}
+
 export function EmptyThread() {
   const { user } = useAuth();
   const isGuest = user?.plan === 'guest';
@@ -55,13 +69,29 @@ export function EmptyThread() {
   const questionInvite = (
     <div className="empty-thread">
       <span className="empty-thread__icon">
-        <Sparkles size={22} aria-hidden="true" />
+        <Sparkles size={26} aria-hidden="true" />
       </span>
+      <p className="empty-thread__eyebrow">Buildify Intelligence</p>
       <p className="empty-thread__title">Ask anything about your business data</p>
       <p className="empty-thread__body">
         Ask a question in plain English and get the right chart, the query
         behind it, and possible factors — all traceable.
       </p>
+      <div className="empty-thread__starters" aria-label="Example questions">
+        <p className="empty-thread__starters-label">Try asking</p>
+        <div className="empty-thread__starters-row">
+          {STARTER_QUESTIONS.map((question) => (
+            <button
+              key={question}
+              type="button"
+              className="empty-thread__chip"
+              onClick={() => fillComposer(question)}
+            >
+              {question}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 

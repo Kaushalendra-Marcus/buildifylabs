@@ -3,63 +3,66 @@
  *
  * CSS approach (F0 decision): plain CSS with custom-property tokens; no
  * preprocessor or framework, applied consistently app-wide. The token ROLE
- * names below are the contract; the exact hex/HSL/spacing VALUES are
- * placeholders pending Figma reconciliation (specs/14 §7 note) — change the
- * values here, never the role names.
+ * names below are the contract; the exact hex/HSL/spacing VALUES are tuned to
+ * the current landing page design language (soft lilac surfaces, ink type,
+ * one violet accent warmed by peach highlights).
  *
- * Palette: warm neutral surfaces with ONE brand accent — amber/ember
- * (#b45309 / #9a3412 on light, #ffbf48 / #be4a1d on dark). This is the
- * same palette used by the landing page and the product loaders; every
- * feature inherits it from here instead of re-declaring its own theme.
+ * Palette: warm lilac neutrals + ONE brand accent (#6d4df2 on light,
+ * #a78bfa on dark). Every feature inherits it from here instead of
+ * re-declaring its own theme.
  *
  * Roles (specs/14 §7): surface-page|card|raised, text-primary|secondary|
- * muted, accent, success|danger|warning, and a type scale with nothing
- * below 12px.
+ * muted, accent, success|danger|warning, radii, elevation and a type scale
+ * with nothing below 12px.
  */
 :root {
-  /* Surfaces — three elevation steps (warm paper, white cards) */
-  --surface-page: #fafaf9;
+  /* Surfaces — soft lilac paper, white cards */
+  --surface-page: #f7f5fb;
   --surface-card: #ffffff;
   --surface-raised: #ffffff;
   --elevation-card:
-    0 1px 2px rgba(28, 25, 23, 0.04), 0 1px 3px rgba(28, 25, 23, 0.06);
+    0 1px 2px rgba(23, 20, 31, 0.03), 0 6px 20px rgba(23, 20, 31, 0.04);
   --elevation-raised:
-    0 2px 8px rgba(28, 25, 23, 0.05), 0 12px 32px rgba(28, 25, 23, 0.1);
+    0 2px 8px rgba(23, 20, 31, 0.04), 0 20px 50px rgba(50, 32, 110, 0.12);
 
-  /* Text — body / supporting / captions */
-  --text-primary: #1c1917;
-  --text-secondary: #57534e;
-  --text-muted: #78716c;
+  /* Text — ink / supporting / captions */
+  --text-primary: #17141f;
+  --text-secondary: #5d5769;
+  --text-muted: #8b8497;
 
   /* Brand + semantic colors */
-  --accent: #b45309;
-  --accent-hover: #92400e;
-  --accent-strong: #9a3412;
-  --success: #15803d;
-  --danger: #dc2626;
-  --warning: #a16207;
+  --accent: #6d4df2;
+  --accent-hover: #5b3ce0;
+  --accent-strong: #4a2fc4;
+  --success: #2f8a63;
+  --danger: #d5483f;
+  --warning: #b5741a;
 
-  /* Hairlines + washes — ink alphas on light (dark theme overrides below).
-   * Tiers absorb the legacy near-identical literals (.09 → subtle, .10 →
-   * default, .14 → strong); deltas are sub-perceptual by design. */
-  --border-subtle: rgba(28, 25, 23, 0.08);
-  --border-default: rgba(28, 25, 23, 0.14);
-  --border-strong: rgba(28, 25, 23, 0.22);
-  --fill-hover: rgba(28, 25, 23, 0.05);
-  --fill-active: rgba(28, 25, 23, 0.09);
-  --overlay-backdrop: rgba(28, 25, 23, 0.45);
+  /* Hairlines + washes — ink alphas on light (dark theme overrides below). */
+  --border-subtle: rgba(23, 20, 31, 0.08);
+  --border-default: rgba(23, 20, 31, 0.14);
+  --border-strong: rgba(23, 20, 31, 0.22);
+  --fill-hover: rgba(23, 20, 31, 0.05);
+  --fill-active: rgba(23, 20, 31, 0.09);
+  --overlay-backdrop: rgba(23, 20, 31, 0.45);
 
-  /* Text on an accent fill (white-on-amber vs ink-on-amber). */
+  /* Text on an accent fill. */
   --on-accent: #ffffff;
-  --focus-ring: color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring: color-mix(in srgb, var(--accent) 30%, transparent);
 
-  /* Pie/donut ramp — light-background-readable warm ramp. */
-  --chart-pie-1: #b45309;
-  --chart-pie-2: #be4a1d;
-  --chart-pie-3: #d97706;
-  --chart-pie-4: #78716c;
-  --chart-pie-5: #57534e;
-  --chart-pie-6: #292524;
+  /* Chart ramp — violet with peach + ink support tones. */
+  --chart-pie-1: #6d4df2;
+  --chart-pie-2: #9b7ee8;
+  --chart-pie-3: #c8b6ff;
+  --chart-pie-4: #f2a98a;
+  --chart-pie-5: #8b8497;
+  --chart-pie-6: #3b3350;
+
+  /* Radii — shared shape scale (pill = 999px). */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
 
   /* Type scale — nothing below 12px (specs/14 §7) */
   --font-size-xs: 12px;
@@ -68,7 +71,8 @@
   --font-size-metric: 22px;
 
   --font-family:
-    system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    'Outfit', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
 
   color: var(--text-primary);
   background: var(--surface-page);
@@ -84,24 +88,25 @@
 
 /* Dark theme — explicit choice (`<html data-theme="dark">`, set by the
  * theme store + index.html FOUC guard). Same roles, dark values; matches
- * the landing page's near-black + amber panels. */
+ * the landing page's dark-plum panels. */
 :root[data-theme='dark'] {
-  --surface-page: #0a0a0b;
-  --surface-card: #131312;
-  --surface-raised: #1c1b18;
-  --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --elevation-raised: 0 8px 28px rgba(0, 0, 0, 0.55);
+  --surface-page: #0e0c13;
+  --surface-card: #17141f;
+  --surface-raised: #1e1929;
+  --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --elevation-raised:
+    0 2px 8px rgba(0, 0, 0, 0.4), 0 24px 60px rgba(0, 0, 0, 0.5);
 
-  --text-primary: #fafaf9;
-  --text-secondary: #d6d3d1;
-  --text-muted: #a8a29e;
+  --text-primary: #f6f3ff;
+  --text-secondary: #c9c2d8;
+  --text-muted: #938ba3;
 
-  --accent: #ffbf48;
-  --accent-hover: #ffd166;
-  --accent-strong: #be4a1d;
-  --success: #4ade80;
+  --accent: #a78bfa;
+  --accent-hover: #b9a4ff;
+  --accent-strong: #8f72ff;
+  --success: #5ee0b0;
   --danger: #f87171;
-  --warning: #fbbf24;
+  --warning: #f5c26b;
 
   --border-subtle: rgba(255, 255, 255, 0.08);
   --border-default: rgba(255, 255, 255, 0.12);
@@ -110,15 +115,15 @@
   --fill-active: rgba(255, 255, 255, 0.11);
   --overlay-backdrop: rgba(0, 0, 0, 0.6);
 
-  --on-accent: #14100a;
+  --on-accent: #171021;
   --focus-ring: color-mix(in srgb, var(--accent) 35%, transparent);
 
-  --chart-pie-1: #ffbf48;
-  --chart-pie-2: #c96a24;
-  --chart-pie-3: #8f8a83;
-  --chart-pie-4: #5f5a53;
-  --chart-pie-5: #403b36;
-  --chart-pie-6: #2e2a26;
+  --chart-pie-1: #b9a4ff;
+  --chart-pie-2: #8f72ff;
+  --chart-pie-3: #6d4df2;
+  --chart-pie-4: #f2a98a;
+  --chart-pie-5: #938ba3;
+  --chart-pie-6: #4c4262;
 
   color-scheme: dark;
 }
@@ -127,22 +132,23 @@
  * values as above (plain CSS has no shared-block mechanism). */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
-    --surface-page: #0a0a0b;
-    --surface-card: #131312;
-    --surface-raised: #1c1b18;
-    --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.5);
-    --elevation-raised: 0 8px 28px rgba(0, 0, 0, 0.55);
+    --surface-page: #0e0c13;
+    --surface-card: #17141f;
+    --surface-raised: #1e1929;
+    --elevation-card: 0 1px 2px rgba(0, 0, 0, 0.45);
+    --elevation-raised:
+      0 2px 8px rgba(0, 0, 0, 0.4), 0 24px 60px rgba(0, 0, 0, 0.5);
 
-    --text-primary: #fafaf9;
-    --text-secondary: #d6d3d1;
-    --text-muted: #a8a29e;
+    --text-primary: #f6f3ff;
+    --text-secondary: #c9c2d8;
+    --text-muted: #938ba3;
 
-    --accent: #ffbf48;
-    --accent-hover: #ffd166;
-    --accent-strong: #be4a1d;
-    --success: #4ade80;
+    --accent: #a78bfa;
+    --accent-hover: #b9a4ff;
+    --accent-strong: #8f72ff;
+    --success: #5ee0b0;
     --danger: #f87171;
-    --warning: #fbbf24;
+    --warning: #f5c26b;
 
     --border-subtle: rgba(255, 255, 255, 0.08);
     --border-default: rgba(255, 255, 255, 0.12);
@@ -151,15 +157,15 @@
     --fill-active: rgba(255, 255, 255, 0.11);
     --overlay-backdrop: rgba(0, 0, 0, 0.6);
 
-    --on-accent: #14100a;
+    --on-accent: #171021;
     --focus-ring: color-mix(in srgb, var(--accent) 35%, transparent);
 
-    --chart-pie-1: #ffbf48;
-    --chart-pie-2: #c96a24;
-    --chart-pie-3: #8f8a83;
-    --chart-pie-4: #5f5a53;
-    --chart-pie-5: #403b36;
-    --chart-pie-6: #2e2a26;
+    --chart-pie-1: #b9a4ff;
+    --chart-pie-2: #8f72ff;
+    --chart-pie-3: #6d4df2;
+    --chart-pie-4: #f2a98a;
+    --chart-pie-5: #938ba3;
+    --chart-pie-6: #4c4262;
 
     color-scheme: dark;
   }
@@ -174,10 +180,16 @@
 body {
   margin: 0;
   min-height: 100svh;
+  background: var(--surface-page);
 }
 
 #root {
   min-height: 100svh;
   display: flex;
   flex-direction: column;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--text-primary);
 }

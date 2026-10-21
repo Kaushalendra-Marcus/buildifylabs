@@ -50,6 +50,9 @@ export function SignupScreen() {
   return (
     <form className="auth-form" onSubmit={handleSubmit}>
       <h1 className="auth-form__title">Create your account</h1>
+      <p className="auth-form__sub">
+        Start with 4 free questions — no card required.
+      </p>
 
       <GoogleButton onError={(err) => setError(getErrorMessage(err))} />
 

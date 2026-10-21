@@ -42,6 +42,9 @@ export function SigninScreen() {
   return (
     <form className="auth-form" onSubmit={handleSubmit}>
       <h1 className="auth-form__title">Sign in</h1>
+      <p className="auth-form__sub">
+        Welcome back — pick up where you left off.
+      </p>
 
       <GoogleButton onError={(err) => setError(getErrorMessage(err))} />
 

@@ -76,6 +76,19 @@ export function Composer() {
     }
   }, []);
 
+  // Empty-thread starter chips (and any future suggestion surface) fill the
+  // composer through a tiny DOM event instead of duplicating draft state.
+  useEffect(() => {
+    function handleSuggestion(event: Event) {
+      const question = (event as CustomEvent<string>).detail;
+      if (typeof question !== 'string' || !question.trim()) return;
+      setDraft(question.trim());
+      window.requestAnimationFrame(() => inputRef.current?.focus());
+    }
+    window.addEventListener('bl:ask-suggestion', handleSuggestion);
+    return () => window.removeEventListener('bl:ask-suggestion', handleSuggestion);
+  }, []);
+
   const canSend = draft.trim().length > 0; // §5.4: quota NEVER disables send.
   const ScopeIcon =
     SCOPE_ICON[scope as keyof typeof SCOPE_ICON] ?? Database;
