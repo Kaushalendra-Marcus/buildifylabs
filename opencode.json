@@ -15,7 +15,7 @@
         "url": "https://mcp.firecrawl.dev/v2/mcp",
         "oauth": false,
         "headers": {
-          "Authorization": "Bearer fc-6d0ea394d95d423eab0452c6de2be2ce"
+          "Authorization": "Bearer {env:FIRECRAWL_API_KEY}"
         }
       }
     }
