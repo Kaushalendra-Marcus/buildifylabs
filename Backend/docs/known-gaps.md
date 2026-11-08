@@ -52,8 +52,10 @@ starting; don't fix from this summary alone.
   and store plain-text chunks in `document_chunks` on the existing Neon Postgres
   (no embedding service, no second vendor/key — the earlier HF-Inference-API +
   pgvector design was removed after the vendor endpoint became unreachable from
-  prod). Retrieved per query by keyword overlap scoped to `user_id` (first
-  chunks as fallback when no keyword hits), merged into the answer inside a
+  prod). Retrieved per query by keyword overlap scoped to `user_id` (zero
+  keyword hits returns nothing so the judge can clarify instead of answering
+  off-topic; only summarize-style queries fall back to the opening chunks),
+  merged into the answer inside a
   reserved sub-budget (`MAX_DOCUMENT_CONTEXT_CHARS`) ranked ahead of web
   evidence, tagged `your_documents` end-to-end (prompt tag + frontend "your
   documents" badge). `ENABLE_DOCUMENT_QA=false` degrades cleanly (ingest still
@@ -118,6 +120,58 @@ starting; don't fix from this summary alone.
   per live-web request (overlapped with SQL generation, not serial), and any planner failure or
   empty/unknown plan degrades to the deterministic intent predicates. The regex predicates are
   therefore still the guarantee path, not dead code — do not delete them.
+
+## Hallucination guards (post-narration, deterministic)
+
+All in `app/services/llm/pipeline/` unless noted; every guard records itself via
+`guard_metrics.record_guard` and the events land in `research_state["guards"]`
+(persisted in QueryLogs; aggregate with `scripts/guard_report.py`).
+
+- **Prose number guard** (`prose_guard.py`, `PROSE_NUMBER_GUARD_MODE=off|flag|strip`,
+  default `flag`): every number in answer/summary/insights/root causes/
+  recommendations must trace to rows, computed stats, structured history,
+  snippets or the user's own question, or be a sum/difference/ratio/share/%-change
+  of two of those. `flag` caps confidence at 0.65 and notes it in the trace;
+  `strip` also removes the sentence/item. Whole numbers 0-10 are treated as
+  counts unless written with `%`. Known limits: a fabricated number that happens
+  to equal a derived value passes; paraphrased magnitudes ("about a third") are
+  not checked.
+- **Citation-support guard** (`CITATION_SUPPORT_GUARD_MODE`, same modes): a
+  sentence citing `[n]` needs >=15% content-word overlap with snippet n (when it
+  has 5+ content words) and its non-structural numbers must be in, or derivable
+  from, that snippet. Lexical, not semantic: a false claim that reuses the
+  snippet's vocabulary still passes.
+- **Fail-closed** (`FAIL_CLOSED_GUARDS`): if the narration contract or a prose
+  guard crashes, confidence is capped at 0.65 and the trace says verification was
+  unavailable (previously the prose shipped silently as "fail-open").
+- **Prose-rescue path** (`PROSE_RESCUE_STRICT`): sentences with untraceable
+  numbers are removed; nothing left -> honest zero-confidence fallback.
+- **Number placeholders** (`ENABLE_NUMBER_PLACEHOLDERS`, default off; changes the
+  narration prompt, evaluate with the golden set before enabling): the narrator
+  writes `{{computed.x.y}}` and the server fills in the value.
+- **Untrusted evidence**: SYSTEM_PROMPT has an UNTRUSTED EVIDENCE RULE and a NUMBER
+  RULE; `evidence_safety.py` neutralizes instruction-shaped text in the prompt copy
+  of snippets (grounding still uses the original text). Pattern-based, so evadable;
+  the output guards are the real backstop.
+- **SQL**: `LIMIT` capped at 1000 (`sql_sanitizer.MAX_QUERY_LIMIT`); Postgres
+  `statement_timeout` via `SQL_STATEMENT_TIMEOUT_MS`; a data profile (types, ranges,
+  top values, latest date) is fed to SQL generation so relative dates resolve
+  against the data (`ENABLE_DATA_PROFILE`); result sanity notes in
+  `research_state["sql_sanity"]`; plain-English `research_state["sql_interpretation"]`.
+  The profile costs one extra aggregate scan per own-data request (fine at the
+  current <=10MB cap; cache by upload id if caps grow).
+- **Drivers** (`app/services/data/drivers.py`, `ENABLE_DRIVER_ANALYSIS`): "why did X
+  change" questions get a code-computed per-segment decomposition (latest window vs
+  the previous equal window, anchored on the data's latest date) in
+  `computed["drivers"]`; root causes must come from it.
+- **Not done**: the upload cleaning report (what `clean_dataframe` coerced/dropped)
+  is not stored or surfaced; needs a column/migration on `FileUpload`. The new
+  `research_state` keys are not rendered in the frontend yet. SQL self-consistency
+  (generate twice, compare) was skipped: it doubles LLM spend against a 4-per-6h quota.
+- **Evals**: `scripts/eval_pipeline.py --repeat N --min-pass-rate R` (pass@k, flake
+  detection) and `--record-llm/--replay-llm` (offline re-run of a recording);
+  `scripts/eval_sql.py` (text-to-SQL execution accuracy; `--dry-run` verifies the
+  fixtures offline and runs in pytest via `tests/test_eval_tooling.py`).
 
 ## LLM config (`specs/12-llm-orchestration.md`)
 

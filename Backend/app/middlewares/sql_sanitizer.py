@@ -7,6 +7,9 @@ from fastapi import HTTPException
 logger = logging.getLogger(__name__)
 
 MAX_QUERY_LENGTH = 1000
+# A LIMIT above this is rejected: the prompt asks for LIMIT 100, and an
+# unbounded-looking LIMIT on a big table is a cheap way to pin the database.
+MAX_QUERY_LIMIT = 1000
 SQL_DIALECT = "postgres"
 
 # Statement types that are allowed at the top level - anything that is
@@ -99,10 +102,26 @@ def sanitize_sql(query: str) -> str:
                     detail="Forbidden SQL function detected",
                 )
 
-    if not statement.args.get("limit"):
+    limit_node = statement.args.get("limit")
+    if not limit_node:
         raise HTTPException(
             status_code=403,
             detail="Query must include LIMIT",
         )
+
+    # Cap the LIMIT value when it is a plain integer literal. Anything else
+    # (an expression, a parameter) is left to the statement timeout.
+    try:
+        limit_expr = limit_node.args.get("expression")
+        limit_text = limit_expr.name if limit_expr is not None else ""
+        if limit_text.isdigit() and int(limit_text) > MAX_QUERY_LIMIT:
+            raise HTTPException(
+                status_code=403,
+                detail=f"LIMIT must be at most {MAX_QUERY_LIMIT}",
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
 
     return query

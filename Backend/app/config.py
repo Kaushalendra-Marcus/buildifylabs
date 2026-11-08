@@ -148,6 +148,36 @@ class Settings(BaseSettings):
     # time is skipped.
     ENABLE_DOCUMENT_QA: bool = Field(True)
 
+    # --- Hallucination guards (deterministic, post-narration) ---
+
+    # Prose number guard: every number the narrator writes must trace to the
+    # evidence (rows, computed stats, history, snippets, the question itself) or
+    # be derivable from it (sum/difference/ratio/% change). Modes:
+    #   off   - disabled
+    #   flag  - record + cap confidence at 0.65 + note in the trace (default)
+    #   strip - also remove the offending sentences / list items
+    PROSE_NUMBER_GUARD_MODE: str = "flag"
+    # Citation-support guard: a sentence citing [n] must be lexically and
+    # numerically supported by snippet n. Same off|flag|strip modes.
+    CITATION_SUPPORT_GUARD_MODE: str = "flag"
+    # When a verification step itself crashes, cap confidence and say so
+    # instead of silently shipping unverified prose.
+    FAIL_CLOSED_GUARDS: bool = True
+    # The prose-rescue path (structured narration failed) is the least
+    # constrained path; strip any sentence with an untraceable number there.
+    PROSE_RESCUE_STRICT: bool = True
+    # Let the narrator write {{computed.x.y}} placeholders that the server
+    # fills in from code-computed values, so it never types a number itself.
+    # Changes the narration prompt, so it is opt-in.
+    ENABLE_NUMBER_PLACEHOLDERS: bool = False
+    # Per-request data profile (row count, types, ranges, top values, latest
+    # date) fed to SQL generation + narration, and deterministic driver
+    # (root-cause) decomposition for "why did X change" questions.
+    ENABLE_DATA_PROFILE: bool = True
+    ENABLE_DRIVER_ANALYSIS: bool = True
+    # Postgres statement_timeout (ms) applied to generated read queries.
+    SQL_STATEMENT_TIMEOUT_MS: int = 10000
+
     DOCUMENT_CHUNK_CHARS: int = 1000
     DOCUMENT_CHUNK_OVERLAP_CHARS: int = 150
     MAX_DOCUMENT_CHARS: int = 200_000  # safety cap on extracted PDF text before chunking

@@ -3,6 +3,7 @@ import re
 from typing import Optional, List
 
 import sqlglot
+from sqlglot import exp
 
 from app.middlewares.sql_sanitizer import SQL_DIALECT
 
@@ -68,15 +69,107 @@ _FENCE_RE = re.compile(r"```[a-zA-Z]*\r?\n(.*?)```", re.DOTALL)
 _INLINE_FENCE_RE = re.compile(r"```[a-zA-Z]*[ \t]*(.*?)```", re.DOTALL)
 
 
-def build_data_schema(table_name: str, columns: List[str]) -> str:
+def build_data_schema(table_name: str, columns: List[str], profile: Optional[dict] = None) -> str:
     """Build the prompt's schema section for one user's data table.
 
     B3 calls this after ingesting a file, with the real per-user table name and
-    its parsed columns, replacing the hardcoded placeholder schema.
+    its parsed columns, replacing the hardcoded placeholder schema. When a data
+    profile is given (executor.get_data_profile), column types and real value
+    facts are added; without one the output is exactly the plain column list.
     """
     lines = ["Tables:", table_name]
-    lines.extend(f"- {column}" for column in columns)
+    kinds = {}
+    if isinstance(profile, dict):
+        for col in profile.get("columns") or []:
+            if isinstance(col, dict) and col.get("name"):
+                kinds[col["name"]] = (
+                    "text holding ISO dates (YYYY-MM-DD); compare as strings"
+                    if col.get("iso_text")
+                    else col.get("type")
+                )
+    for column in columns:
+        kind = kinds.get(column)
+        lines.append(f"- {column} ({kind})" if kind else f"- {column}")
+    block = profile_prompt_block(profile)
+    if block:
+        lines.append(block)
     return "\n".join(lines)
+
+
+def profile_prompt_block(profile: Optional[dict]) -> str:
+    """Real facts about the table for the SQL prompt. Empty when no profile."""
+    try:
+        if not isinstance(profile, dict) or not profile.get("columns"):
+            return ""
+        lines = ["", "Data profile (real facts about this table - use them, never guess values):"]
+        if isinstance(profile.get("row_count"), int):
+            lines.append(f"- row count: {profile['row_count']}")
+        for col in list(profile["columns"])[:40]:
+            if not isinstance(col, dict):
+                continue
+            name, kind = col.get("name"), col.get("type", "unknown")
+            shown_kind = "text, ISO dates" if col.get("iso_text") else kind
+            detail = []
+            if kind in ("numeric", "date") and col.get("min") is not None:
+                joiner = " to " if kind == "date" else " .. "
+                detail.append(f"{col.get('min')}{joiner}{col.get('max')}")
+            if kind == "text" and col.get("distinct") is not None:
+                detail.append(f"{col['distinct']} distinct")
+                if col.get("top_values"):
+                    detail.append("values: " + ", ".join(f"'{v}'" for v in col["top_values"]))
+            if col.get("nulls"):
+                detail.append(f"{col['nulls']} empty")
+            lines.append(f"- {name} ({shown_kind})" + (": " + "; ".join(detail) if detail else ""))
+        if profile.get("date_max"):
+            lines.append(
+                f"Latest date in the data: {profile['date_max']} (column {profile.get('date_column')}). "
+                "Resolve relative dates (\"last week\", \"this month\", \"last quarter\", "
+                "\"yesterday\", \"recent\") against THIS date, never CURRENT_DATE or NOW()."
+            )
+        lines.append("When filtering a text column, use exactly the listed values (case-sensitive).")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+def describe_sql(query: str) -> str:
+    """Plain-English reading of a generated query, built from its AST (no LLM).
+
+    Shown to the user so a wrong interpretation ("I summed revenue where
+    status = paid") is easy to spot. Never raises; empty string on any failure.
+    """
+    try:
+        ast = sqlglot.parse_one(query, read=SQL_DIALECT)
+        select = ast if isinstance(ast, exp.Select) else ast.find(exp.Select)
+        if select is None:
+            return ""
+
+        def _sql(node) -> str:
+            return node.sql(dialect=SQL_DIALECT)
+
+        parts = []
+        projections = [_sql(e) for e in (select.expressions or [])[:6]]
+        if projections:
+            parts.append("selects " + ", ".join(projections))
+        where = select.args.get("where")
+        if where is not None:
+            parts.append("filtered to " + _sql(where.this))
+        group = select.args.get("group")
+        if group is not None and group.expressions:
+            parts.append("grouped by " + ", ".join(_sql(e) for e in group.expressions))
+        order = select.args.get("order")
+        if order is not None and order.expressions:
+            parts.append("ordered by " + ", ".join(_sql(e) for e in order.expressions))
+        limit = select.args.get("limit")
+        limit_expr = limit.args.get("expression") if limit is not None else None
+        if limit_expr is not None:
+            parts.append(f"limited to {limit_expr.name} rows")
+        if not parts:
+            return ""
+        text = "Reads your data table: " + ", ".join(parts) + "."
+        return re.sub(r'"?user_[0-9a-zA-Z]+_data"?', "your data", text)
+    except Exception:
+        return ""
 
 
 # Build Prompt

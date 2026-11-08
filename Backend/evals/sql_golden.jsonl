@@ -1,0 +1,19 @@
+# BuildifyLabs text-to-SQL golden set (execution accuracy). See scripts/eval_sql.py.
+# A `fixture_def` line defines a small table; each case references it by name.
+# Case schema: id, fixture, question, reference_sql ({table} is replaced), expected
+#   {rows: [[cell, ...], ...], mode: exact|subset, ordered: bool, tolerance: float},
+#   or expect_invalid: true (the model must return the INVALID_QUERY sentinel).
+# postgres_only: true => skipped on the SQLite fixture engine in live mode (the
+#   model's date arithmetic is Postgres-style); the reference_sql is still
+#   verified offline by --dry-run and the CI test.
+{"fixture_def": {"name": "sales", "columns": ["order_date", "region", "product", "revenue", "units"], "rows": [["2025-03-01", "East", "A", 100, 10], ["2025-03-02", "East", "B", 200, 20], ["2025-03-03", "West", "A", 150, 15], ["2025-03-04", "West", "B", 50, 5], ["2025-03-05", "North", "A", 300, 30], ["2025-03-08", "East", "A", 120, 12], ["2025-03-09", "West", "A", 180, 18], ["2025-03-10", "North", "B", 250, 25], ["2025-03-11", "East", "B", 80, 8], ["2025-03-12", "West", "B", 90, 9]]}}
+{"id": "sql-01-total-revenue", "fixture": "sales", "question": "What is the total revenue?", "reference_sql": "SELECT SUM(revenue) AS total_revenue FROM {table} LIMIT 1", "expected": {"rows": [[1520]], "mode": "exact", "ordered": false, "tolerance": 0.01}}
+{"id": "sql-02-revenue-by-region", "fixture": "sales", "question": "Show revenue by region", "reference_sql": "SELECT region, SUM(revenue) AS total FROM {table} GROUP BY region ORDER BY total DESC LIMIT 100", "expected": {"rows": [["North", 550], ["East", 500], ["West", 470]], "mode": "exact", "ordered": false, "tolerance": 0.01}}
+{"id": "sql-03-top-region", "fixture": "sales", "question": "Which region has the highest revenue?", "reference_sql": "SELECT region FROM {table} GROUP BY region ORDER BY SUM(revenue) DESC LIMIT 1", "expected": {"rows": [["North"]], "mode": "subset", "ordered": false, "tolerance": 0.01}}
+{"id": "sql-04-revenue-by-product", "fixture": "sales", "question": "Revenue by product", "reference_sql": "SELECT product, SUM(revenue) AS total FROM {table} GROUP BY product LIMIT 100", "expected": {"rows": [["A", 850], ["B", 670]], "mode": "exact", "ordered": false, "tolerance": 0.01}}
+{"id": "sql-05-row-count", "fixture": "sales", "question": "How many orders are there?", "reference_sql": "SELECT COUNT(*) AS n FROM {table} LIMIT 1", "expected": {"rows": [[10]], "mode": "exact", "ordered": false, "tolerance": 0.01}}
+{"id": "sql-06-average-units", "fixture": "sales", "question": "What is the average number of units per order?", "reference_sql": "SELECT AVG(units) AS avg_units FROM {table} LIMIT 1", "expected": {"rows": [[15.2]], "mode": "exact", "ordered": false, "tolerance": 0.01}}
+{"id": "sql-07-east-revenue", "fixture": "sales", "question": "What was the total revenue in the East region?", "reference_sql": "SELECT SUM(revenue) AS total FROM {table} WHERE region = 'East' LIMIT 1", "expected": {"rows": [[500]], "mode": "exact", "ordered": false, "tolerance": 0.01}}
+{"id": "sql-08-top-units-product", "fixture": "sales", "question": "Which product sold the most units?", "reference_sql": "SELECT product FROM {table} GROUP BY product ORDER BY SUM(units) DESC LIMIT 1", "expected": {"rows": [["A"]], "mode": "subset", "ordered": false, "tolerance": 0.01}}
+{"id": "sql-09-relative-date-anchor", "fixture": "sales", "question": "What was the total revenue in the last 7 days?", "reference_sql": "SELECT SUM(revenue) AS total FROM {table} WHERE order_date >= '2025-03-06' LIMIT 1", "postgres_only": true, "expected": {"rows": [[720]], "mode": "exact", "ordered": false, "tolerance": 0.01}}
+{"id": "sql-10-impossible-question", "fixture": "sales", "question": "What is the customer churn rate?", "expect_invalid": true}

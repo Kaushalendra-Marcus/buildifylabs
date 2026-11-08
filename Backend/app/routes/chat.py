@@ -39,12 +39,20 @@ from app.db.models.user import User
 from app.middlewares.auth_middleware import get_current_user
 from app.middlewares.rate_limiter import rate_limiter
 from app.schemas.chat import ChatRequest, FlagRequest, FlagResponse
+from app.services.data.drivers import compute_drivers, is_driver_query
 from app.services.data.executor import (
     InvalidQueryError,
     execute_sql,
+    get_data_profile,
     get_table_columns,
     user_data_table_name,
 )
+from app.services.data.result_checks import (
+    compact_profile,
+    should_cap_confidence,
+    sql_result_sanity,
+)
+from app.services.llm.pipeline import guard_metrics
 from app.services.data.stats import (
     apply_what_if,
     compute_forecast,
@@ -71,6 +79,7 @@ from app.services.llm.sql_generator import (
     build_data_schema,
     build_sql_prompt,
     clean_sql_response,
+    describe_sql,
 )
 
 logger = logging.getLogger(__name__)
@@ -390,6 +399,7 @@ async def _answer_request(
     rows: list = []
     cleaned_sql = None
     table_name = None
+    data_profile: dict = {}
     thread_id = _thread_id_for(request)
     prior_clarification, prior_data, prior_research_state, prior_query = (
         await _load_prior_context(db, user_id, thread_id)
@@ -511,7 +521,12 @@ async def _answer_request(
         if not columns:
             table_name = None  # no structured data for this user; skip SQL, keep documents/web
         else:
-            schema = build_data_schema(table_name, columns)
+            # Real facts about the table (types, ranges, top values, latest date)
+            # so SQL generation stops guessing values and resolves relative dates
+            # against the data, not today. Fail-soft: {} on any error.
+            if getattr(get_settings(), "ENABLE_DATA_PROFILE", True):
+                data_profile = await get_data_profile(db, table_name, columns)
+            schema = build_data_schema(table_name, columns, data_profile or None)
             # Canonical query (P0#1): SQL uses plan_query (clarification-merged
             # research intent), never the fragmentary request.query, so SQL and
             # research/visual timeframes cannot diverge.
@@ -553,7 +568,7 @@ async def _answer_request(
                     real_columns = await get_table_columns(db, table_name)
                     repair_prompt = build_sql_prompt(
                         plan_query,
-                        build_data_schema(table_name, real_columns),
+                        build_data_schema(table_name, real_columns, data_profile or None),
                     ) + (
                         "\n\nYour previous query failed with this database error:\n"
                         f"{http_exc.detail}\n"
@@ -758,6 +773,22 @@ async def _answer_request(
                         }
             except Exception as exc:
                 logger.warning(f"Forecast computation skipped: {exc}")
+        # Root causes are computed, not imagined: for "why did X change"
+        # questions, decompose the latest window's change into per-segment
+        # contributions from the user's table. The narrator may only cite
+        # these drivers (narration_aids.DRIVER_RULE).
+        try:
+            if (
+                table_name is not None
+                and data_profile
+                and getattr(get_settings(), "ENABLE_DRIVER_ANALYSIS", True)
+                and is_driver_query(plan_query)
+            ):
+                drivers = await compute_drivers(db, table_name, data_profile)
+                if drivers:
+                    computed = {**computed, "drivers": drivers}
+        except Exception as exc:
+            logger.warning(f"Driver analysis skipped: {exc}")
         news_context = None
         web_sources = []
         market_data = []
@@ -849,6 +880,9 @@ async def _answer_request(
         )
         news_context = document_context + news_context
         web_sources = document_sources + web_sources
+        # Per-request data profile for the narration step (a ContextVar, not a
+        # run_pipeline argument, so the pipeline's signature stays unchanged).
+        guard_metrics.set_data_profile(data_profile or None)
         output = await run_pipeline(
             user_query=request.query,
             db_data=rows,
@@ -898,6 +932,11 @@ async def _answer_request(
             "canonical_query": plan_query,
             "thread_id": thread_id,
             "total_rows": len(rows or []),
+            # Trust extras: what the query meant in plain English, what the data
+            # covers, and any sign the result does not match the data.
+            "sql_interpretation": describe_sql(cleaned_sql) if cleaned_sql else "",
+            "data_profile": compact_profile(data_profile),
+            "sql_sanity": sql_result_sanity(rows, cleaned_sql, data_profile),
             # Kill-switch disclosure: when live_web was requested but served
             # from own_data, record both so the answer is traceable.
             "scope_requested": request.source_scope,
@@ -905,6 +944,19 @@ async def _answer_request(
             "scope_downgraded": bool(request.source_scope != effective_scope),
         })
         output.research_state = _rsf
+        try:
+            _sanity = _rsf.get("sql_sanity") or []
+            if _sanity:
+                output.thinking = list(output.thinking or []) + [
+                    f"Result check: {note['message']}" for note in _sanity
+                ]
+                for note in _sanity:
+                    guard_metrics.record_guard(f"sql_{note['code']}")
+                if should_cap_confidence(_sanity):
+                    output.confidence = min(float(output.confidence or 0.0), 0.5)
+                _rsf["guards"] = guard_metrics.request_events()
+        except Exception as exc:
+            logger.warning(f"Result sanity notes skipped: {exc}")
         # Scope-downgrade thinking disclosure: the TrustFooter notice
         # ("Live web unavailable, answered from your data") is driven by
         # research_state.scope_downgraded; record the same fact in thinking

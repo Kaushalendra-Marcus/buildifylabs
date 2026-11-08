@@ -17,6 +17,10 @@ from .judge import judge_sufficiency
 from .history import _fail_closed_gate, compute_structured_what_if, is_what_if_query
 from .grounding import apply_narration_contract, build_validated_evidence_state, drop_ungrounded_visuals_evidence, is_visual_stale_for_query, plan_visuals_from_evidence
 from .guarantee import ensure_visuals
+from . import guard_metrics
+from .evidence_safety import neutralize_untrusted
+from .narration_aids import build_narration_addenda, coverage_note, finalize_placeholders, stream_wrapper
+from .prose_guard import enforce_prose_guards, fail_closed_after_guard_error, guard_rescued_prose
 from app.services.llm.groq_service import _to_strict_schema
 
 logger = logging.getLogger(__name__)
@@ -274,6 +278,13 @@ async def run_pipeline(
 
     rows = list(db_data or [])
     thinking: List[str] = []
+    guard_metrics.begin_request()
+    try:
+        _coverage = coverage_note(guard_metrics.get_data_profile())
+        if _coverage:
+            thinking.append(f"Data coverage: {_coverage}.")
+    except Exception:
+        pass
     # Deterministic what-if (generic): structured-history scenario first,
     # then the row-level price scenario for own-data queries. Both compute
     # in code; narration quotes verbatim (never LLM arithmetic).
@@ -347,6 +358,18 @@ async def run_pipeline(
         )
         if rescued is not None:
             rescued.thinking = thinking + ["Structured narration failed; prose rescue."]
+            # The rescue path has no schema, no visual grounding and no
+            # narration contract: strip any sentence with an untraceable number.
+            rescued = guard_rescued_prose(
+                rescued,
+                query=user_query,
+                snippets=news_context,
+                rows=rows,
+                market_data=market_data,
+                computed_numbers=computed_numbers,
+                price_history=price_history,
+                financial_history=financial_history,
+            )
             return ensure_visuals(
                 rescued,
                 rows=rows,
@@ -1204,7 +1227,30 @@ async def run_pipeline(
                 market_data=market_data,
             )
         except Exception as exc:
-            logger.warning("Narration contract failed (fail-open prose kept): %s", exc)
+            logger.warning("Narration contract failed: %s", exc)
+            # Fail closed: the prose is kept, but it is no longer presented as
+            # fully verified (confidence capped, trace says why, guard counted).
+            fail_closed_after_guard_error(output, thinking, "narration_contract", exc)
+        # Deterministic prose guards: every number in the prose must trace to
+        # the evidence (or be derivable from it) and every [n] citation must be
+        # supported by its snippet. Modes via PROSE_NUMBER_GUARD_MODE /
+        # CITATION_SUPPORT_GUARD_MODE (off | flag | strip).
+        try:
+            output = enforce_prose_guards(
+                output,
+                query=user_query,
+                plan_query=plan_text,
+                snippets=news_context,
+                rows=narrate_rows,
+                price_history=price_history,
+                financial_history=financial_history,
+                market_data=market_data,
+                computed_numbers=computed_numbers,
+                thinking=thinking,
+            )
+        except Exception as exc:
+            logger.warning("Prose guards failed: %s", exc)
+            fail_closed_after_guard_error(output, thinking, "prose_guards", exc)
         # Forecast dead-end, final enforcement (specs/11 §5): no deterministic
         # projection means confidence 0, NO graph/comparison visual, and an
         # explicit missing-data sentence in the prose — the LLM must never be
@@ -1281,6 +1327,14 @@ async def run_pipeline(
             }
         except Exception as exc:
             logger.warning("Research-state build failed: %s", exc)
+        try:
+            # Guard events ride along in research_state (persisted in QueryLogs)
+            # so scripts/guard_report.py can compute guard fire-rates.
+            _guard_events = guard_metrics.request_events()
+            if _guard_events and isinstance(output.research_state, dict):
+                output.research_state["guards"] = _guard_events
+        except Exception as exc:
+            logger.warning("Guard events attach failed: %s", exc)
         try:
             _executed = [
                         name for name, lst in (
@@ -1517,6 +1571,14 @@ async def _narrate(
         comparison_gate=comparison_gate,
     )
 
+    # Narration aids: number placeholders (opt-in), the driver rule when code
+    # computed drivers, and the data-coverage note. Prompt-only additions.
+    addenda, placeholder_values = build_narration_addenda(computed_numbers, db_data)
+    if addenda:
+        prompt = prompt + addenda
+    if on_token is not None and placeholder_values:
+        on_token = stream_wrapper(on_token, placeholder_values)
+
     try:
         narration_model: Optional[str] = None
         if source_scope in ("live_web", "both"):
@@ -1568,7 +1630,7 @@ async def _narrate(
     parsed = normalize_pipeline_payload(extract_json(raw_output))
 
     try:
-        return PipelineOutput(**parsed)
+        return finalize_placeholders(PipelineOutput(**parsed), placeholder_values)
     except ValidationError as ve:
         # Retry-with-clarification (one bounded repair, failure path only):
         # feed Pydantic's exact error back for one targeted fix. Success
@@ -1583,7 +1645,7 @@ async def _narrate(
             model=narration_model,
         )
         if repaired is not None:
-            return repaired
+            return finalize_placeholders(repaired, placeholder_values)
         raise
 
 
@@ -1652,7 +1714,7 @@ async def _narrate_prose_rescue(
         evidence_parts.append(
             "Web snippets:\n"
             + "\n".join(
-                f"[{index}] {snippet}"
+                f"[{index}] {neutralize_untrusted(str(snippet))[0]}"
                 for index, snippet in enumerate(news_context[:8], start=1)
             )
         )

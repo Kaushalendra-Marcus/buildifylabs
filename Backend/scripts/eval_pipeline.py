@@ -30,6 +30,7 @@ hard failure. Keep out of CI (needs live keys + flaky vendors); run nightly.
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -49,6 +50,10 @@ os.environ.setdefault("SMTP_PASS", "eval")
 os.environ.setdefault("EMAIL_FROM", "eval@example.com")
 os.environ.setdefault("CONTACT_FORM_RECIPIENT_EMAIL", "eval@example.com")
 os.environ.setdefault("GOOGLE_CLIENT_ID", "eval")
+if "--replay-llm" in sys.argv:
+    # Replay never calls a provider, but app.config still needs these to import.
+    os.environ.setdefault("GROQ_MODEL", "replay-model")
+    os.environ.setdefault("GROQ_API_KEY", "replay-key")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -68,6 +73,9 @@ from app.services.llm.pipeline.grounding import _parse_scaled_number  # noqa: E4
 _HERE = Path(__file__).resolve().parent
 DEFAULT_GOLDEN = _HERE.parent / "evals" / "golden.jsonl"
 DEFAULT_OUT_DIR = _HERE.parent / "evals" / "results"
+# A case passes overall only if at least this fraction of its repeated runs pass
+# (set from --min-pass-rate; 1.0 keeps the old single-run behaviour).
+MIN_PASS_RATE = 1.0
 
 _NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_.])\$?\d[\d,]*(?:\.\d+)?")
 _CITATION_RE = re.compile(r"\[(\d+)\]")
@@ -586,6 +594,58 @@ async def run_case(case):
     return output, computed
 
 
+def _llm_key(kwargs):
+    raw = "\n--\n".join(
+        str(kwargs.get(name, "") or "") for name in ("model", "system_prompt", "prompt")
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def install_llm_hook(record_path=None, replay_path=None):
+    """Record or replay every LLM call made by the pipeline.
+
+    --record-llm FILE appends {key, result} per call during a live run.
+    --replay-llm FILE serves those recorded results by key (sha256 of
+    model + system prompt + prompt), so the exact same eval re-runs offline
+    with no keys: pipeline/guard regressions show up without paying for the
+    model, and a changed prompt fails loudly as a replay miss instead of
+    silently using a stale answer.
+    """
+    import app.services.llm.langchain_pipeline as pipeline_mod
+
+    original = pipeline_mod.generate_response
+    replay = {}
+    if replay_path:
+        with open(replay_path, encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    item = json.loads(line)
+                    replay[item["key"]] = item["result"]
+
+    async def hooked(*args, **kwargs):
+        key = _llm_key(kwargs)
+        if replay_path:
+            if key not in replay:
+                raise RuntimeError(
+                    f"replay miss: no recorded LLM result for call {key[:12]} "
+                    "(prompt changed since recording?)"
+                )
+            return replay[key]
+        result = await original(*args, **kwargs)
+        if record_path:
+            with open(record_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({
+                    "key": key,
+                    "result": {
+                        "content": result.get("content"),
+                        "source": result.get("source"),
+                    },
+                }) + "\n")
+        return result
+
+    pipeline_mod.generate_response = hooked
+
+
 def dry_run(cases):
     """No keys, no LLM: validate the file + evidence wiring + local gates."""
     print(f"dry-run: {len(cases)} cases loaded, no LLM calls made")
@@ -626,6 +686,7 @@ async def live_main(cases, out_dir):
     out_path = os.path.join(out_dir, f"eval-{stamp}.jsonl")
     passed = failed = 0
     component_stats = {}
+    per_case = {}
     with open(out_path, "w", encoding="utf-8") as fh:
         for case in cases:
             comp = case["id"].split("-")[0]
@@ -675,6 +736,7 @@ async def live_main(cases, out_dir):
                     "answer_excerpt": "",
                 }
             fh.write(json.dumps(record, default=str) + "\n")
+            per_case.setdefault(case["id"], []).append(not record["failures"])
             if record["failures"]:
                 failed += 1
                 stats["fail"] += 1
@@ -688,9 +750,21 @@ async def live_main(cases, out_dir):
     for comp in sorted(component_stats):
         stats = component_stats[comp]
         print(f"  {comp}: {stats['pass']} pass / {stats['fail']} fail")
-    print(f"EVAL {'PASSED' if not failed else 'FAILED'} "
-          f"({passed} passed, {failed} failed)")
-    return 0 if not failed else 1
+    flaky = sorted(i for i, runs in per_case.items() if 0 < sum(runs) < len(runs))
+    below = sorted(
+        i for i, runs in per_case.items()
+        if sum(runs) / len(runs) < MIN_PASS_RATE - 1e-9
+    )
+    if max((len(runs) for runs in per_case.values()), default=1) > 1:
+        print("== Pass rate per case (pass@k) ==")
+        for case_id, runs in sorted(per_case.items()):
+            print(f"  {case_id}: {sum(runs)}/{len(runs)}")
+        if flaky:
+            print(f"FLAKY (passes sometimes): {', '.join(flaky)}")
+    print(f"EVAL {'PASSED' if not below else 'FAILED'} "
+          f"({passed} passed, {failed} failed runs; "
+          f"required pass rate {MIN_PASS_RATE:.0%})")
+    return 0 if not below else 1
 
 
 def main(argv=None):
@@ -708,6 +782,14 @@ def main(argv=None):
                         help="list case ids and exit (no keys needed)")
     parser.add_argument("--dry-run", action="store_true",
                         help="validate the golden file without LLM calls")
+    parser.add_argument("--repeat", type=int, default=1,
+                        help="run each case N times and report pass@k / flakiness")
+    parser.add_argument("--min-pass-rate", type=float, default=1.0,
+                        help="fraction of repeated runs that must pass (default 1.0)")
+    parser.add_argument("--record-llm", default=None, metavar="FILE",
+                        help="append every LLM call + result to FILE (live run)")
+    parser.add_argument("--replay-llm", default=None, metavar="FILE",
+                        help="serve LLM results from a recording: offline, no keys")
     args = parser.parse_args(argv)
     cases = load_golden(args.golden)
     if args.list:
@@ -720,6 +802,8 @@ def main(argv=None):
         cases = [c for c in cases if c["id"] == args.case]
     if args.limit:
         cases = cases[: args.limit]
+    if args.repeat and args.repeat > 1:
+        cases = [case for case in cases for _ in range(args.repeat)]
     if args.dry_run:
         if not cases:
             print("No cases selected.")
@@ -728,10 +812,15 @@ def main(argv=None):
     if not cases:
         print("No cases selected.")
         return 1
-    if not ensure_live_keys():
+    if not args.replay_llm and not ensure_live_keys():
         print("GROQ_API_KEY is required for live eval (real keys). "
-              "Use --dry-run for keyless validation.")
+              "Use --dry-run for keyless validation or --replay-llm to "
+              "re-run a recording.")
         return 2
+    global MIN_PASS_RATE
+    MIN_PASS_RATE = float(args.min_pass_rate)
+    if args.record_llm or args.replay_llm:
+        install_llm_hook(args.record_llm, args.replay_llm)
     return asyncio.run(live_main(cases, args.out_dir))
 
 
