@@ -24,12 +24,14 @@ from urllib.parse import quote, quote_plus
 import httpx
 
 from app.config import get_settings
+from app.services import cost_ledger
 from app.services.llm.context_budget import fit_pairs_to_budget, rank_snippet_pairs
 from app.services.llm.langchain_pipeline import TOOL_CATALOG
 from app.services.llm.query_rewriter import (
     is_time_sensitive_query,
     rewrite_search_queries,
 )
+from app.services.box_office import extract_box_office_history
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,11 @@ STOCK_ALIASES = {
 }
 
 MAX_SEARCH_QUERIES = 4
+BOX_OFFICE_INTENT_RE = re.compile(
+    r"\b(box office|collection|collections|revenue|gross|"
+    r"day[- ]wise|day by day|opening weekend|budget|release date)\b",
+    re.IGNORECASE,
+)
 # Entity budget: 3-company comparisons (Tesla/BYD/Toyota) must never lose
 # a company to truncation. 4 gives headroom without runaway Yahoo fan-out.
 MAX_MARKET_ENTITIES = 4
@@ -409,6 +416,7 @@ class WebSearchResult:
     # series were wanted but unfetched (no key / unmapped topic / US-only
     # coverage). Narrator prompt context, never evidence.
     macro_note: str = ""
+    box_office_history: dict[str, Any] = field(default_factory=dict)
 
 
 def _dedupe_texts(items: list[str]) -> list[str]:
@@ -1046,6 +1054,7 @@ async def _tavily_extract(
     if not getattr(settings, "WEB_SEARCH_API_KEY", None):
         return None
     try:
+        cost_ledger.add("tavily_extracts")
         response = await client.post(
             "https://api.tavily.com/extract",
             json={
@@ -1272,6 +1281,7 @@ async def _tavily_search(
     if time_sensitive:
         body["topic"] = "news"
         body["time_range"] = "week"
+    cost_ledger.add("tavily_searches")
     response = await client.post(
         "https://api.tavily.com/search",
         json=body,
@@ -1360,6 +1370,8 @@ def _firecrawl_allowed(settings) -> bool:
 def _firecrawl_record_credits(result_count: int, scrape: bool) -> int:
     """Add one search's estimated credits to the daily tally and log them."""
     credits = 2 + (max(0, int(result_count)) if scrape else 0)
+    cost_ledger.add("firecrawl_searches")
+    cost_ledger.add("firecrawl_credits", credits)
     try:
         today = _firecrawl_today()
         if _firecrawl_daily["day"] != today:
@@ -1991,6 +2003,20 @@ async def search_web(
         raw_text = " ".join(search_queries)
         time_sensitive = is_time_sensitive_query(raw_text)
 
+    # Generic search framing is not enough for a daily-series request:
+    # headlines tend to win and contain only one total. Add bounded,
+    # evidence-shaped queries so providers return explicit Day N rows and a
+    # budget/release-date source. Keep the original framed queries intact.
+    if BOX_OFFICE_INTENT_RE.search(raw_text or ""):
+        # Prefer the cleaned primary query so a compound message does not
+        # drag an unrelated person/topic into the movie evidence search.
+        subject = (search_queries[0] if search_queries else raw_text).strip()
+        targeted = [
+            f"{subject} day wise box office collection day 1 day 2 day 3 India net",
+            f"{subject} total box office collection budget release date",
+        ]
+        search_queries = list(dict.fromkeys(targeted + search_queries))[:MAX_SEARCH_QUERIES]
+
     # Repeat-query cache: same framed evidence reused within TTL for latency,
     # cost, and answer consistency.
     cache_key: Optional[str] = None
@@ -2036,6 +2062,7 @@ async def search_web(
         except Exception:
             pass
         if cached:
+            cost_ledger.set_flag("web_cache", "hit")
             logger.info("Web-search cache hit.")
             return WebSearchResult(
                 context=list(cached.get("context", [])),
@@ -2047,11 +2074,15 @@ async def search_web(
                 financial_history=list(cached.get("financial_history", [])),
                 research_notes=list(cached.get("research_notes", [])),
                 macro_note=str(cached.get("macro_note", "") or ""),
+                box_office_history=extract_box_office_history(
+                    list(cached.get("context", [])), list(cached.get("sources", []))
+                ),
             )
     except Exception as exc:
         logger.warning("Web-search cache lookup failed: %s", exc)
         cache_key = None
 
+    cost_ledger.set_flag("web_cache", "miss" if cache_key else "off")
     try:
         async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
             market_texts: list[str] = []
@@ -2710,6 +2741,7 @@ async def search_web(
                 financial_history,
                 research_notes,
                 macro_note,
+                extract_box_office_history(context, sources),
             )
             if cache_key:
                 # Never cache a totally empty result: one provider outage
@@ -2738,6 +2770,7 @@ async def search_web(
                                 "financial_history": result.financial_history,
                                 "research_notes": result.research_notes,
                                 "macro_note": result.macro_note,
+                                "box_office_history": result.box_office_history,
                             },
                         )
                     except Exception as exc:
@@ -2745,5 +2778,4 @@ async def search_web(
             return result
     except Exception as exc:
         logger.warning("Live web search failed: %s", exc)
-        return WebSearchResult([], [], [])
-
+        return WebSearchResult([], [], [], box_office_history={})

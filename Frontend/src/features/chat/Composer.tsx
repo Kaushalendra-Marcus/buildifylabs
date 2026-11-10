@@ -113,6 +113,7 @@ export function Composer() {
     useChatStore
       .getState()
       .addUserMessage(text, useChatStore.getState().activeFileName);
+    const conversationId = useChatStore.getState().activeConversationId;
 
     try {
       if (scope === 'live_web') {
@@ -131,7 +132,7 @@ export function Composer() {
         {
           query: text,
           source_scope: scope,
-          thread_id: useChatStore.getState().activeConversationId ?? undefined,
+          thread_id: conversationId ?? undefined,
           // Document picker: only for scopes with document evidence, and
           // only when the user actually picked files (empty = all PDFs).
           ...((scope === 'own_data' || scope === 'both') &&
@@ -143,24 +144,26 @@ export function Composer() {
         (delta) => useChatStore.getState().appendStreamingText(delta),
       );
       useQuotaStore.getState().recordQuestion();
-      useChatStore.getState().addAssistantMessage(output);
+      useChatStore.getState().addAssistantMessage(output, conversationId);
     } catch (caught) {
       if (isQuotaError(caught)) {
         if (caught.body.contact_form) {
           useQuotaStore.getState().applyLifetimeExhausted();
-          useChatStore.getState().addSystemNotice('lifetime-cap');
+          useChatStore.getState().addSystemNotice('lifetime-cap', null, null, conversationId);
         } else {
           useQuotaStore.getState().applyWindowExhausted();
           const started = useQuotaStore.getState().windowStartedAt;
           useChatStore.getState().addSystemNotice(
             'window-exhausted',
             started === null ? null : started + WINDOW_MS,
+            null,
+            conversationId,
           );
         }
       } else {
         useChatStore
           .getState()
-          .addSystemNotice('error', null, getErrorMessage(caught));
+          .addSystemNotice('error', null, getErrorMessage(caught), conversationId);
       }
     } finally {
       // The full result (or a notice) replaces the live prose — never show both.

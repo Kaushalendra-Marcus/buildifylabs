@@ -111,6 +111,9 @@ by " - ") and optional prior context. Extract what to search for and return
 Rules (all generic, no topic special-casing):
 - Strip chat phrasing ("can you tell me", "please", "show in chart form") and
   merge any appended clarification answers into the intent (they refine it).
+- If one message contains unrelated subjects or asks for different metrics
+  (for example a film's collection plus a person's biography), emit separate
+  queries for each subject. Do not combine them into one search query.
 - Keep named entities, numbers, comparisons, and time bounds verbatim.
 - Expand to at most 4 queries only when genuinely different angles help
   (e.g. a general angle plus a discussion/experience angle).

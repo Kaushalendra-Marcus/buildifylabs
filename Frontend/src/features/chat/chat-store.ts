@@ -135,8 +135,8 @@ interface ChatState {
    *  2) instead of a generic empty. */
   hasData: boolean | null;
   addUserMessage(content: string, fileName?: string | null): void;
-  addAssistantMessage(output: PipelineOutput): void;
-  addSystemNotice(kind: SystemNoticeKind, resetAt?: number | null, text?: string | null): void;
+  addAssistantMessage(output: PipelineOutput, conversationId?: string | null): void;
+  addSystemNotice(kind: SystemNoticeKind, resetAt?: number | null, text?: string | null, conversationId?: string | null): void;
   setPending(pending: PendingKind | null): void;
   setPendingStage(stage: string | null): void;
   appendStreamingText(delta: string): void;
@@ -210,7 +210,7 @@ addUserMessage: (content, fileName = null) =>
       };
     }),
 
-  addAssistantMessage: (output) =>
+  addAssistantMessage: (output, conversationId = null) =>
     set((state) => ({
       messages: [
         ...state.messages,
@@ -219,12 +219,12 @@ addUserMessage: (content, fileName = null) =>
           role: 'assistant',
           output,
           createdAt: Date.now(),
-          conversationId: state.activeConversationId ?? 'default',
+          conversationId: conversationId ?? state.activeConversationId ?? 'default',
         },
       ],
     })),
 
-  addSystemNotice: (kind, resetAt = null, text = null) =>
+  addSystemNotice: (kind, resetAt = null, text = null, conversationId = null) =>
     set((state) => ({
       messages: [
         ...state.messages,
@@ -234,7 +234,7 @@ addUserMessage: (content, fileName = null) =>
           kind,
           resetAt,
           text,
-          conversationId: state.activeConversationId ?? 'default',
+          conversationId: conversationId ?? state.activeConversationId ?? 'default',
         },
       ],
     })),

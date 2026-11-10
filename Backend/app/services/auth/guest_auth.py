@@ -19,6 +19,13 @@ async def create_guest_user(db: AsyncSession, fingerprint: str):
     existing = result.scalar_one_or_none()
 
     if existing:
+        # Older guest rows were created with the User model's default
+        # ``free`` plan. Normalize them on the next guest login so the
+        # frontend can apply guest restrictions consistently.
+        if existing.auth_provider == "guest" and existing.plan != "guest":
+            existing.plan = "guest"
+            await db.commit()
+            await db.refresh(existing)
         return {
             "user": existing,
             "access_token": create_access_token(existing.id),
@@ -28,7 +35,7 @@ async def create_guest_user(db: AsyncSession, fingerprint: str):
     user = User(
         auth_provider="guest",
         is_active=True,
-        plan="free",
+        plan="guest",
         device_fingerprint=fingerprint,
         questions_in_window=0,
         questions_lifetime=0,

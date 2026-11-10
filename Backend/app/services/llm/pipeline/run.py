@@ -227,6 +227,7 @@ async def run_pipeline(
     macro_note: Optional[str] = None,
     price_history: Optional[list] = None,
     financial_history: Optional[list] = None,
+    box_office_history: Optional[dict] = None,
     research_notes: Optional[list] = None,
     prior_research_state: Optional[Dict[str, Any]] = None,
     plan_query: Optional[str] = None,
@@ -273,6 +274,8 @@ async def run_pipeline(
         price_history = []
     if financial_history is None:
         financial_history = []
+    if box_office_history is None:
+        box_office_history = {}
     if research_notes is None:
         research_notes = []
 
@@ -383,6 +386,7 @@ async def run_pipeline(
                 macro_data=macro_data,
                 price_history=price_history,
                 financial_history=financial_history,
+                box_office_history=box_office_history,
             )
         return fallback_output(reason=reason, confidence=0.0)
 
@@ -1168,6 +1172,7 @@ async def run_pipeline(
             macro_data=macro_data,
             price_history=price_history,
             financial_history=financial_history,
+            box_office_history=box_office_history,
         )
         if output.visuals:
             thinking.append(

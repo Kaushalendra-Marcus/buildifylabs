@@ -76,6 +76,17 @@ def client(db_engine, monkeypatch):
 
 
 class TestSignup:
+    def test_guest_login_returns_guest_plan_and_reuses_device(self, client):
+        test_client, _sender = client
+        first = test_client.post("/auth/guest", json={"device_id": "device-guest-1"})
+        second = test_client.post("/auth/guest", json={"device_id": "device-guest-1"})
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json()["user"]["plan"] == "guest"
+        assert second.json()["user"]["plan"] == "guest"
+        assert first.json()["user"]["id"] == second.json()["user"]["id"]
+
     def test_signup_succeeds_with_tokens(self, client):
         test_client, sender = client
         resp = test_client.post(

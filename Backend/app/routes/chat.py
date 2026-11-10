@@ -52,6 +52,7 @@ from app.services.data.result_checks import (
     should_cap_confidence,
     sql_result_sanity,
 )
+from app.services import cost_ledger
 from app.services.llm.pipeline import guard_metrics
 from app.services.data.stats import (
     apply_what_if,
@@ -400,6 +401,7 @@ async def _answer_request(
     cleaned_sql = None
     table_name = None
     data_profile: dict = {}
+    cost_ledger.begin_request()
     thread_id = _thread_id_for(request)
     prior_clarification, prior_data, prior_research_state, prior_query = (
         await _load_prior_context(db, user_id, thread_id)
@@ -798,6 +800,7 @@ async def _answer_request(
         price_history = []
         financial_history = []
         research_notes = []
+        box_office_history = {}
         if search_result is not None:
             news_context = (
                 search_result.context
@@ -829,6 +832,9 @@ async def _answer_request(
             )
             research_notes = (
                 getattr(search_result, "research_notes", []) or []
+            )
+            box_office_history = (
+                getattr(search_result, "box_office_history", {}) or {}
             )
             # Channels stay separate (P0#15): macro_data is NEVER merged
             # into market_data (a market chart must never contain CPI/GDP).
@@ -900,6 +906,7 @@ async def _answer_request(
             macro_note=macro_note,
             price_history=price_history,
             financial_history=financial_history,
+            box_office_history=box_office_history,
             research_notes=research_notes,
             prior_research_state=prior_research_state,
             plan_query=plan_query,
@@ -937,6 +944,9 @@ async def _answer_request(
             "sql_interpretation": describe_sql(cleaned_sql) if cleaned_sql else "",
             "data_profile": compact_profile(data_profile),
             "sql_sanity": sql_result_sanity(rows, cleaned_sql, data_profile),
+            # Provider spend for this request (LLM calls/tokens, Tavily,
+            # Firecrawl credits, web-cache hit/miss) -> scripts/cost_report.py.
+            "cost": cost_ledger.snapshot(),
             # Kill-switch disclosure: when live_web was requested but served
             # from own_data, record both so the answer is traceable.
             "scope_requested": request.source_scope,

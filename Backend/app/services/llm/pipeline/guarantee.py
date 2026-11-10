@@ -33,6 +33,7 @@ def ensure_visuals(
     macro_data: Optional[list] = None,
     price_history: Optional[list] = None,
     financial_history: Optional[list] = None,
+    box_office_history: Optional[dict] = None,
 ) -> PipelineOutput:
     """Visual guarantee: a validated normal answer must never go out naked
     when plottable tool outputs exist. Clarifications and already-visual
@@ -63,10 +64,97 @@ def ensure_visuals(
     macro_data = list(macro_data or [])
     price_history = list(price_history or [])
     financial_history = list(financial_history or [])
+    box_office_history = dict(box_office_history or {})
     # P0#15: channels stay separate. combined_series is NOT market+macro;
     # the market path charts market_data only, macro never enters it.
     combined_series = list(market_data)
     synthesized: list = []
+
+    # Box-office questions need a domain-specific series. Generic figure
+    # extraction is deliberately not allowed to compare headline percentages
+    # with collection totals.
+    points = [
+        item for item in (box_office_history.get("points") or [])
+        if isinstance(item, dict) and isinstance(item.get("value"), (int, float))
+    ]
+    if len(points) >= 2:
+        labels = [str(item["label"]) for item in points]
+        values = [float(item["value"]) for item in points]
+        source_ids = sorted({str(item.get("source_id")) for item in points if item.get("source_id")})
+        graph = VisualOutput(
+            visual_type="graph",
+            title="Daily box-office collection",
+            subtitle="Reported daily collection by release day.",
+            props={
+                "chart_type": "bar",
+                "labels": labels,
+                "datasets": [{"name": "Collection (INR)", "values": values}],
+            },
+            provenance={
+                "query": query,
+                "entities": [],
+                "metric": "box_office_collection",
+                "units": "INR",
+                "timeframe": box_office_history.get("release_date") or "release days",
+                "frequency": "daily",
+                "source_ids": source_ids,
+                "data_points": {"days": [item["day"] for item in points]},
+            },
+        )
+        table = VisualOutput(
+            visual_type="table",
+            title="Daily collection details",
+            subtitle="Only explicitly reported day-wise figures are shown.",
+            props={
+                "columns": ["Release day", "Collection", "Source"],
+                "values": [
+                    [item["label"], item.get("display_value", ""), f"[{item['citation']}]"]
+                    for item in points
+                ],
+            },
+            provenance=graph.provenance,
+        )
+        synthesized.extend([graph, table])
+        synthesized.append(
+            VisualOutput(
+                visual_type="metric",
+                title="Collection days covered",
+                subtitle="Highest explicitly reported release-day number in the retrieved evidence.",
+                props={
+                    "label": "Reported days",
+                    "value": max(int(item["day"]) for item in points),
+                    "change_pct": None,
+                    "direction": "flat",
+                },
+                provenance={
+                    **graph.provenance,
+                    "metric": "box_office_reported_days",
+                },
+            )
+        )
+        budget = box_office_history.get("budget")
+        if isinstance(budget, dict) and budget.get("value"):
+            cumulative = sum(values)
+            coverage = cumulative / float(budget["value"]) * 100
+            synthesized.append(
+                VisualOutput(
+                    visual_type="metric",
+                    title="Reported collection vs budget",
+                    subtitle="Cumulative reported day-wise collection divided by the cited production budget.",
+                    props={
+                        "label": "Budget coverage",
+                        "value": round(coverage, 2),
+                        "change_pct": None,
+                        "direction": "flat",
+                        "detail": f"{cumulative:g} / {float(budget['value']):g} INR",
+                    },
+                    provenance={
+                        **graph.provenance,
+                        "metric": "box_office_budget_coverage",
+                        "computation_ids": ["box_office_cumulative_divided_by_budget"],
+                    },
+                )
+            )
 
     def _strip_comparison_visuals(visuals: list) -> tuple[list, int]:
         kept = [
@@ -339,6 +427,11 @@ def ensure_visuals(
             except Exception as exc:
                 logger.warning("What-if visual failed: %s", exc)
         # Tables of raw rows may still help; never market-history graphs.
+        if synthesized:
+            output.visuals = list(output.visuals) + synthesized[: get_settings().MAX_SYNTHESIZED_VISUALS]
+            return output.model_copy(update={"visuals": _provenance_filter_final(
+                _drop_sources_table_visuals(output.visuals), query, gate
+            )})
         if rows:
             try:
                 row_visuals = _visuals_from_rows(rows, computed_numbers, preferred_visual)

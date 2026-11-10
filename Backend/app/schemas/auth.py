@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from uuid import UUID
 from typing import Optional
 from pydantic import field_validator
@@ -43,8 +43,7 @@ class AuthUserResponse(BaseModel):
     name: Optional[str] = None
     plan: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AuthResponse(BaseModel):

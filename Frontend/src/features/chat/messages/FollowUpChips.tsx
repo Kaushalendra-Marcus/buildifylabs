@@ -24,31 +24,34 @@ export function FollowUpChips({ followups }: { followups: string[] }) {
 
   const handleFollowUp = async (question: string) => {
     addUserMessage(question);
+    const conversationId = useChatStore.getState().activeConversationId;
     setPending('thinking');
 
     try {
       const response = await sendQuery({
         query: question,
         source_scope: scope,
-        thread_id: useChatStore.getState().activeConversationId ?? undefined,
+        thread_id: conversationId ?? undefined,
       });
       useQuotaStore.getState().recordQuestion();
-      addAssistantMessage(response);
+      addAssistantMessage(response, conversationId);
     } catch (caught) {
       if (isQuotaError(caught)) {
         if (caught.body.contact_form) {
           useQuotaStore.getState().applyLifetimeExhausted();
-          addSystemNotice('lifetime-cap');
+          addSystemNotice('lifetime-cap', null, null, conversationId);
         } else {
           useQuotaStore.getState().applyWindowExhausted();
           const started = useQuotaStore.getState().windowStartedAt;
           addSystemNotice(
             'window-exhausted',
             started === null ? null : started + WINDOW_MS,
+            null,
+            conversationId,
           );
         }
       } else {
-        addSystemNotice('error', null, getErrorMessage(caught));
+        addSystemNotice('error', null, getErrorMessage(caught), conversationId);
       }
     } finally {
       setPending(null);

@@ -18,7 +18,7 @@ profile (column names come from information_schema, quoted). Fail-soft: None.
 
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
@@ -118,20 +118,33 @@ async def compute_drivers(db, table_name: str, profile: Optional[dict]) -> Optio
         end_exclusive = high + timedelta(days=1)
         recent_start = end_exclusive - timedelta(days=window)
         prior_start = recent_start - timedelta(days=window)
-        params = {
-            "ps": prior_start.isoformat(),
-            "rs": recent_start.isoformat(),
-            "re": end_exclusive.isoformat(),
-        }
-
         dialect = getattr(getattr(getattr(db, "bind", None), "dialect", None), "name", "")
         raw_type = str(date_col.get("raw_type") or "").lower()
 
+        def bind_value(day: date):
+            """Window bound typed for the column.
+
+            asyncpg is strict about parameter types: it rejects a str for a
+            date/timestamp parameter (and CAST(:x AS DATE) does not help: the
+            parameter is still inferred as date). Uploads store dates as
+            TIMESTAMP, so Postgres gets real date/datetime objects; SQLite and
+            ISO-text columns compare as ISO strings.
+            """
+            if dialect == "postgresql":
+                if "timestamp" in raw_type:
+                    zone = timezone.utc if "with time zone" in raw_type else None
+                    return datetime(day.year, day.month, day.day, tzinfo=zone)
+                if raw_type == "date":
+                    return day
+            return day.isoformat()
+
+        params = {
+            "ps": bind_value(prior_start),
+            "rs": bind_value(recent_start),
+            "re": bind_value(end_exclusive),
+        }
+
         def bound(name: str) -> str:
-            if dialect == "postgresql" and "timestamp" in raw_type:
-                return f"CAST(:{name} AS TIMESTAMP)"
-            if dialect == "postgresql" and raw_type == "date":
-                return f"CAST(:{name} AS DATE)"
             return f":{name}"
 
         d, v = _quote_ident(date_col["name"]), _quote_ident(value_col["name"])
