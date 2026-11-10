@@ -49,8 +49,15 @@ def _interleave_entities(rows: list[list], max_rows: int) -> list[list]:
 # "2024") never qualify, so dates and ranks cannot leak into charts — but a
 # number attached to a count noun ("16 billion views", "12,655 open jobs")
 # IS chartable evidence and must become visuals, never prose-only.
+# Scale words. Indian units must be recognised: crore = 1e7, lakh = 1e5.
+# Without them "₹100 crore" was captured as "₹100" with value 100 instead of
+# 1,000,000,000 (wrong figure text AND wrong chart value).
+_SCALE_ALT = (
+    r"crores?|Crores?|lakhs?|Lakhs?|lacs?|Lacs?|Cr|"
+    r"k|K|M|B|million|billion|thousand"
+)
 _FIGURE_MONEY_RE = re.compile(
-    r"([$€₹£])\s?(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand)?\b"
+    r"([$€₹£])\s?(\d[\d,]*(?:\.\d+)?)\s?(" + _SCALE_ALT + r")?\b"
 )
 _FIGURE_PERCENT_RE = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s?(%(?!\w)|percent\b)")
 _FIGURE_COUNT_NOUNS = (
@@ -59,7 +66,7 @@ _FIGURE_COUNT_NOUNS = (
     r"customers?|clients?|members?|orders?|listeners?|students?"
 )
 _FIGURE_COUNT_RE = re.compile(
-    r"(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand)?\b\s?"
+    r"(\d[\d,]*(?:\.\d+)?)\s?(" + _SCALE_ALT + r")?\b\s?"
     r"(?:open\s+)?(" + _FIGURE_COUNT_NOUNS + r")\b",
     re.IGNORECASE,
 )
@@ -68,7 +75,7 @@ _FIGURE_COUNT_RE = re.compile(
 # from the nearest count noun in a small window ("lifetime views (about
 # 350 billion)" -> views). Unit-less decimals ("58.3") never qualify.
 _FIGURE_SCALED_BARE_RE = re.compile(
-    r"(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand)\b",
+    r"(\d[\d,]*(?:\.\d+)?)\s?(" + _SCALE_ALT + r")\b",
     re.IGNORECASE,
 )
 _FIGURE_NOUN_WINDOW = 80
@@ -96,6 +103,10 @@ _FIGURE_SCALE = {
     "k": 1e3, "K": 1e3, "thousand": 1e3,
     "M": 1e6, "million": 1e6,
     "B": 1e9, "billion": 1e9,
+    # Indian numbering: 1 lakh = 100,000; 1 crore = 10,000,000.
+    "lakh": 1e5, "Lakh": 1e5, "lakhs": 1e5, "Lakhs": 1e5,
+    "lac": 1e5, "Lac": 1e5, "lacs": 1e5, "Lacs": 1e5,
+    "crore": 1e7, "Crore": 1e7, "crores": 1e7, "Crores": 1e7, "Cr": 1e7,
 }
 
 
@@ -670,6 +681,74 @@ def _apply_budget_constraint(figures: list, query: str) -> list:
     return kept
 
 
+# Excerpt fragments from search providers are joined with "..." / "…"
+# ("Title ...: body ... more"). The display excerpt must come from ONE fragment:
+# a join in the middle of a sentence is an artifact, not text.
+_ELLIPSIS_RUN_RE = re.compile(r"\s*(?:\.{3,}|\u2026)\s*")
+_SENTENCE_START_RE = re.compile(r"[.!?][\"')\]]?\s+(?=[A-Z0-9₹$€£\"'(])")
+_SENTENCE_END_RE = re.compile(r"[.!?](?=[\"')\]]?(?:\s|$))")
+_DISPLAY_BEFORE = 160
+_DISPLAY_AFTER = 140
+_DISPLAY_MAX = 280
+
+
+def _display_context(text: str, match_start: int, match_end: int) -> str:
+    """Readable excerpt around one figure, for the Figures-cited table.
+
+    Display only: entity/metric binding keeps using the original `context`
+    window, so chart labels and eligibility are unaffected. The excerpt stays
+    inside the single "..."-delimited fragment that holds the figure, begins at
+    a sentence start when one is near (else a word boundary) and ends at the
+    sentence end (else a word boundary). Returns "" when it cannot build one,
+    in which case callers fall back to `context`.
+    """
+    try:
+        lo, hi = 0, len(text)
+        for run in _ELLIPSIS_RUN_RE.finditer(text):
+            if run.end() <= match_start:
+                lo = run.end()
+            elif run.start() >= match_end:
+                hi = run.start()
+                break
+        fragment = text[lo:hi]
+        start, end = match_start - lo, match_end - lo
+        if start < 0 or end > len(fragment):
+            return ""
+        left = max(0, start - _DISPLAY_BEFORE)
+        boundaries = [
+            m.end()
+            for m in _SENTENCE_START_RE.finditer(
+                fragment, left, min(len(fragment), start + 1)
+            )
+        ]
+        if boundaries:
+            left = boundaries[-1]
+        else:
+            while 0 < left < start and not fragment[left - 1].isspace():
+                left += 1
+        right = min(len(fragment), end + _DISPLAY_AFTER)
+        sentence_end = _SENTENCE_END_RE.search(fragment, end, right)
+        if sentence_end:
+            right = sentence_end.end()
+        else:
+            while end < right < len(fragment) and not fragment[right].isspace():
+                right -= 1
+        excerpt = " ".join(fragment[left:right].split())
+        excerpt = re.sub(r"\[[^\]]*\]", " ", excerpt)  # [...] / [n] remnants
+        excerpt = excerpt.replace("|", " ")
+        excerpt = re.sub(r"#+\s*", "", excerpt)  # markdown headings
+        excerpt = re.sub(r"[-–—]{2,}", " ", excerpt)  # table separators
+        excerpt = re.sub(r"^[\s:;,.\-–—]+", "", excerpt)  # join punctuation
+        excerpt = re.sub(r"\s{2,}", " ", excerpt).strip()
+        if len(excerpt) > _DISPLAY_MAX:
+            cut = excerpt[:_DISPLAY_MAX]
+            snap = cut.rfind(" ")
+            excerpt = (cut[:snap] if snap > _DISPLAY_MAX - 60 else cut).strip()
+        return excerpt
+    except Exception:
+        return ""
+
+
 def _bind_figure(
     *,
     text: str,
@@ -817,6 +896,9 @@ def _bind_figure(
         "value": value,
         "unit": unit,
         "context": window,
+        # Display-only excerpt (one fragment, sentence-bounded); binding
+        # above and chart labels keep using `context`.
+        "display_context": _display_context(text, match_start, match_end),
         "full_context": full_scope[:2000],
         "ref": ref,
         "entity": entity,

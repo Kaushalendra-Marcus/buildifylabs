@@ -90,6 +90,28 @@ class Settings(BaseSettings):
     # snippet, but also more credits/latency), so keep its fan-out tighter than
     # Tavily's.
     FIRECRAWL_MAX_RESULTS: int = 3
+    # --- Firecrawl cost controls ---
+    # Credit model (Firecrawl billing): search = 2 credits per <=10 results, PLUS
+    # 1 credit per result when page scraping (markdown) is on. With the defaults
+    # above that is ~5 credits per search call. search_web used to fire one
+    # Firecrawl search per rewritten query (up to 4), plus one per entity in the
+    # financial second pass and again in the recovery pass: ~20 credits for a
+    # normal live-web question, 50+ in the worst case.
+    # Max Firecrawl searches per live-web request (Tavily still runs every
+    # query; Firecrawl only adds independent corroboration). 0 = unlimited.
+    FIRECRAWL_MAX_QUERIES_PER_REQUEST: int = 2
+    # Scrape each result's page as markdown (richer evidence, +1 credit/result).
+    # False = search-only snippets at 2 credits per call (~60% cheaper).
+    FIRECRAWL_SCRAPE_RESULTS: bool = True
+    # Process-local daily ceiling on ESTIMATED Firecrawl credits (UTC day). When
+    # reached, Firecrawl is skipped and Tavily carries the request. 0 = off.
+    # Per process: with N instances the effective ceiling is N x this value.
+    FIRECRAWL_DAILY_CREDIT_BUDGET: int = 0
+    # Share cached PUBLIC web evidence across users/threads. search_web only
+    # fetches public pages and the key already encodes the framed queries, so
+    # per-user/per-thread keys only made every new thread re-pay for the same
+    # search. False restores the old per-user/per-thread isolation.
+    WEB_SEARCH_CACHE_SHARED: bool = True
     WEB_SEARCH_MAX_RESULTS: int = 5
     # Live-web cache TTL (specs/07 FR5: ~6h so repeat external questions
     # share evidence instead of re-scraping at full latency/cost).

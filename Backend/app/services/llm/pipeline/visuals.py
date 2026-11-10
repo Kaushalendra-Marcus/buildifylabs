@@ -24,7 +24,14 @@ def _figures_table_visual(figures: list) -> Optional[VisualOutput]:
         props={
             "columns": ["Figure", "Context"],
             "values": [
-                [f"{figure['text']} [{figure['ref']}]", _clean_figure_context(figure["context"])]
+                [
+                    f"{figure['text']} [{figure['ref']}]",
+                    # display_context = one-fragment, sentence-bounded excerpt
+                    # (no "..." joins); falls back to the binding window.
+                    _clean_figure_context(
+                        figure.get("display_context") or figure["context"]
+                    ),
+                ]
                 for figure in figures
             ],
         },
@@ -40,7 +47,17 @@ def _clean_figure_context(context: str) -> str:
     via the citation number, not the dots.
     """
     try:
-        cleaned = re.sub(r"^[\s.…]+", "", str(context or ""))
+        # Leading ellipsis runs FIRST: they are a cut, not a join, and must
+        # never become a dash. A trailing run is left untouched (the frontend
+        # marks the cut).
+        cleaned = re.sub(r"^[\s.\u2026]+", "", str(context or ""))
+        # Fragment join before punctuation ("Mogul's ...: it became") is
+        # just the punctuation; a join mid-sentence becomes a plain dash.
+        # (?!\.) makes the dot run match as a whole, never a 3-of-4 prefix.
+        cleaned = re.sub(r"\s*(?:\.{3,}(?!\.)|\u2026)\s*(?=[:;,.!?])", "", cleaned)
+        cleaned = re.sub(r"\s*(?:\.{3,}(?!\.)|\u2026)\s*(?=\S)", " \u2013 ", cleaned)
+        cleaned = re.sub(r"^[\s:;,]+", "", cleaned)
+        cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
         return cleaned or str(context or "")
     except Exception:
         return str(context or "")

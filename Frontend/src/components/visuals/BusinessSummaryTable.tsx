@@ -41,9 +41,19 @@ function shortDate(raw: string): string {
   return text;
 }
 
-/** Strip markdown/table junk that leaks from raw web snippets, and mark
- *  mid-sentence cuts with "…" so a sliced window reads as a quote fragment
- *  instead of a typo ("b outlook" → "…outlook"). */
+/** Real 1–2 letter words: never mistaken for a mid-word cut stub. */
+const SHORT_REAL_WORDS = new Set([
+  'a', 'i', 'an', 'as', 'at', 'be', 'by', 'do', 'go', 'he', 'if', 'in', 'is',
+  'it', 'me', 'my', 'no', 'of', 'on', 'or', 'so', 'to', 'up', 'us', 'we',
+]);
+
+/** Strip markdown/table junk that leaks from raw web snippets.
+ *
+ *  Search providers join excerpt fragments with "..." or "…" ("Title ...: body").
+ *  A run of dots in the middle of text is a join artifact, never content, so it
+ *  becomes a clean break (or vanishes before punctuation). A cut at either end
+ *  is marked with ONE attached "…", so a sliced window reads as a quote
+ *  fragment instead of a typo. */
 function cleanProse(raw: string): string {
   let text = String(raw ?? '').replace(/\s+/g, ' ');
   text = text.replace(/\[[^\]]*\]/g, ' '); // [...] / stray [n] fragments
@@ -52,11 +62,34 @@ function cleanProse(raw: string): string {
   text = text.replace(/(·\s*){2,}/g, '· ');
   text = text.replace(/[-–—]{2,}/g, ' – ');
   text = text.replace(/\*{1,2}([^*]+?)\*{1,2}/g, '$1');
+
+  // (?!\.) makes a dot run match as a WHOLE: without it the engine can settle
+  // for two of three dots to satisfy a following lookahead and leave a stray
+  // period behind ("generator ... will" → "generator. will").
+  const cutAtStart = /^\s*(?:\.{2,}(?!\.)|…)/.test(text);
+  const cutAtEnd = /(?:\.{2,}(?!\.)|…)\s*$/.test(text);
+  text = text
+    .replace(/^\s*(?:\.{2,}(?!\.)|…)\s*/, '')
+    .replace(/\s*(?:\.{2,}(?!\.)|…)\s*$/, '');
+  text = text.replace(/\s*(?:\.{2,}(?!\.)|…)\s*(?=[:;,.!?])/g, ''); // "...:" → ":"
+  text = text.replace(/\s*(?:\.{2,}(?!\.)|…)\s*/g, ' – '); // inner join → break
+  text = text.replace(/^[\s:;,.\-–—]+/, '');
   text = text.replace(/\s{2,}/g, ' ').trim();
-  // Leading 1–2 char stub from a mid-word cut ("b outlook", "le Energy").
-  text = text.replace(/^[A-Za-z]{1,2}\s+(?=[A-Za-z])/, '');
-  if (/^[a-z]/.test(text)) text = `…${text}`;
-  if (text && !/[.!?…:;]$/.test(text)) text = `${text} …`;
+
+  // Leading 1–2 char stub from a mid-word cut ("b outlook", "le Energy") —
+  // but never delete a real word ("it became…", "an outlook…").
+  const stub = /^([A-Za-z]{1,2})\s+(?=[A-Za-z])/.exec(text);
+  if (
+    stub &&
+    /^[a-z]/.test(text) &&
+    !SHORT_REAL_WORDS.has(stub[1].toLowerCase())
+  ) {
+    text = text.slice(stub[0].length);
+  }
+  if (cutAtStart || /^[a-z]/.test(text)) text = `…${text}`;
+  if (text && (cutAtEnd || !/[.!?…:;]$/.test(text))) {
+    text = `${text.replace(/…$/, '')}…`;
+  }
   return text;
 }
 

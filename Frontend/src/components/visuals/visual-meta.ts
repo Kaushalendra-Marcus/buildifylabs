@@ -87,14 +87,47 @@ function graphTakeaway(props: GraphProps): string | null {
   return `${moves.map((move) => `${move.label} ${move.change}`).join(' · ')} over the period.`;
 }
 
-/** Context fallback from provenance: "Revenue · FY2025 · USD". */
+/** Internal unit-class tags the backend uses; never meant for readers. */
+const INTERNAL_UNIT_TAGS = new Set([
+  'money',
+  'percent',
+  'count',
+  'currency',
+  'unknown',
+  'none',
+]);
+
+/** Turn raw provenance fields into reader-friendly text, or null to omit:
+ *  metric "revenue" → "Revenue", timeframe "3Y" → "3-year", and internal
+ *  unit tags ("money") are dropped. Real codes like "USD" / "FY2025" pass
+ *  through unchanged. */
+function humanizeProvenancePart(
+  kind: 'metric' | 'timeframe' | 'units',
+  value: unknown,
+): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!text) return null;
+  if (kind === 'units') {
+    return INTERNAL_UNIT_TAGS.has(text.toLowerCase()) ? null : text;
+  }
+  if (kind === 'timeframe') {
+    const years = /^(\d+)\s*y(?:ears?)?$/i.exec(text);
+    return years ? `${years[1]}-year` : text;
+  }
+  const spaced = text.replace(/_/g, ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** Context fallback from provenance: "Revenue · 3-year" / "Revenue · FY2025 · USD". */
 function provenanceContext(visual: VisualOutput): string | null {
   const provenance = visual.provenance;
   if (!provenance || typeof provenance !== 'object') return null;
-  const parts = [provenance.metric, provenance.timeframe, provenance.units]
-    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
-    .map((part) => part.trim())
-    .slice(0, 3);
+  const parts = [
+    humanizeProvenancePart('metric', provenance.metric),
+    humanizeProvenancePart('timeframe', provenance.timeframe),
+    humanizeProvenancePart('units', provenance.units),
+  ].filter((part): part is string => part !== null);
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 

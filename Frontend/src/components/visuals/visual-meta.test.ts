@@ -87,6 +87,17 @@ describe('visualSubtitle — InsightDeck chart takeaway', () => {
     ).toBe('Revenue · FY2025 · USD');
   });
 
+  it('humanizes raw provenance fields instead of showing internal tags', () => {
+    expect(
+      visualSubtitle({
+        visual_type: 'table',
+        title: 'Figures cited',
+        props: { columns: ['Figure', 'Context'], values: [] },
+        provenance: { metric: 'revenue', timeframe: '3Y', units: 'money' },
+      }),
+    ).toBe('Revenue · 3-year');
+  });
+
   it('returns null rather than an empty subtitle', () => {
     expect(
       visualSubtitle({

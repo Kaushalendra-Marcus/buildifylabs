@@ -14,6 +14,7 @@ import asyncio
 import logging
 import re
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from json import JSONDecodeError
@@ -1305,6 +1306,71 @@ FIRECRAWL_SNIPPET_MAX_CHARS = 4000
 _firecrawl_client: Any = None
 _firecrawl_client_key: Optional[str] = None
 
+# --- Firecrawl cost controls -------------------------------------------------
+# Billing: search = 2 credits per <=10 results, +1 credit per scraped result.
+# search_web fans out one Firecrawl search per query (and again in the financial
+# second pass / recovery pass), so uncapped it cost ~20 credits per question.
+#
+# Per-request state lives in a ContextVar holding a MUTABLE dict: the fan-out
+# runs in asyncio.gather child tasks, and mutating a shared dict is visible to
+# all of them (rebinding an int in a child task would not be).
+_firecrawl_request_state: ContextVar[Optional[dict]] = ContextVar(
+    "firecrawl_request_state", default=None
+)
+# Process-local daily tally of ESTIMATED credits (UTC day).
+_firecrawl_daily: dict[str, Any] = {"day": "", "credits": 0}
+_firecrawl_budget_warned_day = ""
+
+
+def _firecrawl_today() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _firecrawl_allowed(settings) -> bool:
+    """True when this request may spend another Firecrawl search.
+
+    Two independent gates, both fail-open on error (a broken guard must never
+    take search down): the per-request call cap, then the daily credit budget.
+    When either blocks, Tavily alone serves the request.
+    """
+    global _firecrawl_budget_warned_day
+    try:
+        state = _firecrawl_request_state.get()
+        cap = int(getattr(settings, "FIRECRAWL_MAX_QUERIES_PER_REQUEST", 0) or 0)
+        if state is not None and cap > 0 and state["calls"] >= cap:
+            logger.info("Firecrawl skipped: per-request cap of %d search(es) reached.", cap)
+            return False
+        budget = int(getattr(settings, "FIRECRAWL_DAILY_CREDIT_BUDGET", 0) or 0)
+        today = _firecrawl_today()
+        if _firecrawl_daily["day"] != today:
+            _firecrawl_daily["day"] = today
+            _firecrawl_daily["credits"] = 0
+        if budget > 0 and _firecrawl_daily["credits"] >= budget:
+            if _firecrawl_budget_warned_day != today:
+                _firecrawl_budget_warned_day = today
+                logger.warning("Firecrawl daily credit budget reached (%d est. credits, budget %d); skipping Firecrawl until tomorrow (UTC).", _firecrawl_daily["credits"], budget)
+            return False
+        if state is not None:
+            state["calls"] += 1
+        return True
+    except Exception:
+        return True
+
+
+def _firecrawl_record_credits(result_count: int, scrape: bool) -> int:
+    """Add one search's estimated credits to the daily tally and log them."""
+    credits = 2 + (max(0, int(result_count)) if scrape else 0)
+    try:
+        today = _firecrawl_today()
+        if _firecrawl_daily["day"] != today:
+            _firecrawl_daily["day"] = today
+            _firecrawl_daily["credits"] = 0
+        _firecrawl_daily["credits"] += credits
+        logger.info("FIRECRAWL search ~%d credit(s) (%d result(s), scrape=%s); ~%d est. credits today in this process.", credits, result_count, scrape, _firecrawl_daily["credits"])
+    except Exception:
+        pass
+    return credits
+
 
 def _get_firecrawl_client(settings):
     """Lazily create the Firecrawl client so key-less deployments and tests
@@ -1405,21 +1471,22 @@ async def _firecrawl_search(
         return []
     if firecrawl is None:
         return []
+    if not _firecrawl_allowed(settings):
+        return []
 
     result_limit = min(
         settings.WEB_SEARCH_MAX_RESULTS,
         getattr(settings, "FIRECRAWL_MAX_RESULTS", 3),
     )
     sources = ["news"] if time_sensitive else ["web"]
-    data = await firecrawl.search(
-        query_item,
-        limit=result_limit,
-        sources=sources,
-        scrape_options=ScrapeOptions(
+    scrape = bool(getattr(settings, "FIRECRAWL_SCRAPE_RESULTS", True))
+    search_kwargs: dict[str, Any] = {"limit": result_limit, "sources": sources}
+    if scrape:
+        search_kwargs["scrape_options"] = ScrapeOptions(
             formats=["markdown"],
             only_main_content=True,
-        ),
-    )
+        )
+    data = await firecrawl.search(query_item, **search_kwargs)
     warning = getattr(data, "warning", None)
     if warning:
         logger.warning("Firecrawl search warning for %r: %s", query_item, warning)
@@ -1434,6 +1501,7 @@ async def _firecrawl_search(
         triple = _firecrawl_item_to_triple(item, fallback_position=index)
         if triple is not None:
             triples.append(triple)
+    _firecrawl_record_credits(len(items), scrape)
     return triples[:result_limit]
 
 
@@ -1891,6 +1959,8 @@ async def search_web(
     advisory and can never narrow an answer by failing.
     """
     settings = get_settings()
+    # Fresh per-request Firecrawl call counter (shared by every fan-out task).
+    _firecrawl_request_state.set({"calls": 0})
     time_sensitive = False
     if isinstance(query, str):
         framed = await rewrite_search_queries(
@@ -1941,10 +2011,15 @@ async def search_web(
                 _tf_label = (_ptr(raw_text or "").label or "")
             except Exception:
                 _tf_label = ""
+        # Public web evidence is shareable: the key already encodes the framed
+        # queries, so scoping it to user/thread only made every new thread
+        # re-pay for an identical search (WEB_SEARCH_CACHE_SHARED=false restores).
+        _share_cache = bool(getattr(settings, "WEB_SEARCH_CACHE_SHARED", True))
         cache_key = make_cache_key(
             search_queries, entities, company_name, time_sensitive,
             planned_tools=planned_tools,
-            user_id=user_id, thread_id=thread_id,
+            user_id=None if _share_cache else user_id,
+            thread_id=None if _share_cache else thread_id,
             timeframe_label=_tf_label,
             evidence_class=evidence_class,
             provider_version=provider_version,

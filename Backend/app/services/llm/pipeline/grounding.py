@@ -216,8 +216,13 @@ def _prose_claims_grounded(
         return False
 
 
+# Indian units (crore = 1e7, lakh = 1e5) are listed first so "Crore" is never
+# read as "Cr" + "ore". Must stay in sync with figures._SCALE_ALT: a figure
+# extracted as 1e9 from "₹100 crore" has to ground against the same snippet.
 _VISUAL_NUMBER_RE = re.compile(
-    r"([$€₹£])?\s?(\d[\d,]*(?:\.\d+)?)\s?(k|K|M|B|million|billion|thousand|%|percent)?(?![A-Za-z])"
+    r"([$€₹£])?\s?(\d[\d,]*(?:\.\d+)?)\s?"
+    r"(crores?|Crores?|lakhs?|Lakhs?|lacs?|Lacs?|Cr|"
+    r"k|K|M|B|million|billion|thousand|%|percent)?(?![A-Za-z])"
 )
 # NOTE: the trailing (?![A-Za-z]) is load-bearing, not cosmetic. Without it a
 # scale letter matches the initial of the following word ("120, Mar 2024"
@@ -227,6 +232,9 @@ _VISUAL_SCALE = {
     "k": 1e3, "K": 1e3, "thousand": 1e3,
     "M": 1e6, "million": 1e6,
     "B": 1e9, "billion": 1e9,
+    "lakh": 1e5, "Lakh": 1e5, "lakhs": 1e5, "Lakhs": 1e5,
+    "lac": 1e5, "Lac": 1e5, "lacs": 1e5, "Lacs": 1e5,
+    "crore": 1e7, "Crore": 1e7, "crores": 1e7, "Crores": 1e7, "Cr": 1e7,
 }
 
 
@@ -269,7 +277,8 @@ def _iter_visual_numbers(props: Any) -> list[float]:
             # Only strings that look like figures ($, %, k/M/B) count;
             # plain category labels ("east", "Jan 01") are ignored.
             if re.search(r"[$€₹£%]", node) or re.search(
-                r"\b(k|K|M|B|million|billion|thousand|percent)\b", node
+                r"\b(k|K|M|B|million|billion|thousand|percent|crores?|Crores?|lakhs?|Lakhs?|Cr)\b",
+                node,
             ):
                 found.extend(_parse_scaled_number(_strip_citations(node)))
             elif re.fullmatch(r"\s*[\d,]+(\.\d+)?\s*", node):
