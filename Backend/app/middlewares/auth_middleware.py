@@ -54,4 +54,11 @@ async def get_current_user(
     if not user.is_active:
         raise HTTPException(status_code=403, detail="User is disabled")
 
+    if int(payload.get("token_version", 0)) != int(user.token_version or 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been revoked",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return user

@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from functools import lru_cache
 from typing import Optional
 from typing_extensions import Annotated
@@ -280,8 +280,33 @@ class Settings(BaseSettings):
     # local disk for dev; swap storage.py for an object-store backend in prod.
     # Optional with a sane default, so upload works without extra env setup.
     UPLOAD_DIR: str = "data/uploads"
+    STORAGE_BACKEND: str = "local"
+    # Render Persistent Disk (or another explicitly persistent mounted volume)
+    # makes local storage safe for a single-instance deployment.
+    LOCAL_STORAGE_PERSISTENT: bool = False
+    S3_BUCKET: Optional[str] = None
+    S3_ENDPOINT_URL: Optional[str] = None
+    S3_REGION: str = "auto"
+    S3_ACCESS_KEY_ID: Optional[str] = None
+    S3_SECRET_ACCESS_KEY: Optional[str] = None
 
     REQUESTS_PER_MINUTE: int = 60
+
+    @model_validator(mode="after")
+    def validate_production_storage(self):
+        if self.ENVIRONMENT.lower() == "production" and len(self.JWT_SECRET) < 32:
+            raise ValueError("JWT_SECRET must be at least 32 characters in production")
+        if (
+            self.ENVIRONMENT.lower() == "production"
+            and self.STORAGE_BACKEND == "local"
+            and not self.LOCAL_STORAGE_PERSISTENT
+        ):
+            raise ValueError(
+                "LOCAL_STORAGE_PERSISTENT=true is required for local uploads in production"
+            )
+        if self.STORAGE_BACKEND == "s3" and not self.S3_BUCKET:
+            raise ValueError("S3_BUCKET is required when STORAGE_BACKEND=s3")
+        return self
 
 
 @lru_cache()

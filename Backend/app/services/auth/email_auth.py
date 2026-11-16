@@ -47,8 +47,8 @@ async def register_user(db: AsyncSession, email, password, name):
         logger.warning("Verification email to %s failed: %s", user.email, e)
     return {
         "user": user,
-        "access_token": create_access_token(user.id),
-        "refresh_token": create_refresh_token(user.id),
+        "access_token": create_access_token(user.id, user.token_version),
+        "refresh_token": create_refresh_token(user.id, user.token_version),
     }
 
 
@@ -69,6 +69,6 @@ async def login_user(db: AsyncSession, email, password):
 
     return {
         "user": user,
-        "access_token": create_access_token(user.id),
-        "refresh_token": create_refresh_token(user.id),
+        "access_token": create_access_token(user.id, user.token_version),
+        "refresh_token": create_refresh_token(user.id, user.token_version),
     }

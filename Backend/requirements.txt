@@ -14,7 +14,7 @@ psycopg2-binary
 psycopg[binary]
 passlib
 bcrypt<4.1
-python-jose[cryptography]
+PyJWT>=2.10,<3
 google-auth
 requests
 aiosmtplib
@@ -37,3 +37,5 @@ redis
 # Firecrawl managed search/extraction SDK (live-web evidence).
 # Pin the v2 client surface used by app/services/web_search.py.
 firecrawl-py==4.53.2
+# S3-compatible durable upload storage (AWS S3, Cloudflare R2, MinIO).
+boto3

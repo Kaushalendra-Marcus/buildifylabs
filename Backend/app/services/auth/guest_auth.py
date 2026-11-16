@@ -28,8 +28,8 @@ async def create_guest_user(db: AsyncSession, fingerprint: str):
             await db.refresh(existing)
         return {
             "user": existing,
-            "access_token": create_access_token(existing.id),
-            "refresh_token": create_refresh_token(existing.id),
+            "access_token": create_access_token(existing.id, existing.token_version),
+            "refresh_token": create_refresh_token(existing.id, existing.token_version),
         }
 
     user = User(
@@ -47,6 +47,6 @@ async def create_guest_user(db: AsyncSession, fingerprint: str):
 
     return {
         "user": user,
-        "access_token": create_access_token(user.id),
-        "refresh_token": create_refresh_token(user.id),
+        "access_token": create_access_token(user.id, user.token_version),
+        "refresh_token": create_refresh_token(user.id, user.token_version),
     }

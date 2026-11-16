@@ -14,6 +14,7 @@ class FileUpload(Base):
     file_name = Column(String(255), nullable=False)
     file_type = Column(String(50), nullable=False)
     file_size = Column(Integer, nullable=True)
+    storage_key = Column(String(512), nullable=True)
     # The "storage reference" the ingestion pipeline sets alongside
     # status="completed" (specs/04 FR4, planning master B3). Holds the per-user
     # data-table name (user_data_table_name) the SQL layer queries until the

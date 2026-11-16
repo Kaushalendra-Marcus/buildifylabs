@@ -26,6 +26,8 @@ jobs:
         run: pip install -r requirements-dev.txt
       - name: Run tests
         run: python -m pytest -q
+      - name: Audit Python dependencies
+        run: pip-audit -r requirements.txt
 
   frontend:
     name: Frontend lint, test, build
@@ -48,3 +50,5 @@ jobs:
         run: npm test -- --run
       - name: Build
         run: npm run build
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high

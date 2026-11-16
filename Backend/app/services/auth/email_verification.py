@@ -1,4 +1,4 @@
-from jose import jwt, JWTError
+import jwt
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from app.config import get_settings
@@ -28,7 +28,7 @@ def verify_email_token(token: str):
 
         return payload.get("sub")
 
-    except JWTError:
+    except jwt.InvalidTokenError:
         raise HTTPException(status_code=400, detail="Token expired or invalid")
 
 
@@ -52,5 +52,5 @@ def verify_password_reset_token(token: str):
 
         return payload.get("sub")
 
-    except JWTError:
+    except jwt.InvalidTokenError:
         raise HTTPException(status_code=400, detail="Token expired or invalid")

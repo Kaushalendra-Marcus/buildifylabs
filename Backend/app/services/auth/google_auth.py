@@ -68,8 +68,8 @@ async def google_login(db: AsyncSession, token: str):
         await db.commit()
         await db.refresh(user)
 
-    access_token = create_access_token(user.id)
-    refresh_token = create_refresh_token(user.id)
+    access_token = create_access_token(user.id, user.token_version)
+    refresh_token = create_refresh_token(user.id, user.token_version)
 
     return {
         "user": user,

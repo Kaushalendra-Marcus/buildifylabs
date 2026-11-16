@@ -20,6 +20,25 @@ def save_raw_file(user_id, file_id, original_filename: str, content: bytes) -> s
     directory or collide; the original name stays in the FileUpload row.
     """
     settings = get_settings()
+    if getattr(settings, "STORAGE_BACKEND", "local") == "s3":
+        try:
+            import boto3
+        except ImportError as exc:
+            raise RuntimeError("S3 storage is configured but boto3 is not installed") from exc
+        key = f"{user_id}/{file_id}{Path(original_filename).suffix.lower()}"
+        client = boto3.client(
+            "s3",
+            endpoint_url=getattr(settings, "S3_ENDPOINT_URL", None),
+            region_name=getattr(settings, "S3_REGION", "auto"),
+            aws_access_key_id=getattr(settings, "S3_ACCESS_KEY_ID", None),
+            aws_secret_access_key=getattr(settings, "S3_SECRET_ACCESS_KEY", None),
+        )
+        bucket = getattr(settings, "S3_BUCKET", None)
+        if not bucket:
+            raise RuntimeError("S3 storage requires S3_BUCKET")
+        client.put_object(Bucket=bucket, Key=key, Body=content)
+        return f"s3://{bucket}/{key}"
+
     directory = Path(settings.UPLOAD_DIR) / str(user_id)
     directory.mkdir(parents=True, exist_ok=True)
     ext = Path(original_filename).suffix.lower()
@@ -37,6 +56,29 @@ def delete_raw_file(user_id, file_id) -> bool:
     Returns True if at least one file was removed.
     """
     settings = get_settings()
+    if getattr(settings, "STORAGE_BACKEND", "local") == "s3":
+        try:
+            import boto3
+        except ImportError:
+            return False
+        client = boto3.client(
+            "s3",
+            endpoint_url=getattr(settings, "S3_ENDPOINT_URL", None),
+            region_name=getattr(settings, "S3_REGION", "auto"),
+            aws_access_key_id=getattr(settings, "S3_ACCESS_KEY_ID", None),
+            aws_secret_access_key=getattr(settings, "S3_SECRET_ACCESS_KEY", None),
+        )
+        bucket = getattr(settings, "S3_BUCKET", None)
+        if not bucket:
+            return False
+        prefix = f"{user_id}/{file_id}"
+        response = client.list_objects_v2(Bucket=bucket, Prefix=prefix)
+        objects = [{"Key": item["Key"]} for item in response.get("Contents", [])]
+        if not objects:
+            return False
+        client.delete_objects(Bucket=bucket, Delete={"Objects": objects})
+        return True
+
     directory = Path(settings.UPLOAD_DIR) / str(user_id)
     removed = False
     try:

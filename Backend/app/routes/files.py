@@ -53,7 +53,9 @@ async def upload_file(
 
     table_name = None
     try:
-        storage.save_raw_file(user.id, upload_id, file.filename or "", contents)
+        upload.storage_key = storage.save_raw_file(
+            user.id, upload_id, file.filename or "", contents
+        )
         table_name = await parser.ingest_file(db, user.id, upload_id, file.filename, contents)
     except Exception:
         # specs/04 edge case 1: never leave the row stuck on "processing".
@@ -69,6 +71,7 @@ async def upload_file(
             "Couldn't process this file. Check that it is a valid CSV, XLSX "
             "or PDF and try again."
         )
+        failed.storage_key = None
         await db.commit()
         await db.refresh(failed)
         return failed

@@ -1,3 +1,5 @@
+import hashlib
+import logging
 import time
 
 from fastapi import HTTPException, Request, status
@@ -5,6 +7,7 @@ from fastapi import HTTPException, Request, status
 from app.config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 # The config only defines attempt *counts* (LOGIN_RATE_LIMIT, VERIFY_EMAIL_RATE_LIMIT);
 # the window is a decision this module makes. A one-hour rolling window keeps the
@@ -17,6 +20,24 @@ MAX_TRACKED_KEYS = 10000
 # dependency (plan B7), so this is per-instance. Documented MVP limitation —
 # swap for a shared store when the app runs more than one worker.
 _buckets: dict[str, list[float]] = {}
+_redis_client = None
+
+
+async def _redis():
+    """Return the optional shared limiter client, created lazily per process."""
+    global _redis_client
+    redis_url = get_settings().REDIS_URL
+    if not redis_url:
+        return None
+    if _redis_client is None:
+        try:
+            from redis.asyncio import Redis
+
+            _redis_client = Redis.from_url(redis_url, decode_responses=True)
+        except Exception:
+            logger.exception("Unable to initialize Redis rate limiter")
+            return None
+    return _redis_client
 
 
 def _client_ip(request: Request) -> str:
@@ -32,7 +53,7 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def _check_rate_limit(key: str, limit: int) -> None:
+def _check_rate_limit_memory(key: str, limit: int) -> None:
     now = time.time()
     recent = [ts for ts in _buckets.get(key, []) if now - ts <= RATE_LIMIT_WINDOW_SECONDS]
 
@@ -54,17 +75,44 @@ def _check_rate_limit(key: str, limit: int) -> None:
                 del _buckets[k]
 
 
+async def _check_rate_limit(key: str, limit: int) -> None:
+    client = await _redis()
+    if client is not None:
+        try:
+            redis_key = f"buildify:ratelimit:{hashlib.sha256(key.encode()).hexdigest()}"
+            count = await client.incr(redis_key)
+            if count == 1:
+                await client.expire(redis_key, RATE_LIMIT_WINDOW_SECONDS)
+            if count > limit:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Too many requests. Please try again later.",
+                )
+            return
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception(
+                "Redis rate limiter unavailable; using process-local fallback"
+            )
+    _check_rate_limit_memory(key, limit)
+
+
 async def login_rate_limit(request: Request) -> None:
     try:
         body = await request.json()
     except Exception:
         body = None
     email = (body.get("email") or "").lower() if isinstance(body, dict) else ""
-    _check_rate_limit(f"login:{_client_ip(request)}:{email}", settings.LOGIN_RATE_LIMIT)
+    await _check_rate_limit(
+        f"login:{_client_ip(request)}:{email}", settings.LOGIN_RATE_LIMIT
+    )
 
 
 async def verify_email_rate_limit(request: Request) -> None:
-    _check_rate_limit(f"verify:{_client_ip(request)}", settings.VERIFY_EMAIL_RATE_LIMIT)
+    await _check_rate_limit(
+        f"verify:{_client_ip(request)}", settings.VERIFY_EMAIL_RATE_LIMIT
+    )
 
 
 async def guest_rate_limit(request: Request) -> None:
@@ -73,9 +121,11 @@ async def guest_rate_limit(request: Request) -> None:
     Each call to /auth/guest can create a new User row with a fresh quota, so
     without this an attacker can farm unlimited free questions.
     """
-    _check_rate_limit(f"guest:{_client_ip(request)}", settings.GUEST_RATE_LIMIT)
+    await _check_rate_limit(f"guest:{_client_ip(request)}", settings.GUEST_RATE_LIMIT)
 
 
 async def contact_rate_limit(request: Request) -> None:
     """Cap contact-form submissions per IP (the route sends real email)."""
-    _check_rate_limit(f"contact:{_client_ip(request)}", settings.CONTACT_RATE_LIMIT)
+    await _check_rate_limit(
+        f"contact:{_client_ip(request)}", settings.CONTACT_RATE_LIMIT
+    )

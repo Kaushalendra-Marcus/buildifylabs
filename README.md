@@ -133,7 +133,7 @@ displays these states; the backend remains the authority that enforces them.
 | Guest policy | Guests cannot upload; the upload affordance is absent, never disabled |
 | CSV/XLSX | Defensive cleaning and parsing into a per-user queryable table |
 | PDF | Text extraction, chunking, keyword retrieval, and a configurable document-QA kill switch |
-| Storage | Local disk by default (`UPLOAD_DIR`); storage layer is isolated for object-store swap |
+| Storage | Render Persistent Disk for single-instance production; Neon stores metadata/data |
 | Preview | `GET /files/{id}/preview` returns a bounded first-rows table or document preview |
 
 ### Questions to answers
@@ -404,7 +404,7 @@ Optional:
 ```env
 VITE_GOOGLE_CLIENT_ID=...         # Google sign-in is hidden when unset
 VITE_GA_MEASUREMENT_ID=...        # GA4 pageviews are a no-op when unset
-VITE_RAZORPAY_KEY_ID=...          # payments are currently paused/mocked
+VITE_RAZORPAY_KEY_ID=...          # reserved; payments are intentionally unavailable
 ```
 
 If Vite picks another port, update the backend's `ALLOWED_ORIGIN` /
@@ -450,8 +450,12 @@ All backend settings are loaded from `Backend/.env` through
 | `FIRECRAWL_API_KEY` | — | Managed search/extraction |
 | `WEB_SEARCH_API_KEY` | — | Tavily evidence provider |
 | `FRED_API_KEY` | — | Macro series adapter |
-| `REDIS_URL` | — | Shared live-web cache; memory fallback otherwise |
-| `UPLOAD_DIR` | `data/uploads` | Local upload storage |
+| `REDIS_URL` | — | Shared cache and auth rate limiting when configured |
+| `UPLOAD_DIR` | `data/uploads` | Local upload storage for development only |
+| `STORAGE_BACKEND` | `local` | `local` for the Render Persistent Disk deployment |
+| `LOCAL_STORAGE_PERSISTENT` | `false` | Set `true` only when Render mounts a Persistent Disk |
+| `S3_BUCKET` / `S3_ENDPOINT_URL` / `S3_REGION` | — / — / `auto` | Private S3-compatible bucket settings |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | — | Use workload identity where available |
 | `TRUST_PROXY_HEADERS` | `false` | Enable only behind a trusted proxy that overwrites `X-Forwarded-For` |
 | `LOGIN_RATE_LIMIT` / `VERIFY_EMAIL_RATE_LIMIT` / `GUEST_RATE_LIMIT` / `CONTACT_RATE_LIMIT` | `5` / `3` / `10` / `5` | Per-process abuse limits |
 
@@ -564,9 +568,12 @@ frontend, and keep `DATABASE_SSL=true` for Neon. For more than one replica, run
 migrations as a separate deploy step so replicas do not race on the Alembic
 version row.
 
-Uploads are local to the container by default; move `UPLOAD_DIR` to a mounted
-volume or replace the storage layer with object storage before relying on
-multi-instance deployments.
+For Render, create a Persistent Disk mounted at `/var/data`, set
+`UPLOAD_DIR=/var/data/uploads`, and set `LOCAL_STORAGE_PERSISTENT=true`.
+Neon stores users, file metadata, parsed tables, document chunks, and query
+logs; it does not store raw uploaded files. Render Persistent Disks are
+instance-local, so keep the service at one instance unless you later migrate
+raw uploads to shared object storage.
 
 ## Design system
 
@@ -645,8 +652,9 @@ Backend and frontend contributor notes live in `Backend/CLAUDE.md` and
 ### Honest status notes
 
 - CSV/XLSX ingestion and PDF document QA are implemented.
-- Payments are present as a paused/mocked surface, not a production billing
-  flow.
+- Payments are intentionally unavailable. The frontend does not fabricate order
+  IDs; implement and verify the Razorpay order/webhook flow in
+  `specs/03-payment-verification.md` before enabling billing.
 - The graph knowledge store is deferred.
 - The multi-provider LLM cascade in spec 12 is a target; the current pipeline
   uses Groq with HuggingFace fallback.

@@ -84,7 +84,9 @@ async def refresh(data: RefreshTokenRequest, db: AsyncSession = Depends(get_db))
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token"
         )
 
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(
+        select(User).where(User.id == user_id).with_for_update()
+    )
     user = result.scalar_one_or_none()
 
     if not user:
@@ -97,9 +99,19 @@ async def refresh(data: RefreshTokenRequest, db: AsyncSession = Depends(get_db))
             status_code=status.HTTP_403_FORBIDDEN, detail="Account is disabled"
         )
 
+    if int(payload.get("token_version", 0)) != int(user.token_version or 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has been revoked",
+        )
+
+    user.token_version = int(user.token_version or 0) + 1
+    await db.commit()
+    await db.refresh(user)
+
     return {
-        "access_token": create_access_token(user.id),
-        "refresh_token": create_refresh_token(user.id),
+        "access_token": create_access_token(user.id, user.token_version),
+        "refresh_token": create_refresh_token(user.id, user.token_version),
     }
 
 
@@ -165,6 +177,7 @@ async def reset_password(data: ResetPasswordRequest, db: AsyncSession = Depends(
         )
 
     user.hashed_password = hash_password(data.new_password)
+    user.token_version = int(user.token_version or 0) + 1
     await db.commit()
 
     return {"message": "Password reset successfully"}

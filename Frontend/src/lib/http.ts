@@ -12,8 +12,11 @@
 import { tokenStorage } from './token-storage';
 import type { ApiErrorBody, QuotaErrorBody } from '../types';
 
-const API_BASE_URL: string =
-  import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000';
+const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
+if (import.meta.env.PROD && !configuredApiBaseUrl) {
+  throw new Error('VITE_API_BASE_URL must be set for production builds');
+}
+const API_BASE_URL: string = configuredApiBaseUrl ?? 'http://localhost:8000';
 
 /**
  * Unary requests must not hang forever: without a timeout a stalled backend

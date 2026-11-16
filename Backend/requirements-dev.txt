@@ -7,3 +7,5 @@ pytest-asyncio
 # Async SQLite driver: the test suite builds in-memory/file SQLite databases
 # (sqlite+aiosqlite://) in test_executor, test_parser, test_chat_api, etc.
 aiosqlite
+# Dependency vulnerability audit used by CI; it does not ship in production.
+pip-audit

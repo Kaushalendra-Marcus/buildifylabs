@@ -1,4 +1,4 @@
-from jose import jwt, JWTError
+import jwt
 from fastapi import HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from datetime import datetime, timedelta, timezone
@@ -19,7 +19,7 @@ def decode_token(token: str):
             settings.JWT_SECRET,
             algorithms=[settings.JWT_ALGORITHM],
         )
-    except JWTError:
+    except jwt.InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
@@ -45,28 +45,33 @@ def verify_refresh_token(token: str):
     return payload
 
 
-def _create_token(user_id, token_type: str, expires_delta: timedelta) -> str:
+def _create_token(
+    user_id, token_type: str, expires_delta: timedelta, token_version: int = 0
+) -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
         "type": token_type,
         "iat": now,
         "exp": now + expires_delta,
+        "token_version": int(token_version),
     }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
-def create_access_token(user_id) -> str:
+def create_access_token(user_id, token_version: int = 0) -> str:
     return _create_token(
         user_id,
         "access",
         timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+        token_version,
     )
 
 
-def create_refresh_token(user_id) -> str:
+def create_refresh_token(user_id, token_version: int = 0) -> str:
     return _create_token(
         user_id,
         "refresh",
         timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+        token_version,
     )

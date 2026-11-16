@@ -24,6 +24,9 @@ class User(Base):
     plan = Column(String, default="free")
     device_fingerprint = Column(String(255), unique=True, nullable=True)
     is_verified = Column(Boolean, default=False)
+    # Incremented whenever refresh-token rotation or a password reset revokes
+    # the user's existing sessions.
+    token_version = Column(Integer, default=0, server_default="0", nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
