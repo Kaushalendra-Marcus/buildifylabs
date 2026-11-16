@@ -798,6 +798,13 @@ async def run_pipeline(
                 f"Clarifying (one question): {output.clarification.question[:120]}"
             )
         else:
+            if decision.missing == "judge unavailable; answering best-effort":
+                # Preserve availability during a judge outage, but never let
+                # an unreviewed answer appear fully trustworthy.
+                output.confidence = min(float(output.confidence or 0.0), 0.35)
+                thinking.append(
+                    "Sufficiency judge unavailable; confidence capped at 0.35."
+                )
             # Forecast dead-end (specs/11 §5): asked for but not computed —
             # force confidence 0 NOW so every downstream zero-confidence
             # strip (below + ensure_visuals) fires, and no forecast visual

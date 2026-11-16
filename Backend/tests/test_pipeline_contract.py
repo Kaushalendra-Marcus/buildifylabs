@@ -69,6 +69,13 @@ class TestSystemPrompt:
     def test_no_text_charts_rule(self):
         assert "NO TEXT CHARTS" in pipeline_mod.SYSTEM_PROMPT
 
+    def test_domain_and_source_boundaries_are_explicit(self):
+        assert "DOMAIN BOUNDARY" in pipeline_mod.SYSTEM_PROMPT
+        assert "CONTEXT BOUNDARY" in pipeline_mod.SYSTEM_PROMPT
+        assert "SOURCE BOUNDARY" in pipeline_mod.SYSTEM_PROMPT
+        assert "current query and its evidence inventory" in pipeline_mod.DECISION_SYSTEM_PROMPT
+        assert "current query" in pipeline_mod.PLAN_SYSTEM_PROMPT
+
 
 class TestTruncation:
     def test_rows_past_cap_are_truncated_with_note(self):
