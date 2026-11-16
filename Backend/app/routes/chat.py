@@ -800,7 +800,6 @@ async def _answer_request(
         price_history = []
         financial_history = []
         research_notes = []
-        box_office_history = {}
         if search_result is not None:
             news_context = (
                 search_result.context
@@ -832,9 +831,6 @@ async def _answer_request(
             )
             research_notes = (
                 getattr(search_result, "research_notes", []) or []
-            )
-            box_office_history = (
-                getattr(search_result, "box_office_history", {}) or {}
             )
             # Channels stay separate (P0#15): macro_data is NEVER merged
             # into market_data (a market chart must never contain CPI/GDP).
@@ -906,7 +902,6 @@ async def _answer_request(
             macro_note=macro_note,
             price_history=price_history,
             financial_history=financial_history,
-            box_office_history=box_office_history,
             research_notes=research_notes,
             prior_research_state=prior_research_state,
             plan_query=plan_query,

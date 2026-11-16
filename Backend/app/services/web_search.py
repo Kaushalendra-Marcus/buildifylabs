@@ -31,7 +31,6 @@ from app.services.llm.query_rewriter import (
     is_time_sensitive_query,
     rewrite_search_queries,
 )
-from app.services.box_office import extract_box_office_history
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +60,6 @@ STOCK_ALIASES = {
 }
 
 MAX_SEARCH_QUERIES = 4
-BOX_OFFICE_INTENT_RE = re.compile(
-    r"\b(box office|collection|collections|revenue|gross|"
-    r"day[- ]wise|day by day|opening weekend|budget|release date)\b",
-    re.IGNORECASE,
-)
 # Entity budget: 3-company comparisons (Tesla/BYD/Toyota) must never lose
 # a company to truncation. 4 gives headroom without runaway Yahoo fan-out.
 MAX_MARKET_ENTITIES = 4
@@ -416,7 +410,6 @@ class WebSearchResult:
     # series were wanted but unfetched (no key / unmapped topic / US-only
     # coverage). Narrator prompt context, never evidence.
     macro_note: str = ""
-    box_office_history: dict[str, Any] = field(default_factory=dict)
 
 
 def _dedupe_texts(items: list[str]) -> list[str]:
@@ -2007,15 +2000,6 @@ async def search_web(
     # headlines tend to win and contain only one total. Add bounded,
     # evidence-shaped queries so providers return explicit Day N rows and a
     # budget/release-date source. Keep the original framed queries intact.
-    if BOX_OFFICE_INTENT_RE.search(raw_text or ""):
-        # Prefer the cleaned primary query so a compound message does not
-        # drag an unrelated person/topic into the movie evidence search.
-        subject = (search_queries[0] if search_queries else raw_text).strip()
-        targeted = [
-            f"{subject} day wise box office collection day 1 day 2 day 3 India net",
-            f"{subject} total box office collection budget release date",
-        ]
-        search_queries = list(dict.fromkeys(targeted + search_queries))[:MAX_SEARCH_QUERIES]
 
     # Repeat-query cache: same framed evidence reused within TTL for latency,
     # cost, and answer consistency.
@@ -2074,9 +2058,6 @@ async def search_web(
                 financial_history=list(cached.get("financial_history", [])),
                 research_notes=list(cached.get("research_notes", [])),
                 macro_note=str(cached.get("macro_note", "") or ""),
-                box_office_history=extract_box_office_history(
-                    list(cached.get("context", [])), list(cached.get("sources", []))
-                ),
             )
     except Exception as exc:
         logger.warning("Web-search cache lookup failed: %s", exc)
@@ -2741,7 +2722,6 @@ async def search_web(
                 financial_history,
                 research_notes,
                 macro_note,
-                extract_box_office_history(context, sources),
             )
             if cache_key:
                 # Never cache a totally empty result: one provider outage
@@ -2770,7 +2750,6 @@ async def search_web(
                                 "financial_history": result.financial_history,
                                 "research_notes": result.research_notes,
                                 "macro_note": result.macro_note,
-                                "box_office_history": result.box_office_history,
                             },
                         )
                     except Exception as exc:
@@ -2778,4 +2757,4 @@ async def search_web(
             return result
     except Exception as exc:
         logger.warning("Live web search failed: %s", exc)
-        return WebSearchResult([], [], [], box_office_history={})
+        return WebSearchResult([], [], [])
