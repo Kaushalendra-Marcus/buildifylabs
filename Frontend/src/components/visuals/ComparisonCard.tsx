@@ -19,7 +19,10 @@ export function ComparisonCard({ props }: { props: ComparisonProps }) {
   const delta = value - baseline;
   const deltaPct = baseline !== 0 ? (delta / baseline) * 100 : null;
   const isUp = delta >= 0;
-  const maxGroup = groups.reduce((max, group) => Math.max(max, group.value), 0);
+  const maxGroup = groups.reduce(
+    (max, group) => Math.max(max, Math.abs(group.value)),
+    0,
+  );
   const DeltaIcon = isUp ? ArrowUpRight : ArrowDownRight;
 
   return (
@@ -52,7 +55,7 @@ export function ComparisonCard({ props }: { props: ComparisonProps }) {
               <span
                 className="visual-comparison__group-fill"
                 style={{
-                  width: `${maxGroup > 0 ? (group.value / maxGroup) * 100 : 0}%`,
+                  width: `${maxGroup > 0 ? (Math.abs(group.value) / maxGroup) * 100 : 0}%`,
                 }}
               />
             </span>

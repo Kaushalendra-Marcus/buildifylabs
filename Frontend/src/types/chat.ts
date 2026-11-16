@@ -2,7 +2,7 @@
  *  `visual_type`/`props` come from the frozen contract in
  *  `src/lib/schemas/visuals.ts` (the single source of truth). */
 
-import type { VisualProps, VisualType } from '../lib/schemas/visuals';
+import { isVisualType, type VisualProps, type VisualType } from '../lib/schemas/visuals';
 
 export type SourceScope = 'own_data' | 'live_web' | 'both';
 
@@ -21,6 +21,141 @@ export interface VisualOutput {
    *  entities, metric, timeframe, source/computation IDs. Optional so
    *  older cached answers still validate; new answers always carry it. */
   provenance?: Record<string, unknown> | null;
+}
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
+function numberValue(value: unknown): number | null {
+  if (isFiniteNumber(value)) return value;
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const parsed = Number(value.replace(/[$,%\s,]/g, ''));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeVisual(raw: unknown): VisualOutput | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const item = raw as Record<string, unknown>;
+  const type = item.visual_type;
+  if (!isVisualType(type)) return null;
+  const props =
+    item.props && typeof item.props === 'object'
+      ? (item.props as Record<string, unknown>)
+      : {};
+  const title = typeof item.title === 'string' ? item.title.trim() : '';
+  if (!title) return null;
+
+  if (type === 'graph') {
+    const chartType = props.chart_type;
+    const validChartTypes = ['line', 'bar', 'pie', 'area'] as const;
+    if (!validChartTypes.includes(chartType as (typeof validChartTypes)[number])) return null;
+    const labels = Array.isArray(props.labels)
+      ? props.labels.map(String)
+      : [];
+    const datasets = Array.isArray(props.datasets)
+      ? props.datasets.flatMap((dataset) => {
+          if (!dataset || typeof dataset !== 'object') return [];
+          const value = dataset as Record<string, unknown>;
+          const values = Array.isArray(value.values)
+            ? value.values.map(numberValue)
+            : [];
+          if (!values.length || values.some((entry) => entry === null)) return [];
+          return [{ name: String(value.name || 'Series'), values: values as number[] }];
+        })
+      : [];
+    if (!labels.length || !datasets.length) return null;
+    return {
+      visual_type: type,
+      title,
+      props: { chart_type: chartType as (typeof validChartTypes)[number], labels, datasets },
+      subtitle: typeof item.subtitle === 'string' ? item.subtitle : null,
+      provenance: (item.provenance as Record<string, unknown>) ?? null,
+    };
+  }
+
+  if (type === 'table') {
+    const columns = Array.isArray(props.columns) ? props.columns.map(String) : [];
+    const values = Array.isArray(props.values)
+      ? props.values
+          .filter((row): row is unknown[] => Array.isArray(row))
+          .map((row) => row.slice(0, columns.length).map((cell) => {
+            const numeric = numberValue(cell);
+            return numeric !== null && typeof cell !== 'string' ? numeric : String(cell ?? '');
+          }))
+      : [];
+    if (!columns.length || !values.length) return null;
+    return {
+      visual_type: type,
+      title,
+      props: { columns, values },
+      subtitle: typeof item.subtitle === 'string' ? item.subtitle : null,
+      provenance: (item.provenance as Record<string, unknown>) ?? null,
+    };
+  }
+
+  const normalizedProps = { ...props };
+  if (type === 'metric' || type === 'comparison') {
+    for (const key of type === 'metric' ? ['value', 'change_pct'] : ['value', 'baseline']) {
+      if (normalizedProps[key] !== null && numberValue(normalizedProps[key]) === null) {
+        return null;
+      }
+      if (normalizedProps[key] !== null) normalizedProps[key] = numberValue(normalizedProps[key]);
+    }
+  }
+  if (type === 'comparison' && Array.isArray(normalizedProps.groups)) {
+    normalizedProps.groups = normalizedProps.groups.flatMap((group) => {
+      if (!group || typeof group !== 'object') return [];
+      const entry = group as Record<string, unknown>;
+      const value = numberValue(entry.value);
+      return value === null ? [] : [{ label: String(entry.label || 'Group'), value }];
+    });
+  }
+  if (type === 'metric') {
+    if (
+      typeof normalizedProps.label !== 'string' ||
+      typeof normalizedProps.value !== 'number' ||
+      !['up', 'down', 'flat'].includes(String(normalizedProps.direction))
+    ) return null;
+  } else if (type === 'comparison') {
+    if (
+      typeof normalizedProps.value !== 'number' ||
+      typeof normalizedProps.baseline !== 'number' ||
+      !Array.isArray(normalizedProps.groups)
+    ) return null;
+  } else if (type === 'insight') {
+    if (typeof normalizedProps.text !== 'string' || typeof normalizedProps.context !== 'string') return null;
+  } else if (type === 'alert') {
+    if (
+      !['info', 'warning', 'critical'].includes(String(normalizedProps.level)) ||
+      typeof normalizedProps.summary !== 'string' ||
+      typeof normalizedProps.reason !== 'string'
+    ) return null;
+  } else if (type === 'status') {
+    if (
+      !['on_track', 'at_risk', 'off_track'].includes(String(normalizedProps.state)) ||
+      typeof normalizedProps.detail !== 'string'
+    ) return null;
+  }
+  return {
+    visual_type: type,
+    title,
+    props: normalizedProps as unknown as VisualProps,
+    subtitle: typeof item.subtitle === 'string' ? item.subtitle : null,
+    provenance: (item.provenance as Record<string, unknown>) ?? null,
+  };
+}
+
+export function normalizePipelineOutput(raw: unknown): PipelineOutput | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const output = raw as Record<string, unknown>;
+  if (typeof output.answer !== 'string') return null;
+  const visuals = Array.isArray(output.visuals)
+    ? output.visuals.flatMap((visual) => {
+        const normalized = normalizeVisual(visual);
+        return normalized ? [normalized] : [];
+      })
+    : [];
+  return { ...output, visuals } as PipelineOutput;
 }
 
 /** Alternate response mode (specs/10 §2 "ask, don't guess") — non-null on a

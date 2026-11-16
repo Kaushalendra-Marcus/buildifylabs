@@ -130,7 +130,8 @@ function buildRows(props: GraphProps): Row[] {
   return props.labels.map((label, index) => {
     const row: Row = { label };
     for (const dataset of props.datasets) {
-      row[dataset.name] = dataset.values[index] ?? 0;
+      const value = dataset.values[index];
+      row[dataset.name] = Number.isFinite(value) ? value : 0;
     }
     return row;
   });
@@ -162,8 +163,8 @@ export function GraphCard({
     const pieData = foldPieSlices(
       labels.map((label, index) => ({
         name: label,
-        value: datasets[0]?.values[index] ?? 0,
-      })),
+        value: Math.max(0, datasets[0]?.values[index] ?? 0),
+      })).filter((slice) => slice.value > 0),
     );
     const total = pieData.reduce((sum, slice) => sum + slice.value, 0);
     return (

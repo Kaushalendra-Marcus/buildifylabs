@@ -5,6 +5,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../lib/http'
+import { normalizePipelineOutput } from '../types'
 import { sendQuery } from './chat'
 
 function sseResponse(frames: string[]): Response {
@@ -41,6 +42,36 @@ const OUTPUT = {
 }
 
 describe('sendQuery stream', () => {
+  it('keeps valid visuals and drops malformed visual data', () => {
+    const output = normalizePipelineOutput({
+      ...OUTPUT,
+      visuals: [
+        {
+          visual_type: 'graph',
+          title: 'Revenue',
+          props: {
+            chart_type: 'bar',
+            labels: ['Jan', 'Feb'],
+            datasets: [{ name: 'Revenue', values: [10, 12] }],
+          },
+        },
+        {
+          visual_type: 'graph',
+          title: 'Broken',
+          props: { chart_type: 'line', labels: [], datasets: [] },
+        },
+        { visual_type: 'unknown', title: 'Unsupported', props: {} },
+      ],
+    })
+
+    expect(output?.visuals).toHaveLength(1)
+    expect(output?.visuals[0].props).toEqual({
+      chart_type: 'bar',
+      labels: ['Jan', 'Feb'],
+      datasets: [{ name: 'Revenue', values: [10, 12] }],
+    })
+  })
+
   it('emits stages in order and resolves the final result', async () => {
     const stages: string[] = []
     vi.stubGlobal(

@@ -10,7 +10,13 @@
  * already handles.
  */
 import { ApiError, apiUrl, authHeaders, http } from '../lib/http';
-import type { ChatRequest, FlagRequest, FlagResponse, PipelineOutput } from '../types';
+import {
+  normalizePipelineOutput,
+  type ChatRequest,
+  type FlagRequest,
+  type FlagResponse,
+  type PipelineOutput,
+} from '../types';
 
 export type QueryStageHandler = (stage: string) => void;
 export type QueryTextHandler = (delta: string) => void;
@@ -52,7 +58,9 @@ async function readStream(
       if (event.error) throw new Error(event.error);
       if (event.result) {
         await reader.cancel().catch(() => undefined);
-        return event.result;
+        const result = normalizePipelineOutput(event.result);
+        if (!result) throw new Error('The answer contained an invalid visual payload.');
+        return result;
       }
     }
   }
